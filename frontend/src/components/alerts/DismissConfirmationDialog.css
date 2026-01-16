@@ -1,0 +1,99 @@
+/**
+ * Dismiss Confirmation Dialog Styles (F4 §6.5)
+ */
+
+.dismiss-dialog-backdrop {
+  position: fixed;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background-color: rgba(0, 0, 0, 0.4);
+  z-index: 1000;
+}
+
+.dismiss-dialog {
+  width: 100%;
+  max-width: 420px;
+  margin: 1rem;
+  background-color: #fff;
+  border-radius: 8px;
+  box-shadow: 0 4px 24px rgba(0, 0, 0, 0.15);
+}
+
+.dismiss-dialog__header {
+  padding: 1.25rem 1.5rem 0;
+}
+
+.dismiss-dialog__title {
+  margin: 0;
+  font-size: 1.125rem;
+  font-weight: 600;
+  color: #1a1a1a;
+}
+
+.dismiss-dialog__content {
+  padding: 1rem 1.5rem;
+}
+
+.dismiss-dialog__message {
+  margin: 0 0 0.75rem;
+  font-size: 0.9375rem;
+  color: #333;
+}
+
+.dismiss-dialog__note {
+  margin: 0;
+  padding: 0.75rem;
+  font-size: 0.8125rem;
+  color: #666;
+  background-color: #f5f5f5;
+  border-radius: 4px;
+}
+
+.dismiss-dialog__footer {
+  display: flex;
+  justify-content: flex-end;
+  gap: 0.75rem;
+  padding: 1rem 1.5rem;
+  border-top: 1px solid #e0e0e0;
+}
+
+.dismiss-dialog__button {
+  padding: 0.5rem 1rem;
+  font-size: 0.875rem;
+  font-weight: 500;
+  border-radius: 4px;
+  cursor: pointer;
+  transition: background-color 0.15s, opacity 0.15s;
+}
+
+.dismiss-dialog__button:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
+.dismiss-dialog__button--cancel {
+  color: #666;
+  background-color: transparent;
+  border: 1px solid #ccc;
+}
+
+.dismiss-dialog__button--cancel:hover:not(:disabled) {
+  background-color: #f5f5f5;
+}
+
+.dismiss-dialog__button--confirm {
+  color: #fff;
+  background-color: #d93025;
+  border: none;
+}
+
+.dismiss-dialog__button--confirm:hover:not(:disabled) {
+  background-color: #c5221f;
+}
+
+.dismiss-dialog__button--confirm:focus {
+  outline: 2px solid #d93025;
+  outline-offset: 2px;
+}

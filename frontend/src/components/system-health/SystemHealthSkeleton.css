@@ -1,0 +1,106 @@
+/**
+ * System Health Skeleton Styles (F4 §9.2)
+ */
+
+@keyframes skeleton-pulse {
+  0%, 100% {
+    opacity: 0.6;
+  }
+  50% {
+    opacity: 0.3;
+  }
+}
+
+.system-health-skeleton {
+  max-width: 1200px;
+  margin: 0 auto;
+  padding: 0 1rem;
+}
+
+.system-health-skeleton__header {
+  display: flex;
+  align-items: center;
+  gap: 1rem;
+  padding: 1rem 0;
+  margin-bottom: 1rem;
+  border-bottom: 1px solid #e0e0e0;
+}
+
+.system-health-skeleton__title {
+  width: 180px;
+  height: 1.75rem;
+  background-color: #e0e0e0;
+  border-radius: 4px;
+  animation: skeleton-pulse 1.5s ease-in-out infinite;
+}
+
+.system-health-skeleton__status {
+  width: 140px;
+  height: 2rem;
+  background-color: #e0e0e0;
+  border-radius: 20px;
+  animation: skeleton-pulse 1.5s ease-in-out infinite;
+}
+
+.system-health-skeleton__section {
+  margin-bottom: 2rem;
+}
+
+.system-health-skeleton__section-title {
+  width: 120px;
+  height: 1rem;
+  margin-bottom: 1rem;
+  background-color: #e0e0e0;
+  border-radius: 4px;
+  animation: skeleton-pulse 1.5s ease-in-out infinite;
+}
+
+.system-health-skeleton__services {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+  gap: 1rem;
+}
+
+.system-health-skeleton__card {
+  height: 120px;
+  background-color: #e0e0e0;
+  border-radius: 8px;
+  animation: skeleton-pulse 1.5s ease-in-out infinite;
+}
+
+.system-health-skeleton__models {
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+}
+
+.system-health-skeleton__model {
+  height: 64px;
+  background-color: #e0e0e0;
+  border-radius: 8px;
+  animation: skeleton-pulse 1.5s ease-in-out infinite;
+}
+
+.system-health-skeleton__events {
+  background-color: #fff;
+  border: 1px solid #e0e0e0;
+  border-radius: 8px;
+  padding: 1rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+}
+
+.system-health-skeleton__event {
+  height: 2.5rem;
+  background-color: #e0e0e0;
+  border-radius: 4px;
+  animation: skeleton-pulse 1.5s ease-in-out infinite;
+}
+
+/* Responsive */
+@media (max-width: 768px) {
+  .system-health-skeleton__services {
+    grid-template-columns: 1fr;
+  }
+}

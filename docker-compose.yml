@@ -1,0 +1,207 @@
+# Ruth AI Full System Docker Compose
+# Phase 7 - I1: Full System Bring-Up (Baseline)
+#
+# This configuration starts all Ruth AI services together:
+# - ruth-ai-backend: FastAPI backend API (port 8090 on host, 8080 internal)
+# - ruth-ai-frontend: React UI served via nginx (port 3300)
+# - fall-detection-model: AI inference service (port 8010 on host, 8000 internal)
+# - postgres: PostgreSQL database (port 5434 on host, 5432 internal)
+# - redis: Redis cache (port 6382 on host, 6379 internal)
+#
+# External dependency: VAS-MS-V2 at http://10.30.250.245:8085
+#
+# Usage:
+#   docker compose up          # Start all services
+#   docker compose up -d       # Start in background
+#   docker compose logs -f     # Follow logs
+#   docker compose down        # Stop all services
+#
+# Port Mapping (Ruth AI VAS-MS-V2 Integration Stack):
+#   VAS Frontend:       3200 (external - already running)
+#   Ruth AI Frontend:   3300 (this stack)
+#   Ruth AI Backend:    8090 (this stack, host) -> 8080 (container)
+#   Fall Detection AI:  8010 (this stack, host) -> 8000 (container)
+#   PostgreSQL:         5434 (this stack, host) -> 5432 (container)
+#   Redis:              6382 (this stack, host) -> 6379 (container)
+#   VAS Backend API:    8085 (external - already running)
+
+services:
+  # ============================================
+  # PostgreSQL Database
+  # ============================================
+  postgres:
+    image: postgres:15-alpine
+    container_name: ruth-ai-vas-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-ruth}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-ruth_dev_password}
+      POSTGRES_DB: ${POSTGRES_DB:-ruth_ai}
+    ports:
+      - "5434:5432"
+    volumes:
+      - ruth-postgres-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-ruth} -d ${POSTGRES_DB:-ruth_ai}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+    networks:
+      - ruth-ai-internal
+
+  # ============================================
+  # Redis Cache
+  # ============================================
+  redis:
+    image: redis:7-alpine
+    container_name: ruth-ai-vas-redis
+    restart: unless-stopped
+    ports:
+      - "6382:6379"
+    volumes:
+      - ruth-redis-data:/data
+    command: redis-server --appendonly yes
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 5s
+    networks:
+      - ruth-ai-internal
+
+  # ============================================
+  # Fall Detection Model (AI Inference Service)
+  # ============================================
+  fall-detection-model:
+    build:
+      context: ./fall-detection-model
+      dockerfile: Dockerfile
+    container_name: ruth-ai-vas-fall-detection
+    restart: unless-stopped
+    ports:
+      - "8010:8000"
+    volumes:
+      # Model weights are baked into the image from fall-detection-model/weights/
+      - ./fall-detection-model/weights:/app/weights:ro
+    environment:
+      - ENVIRONMENT=production
+      - LOG_LEVEL=info
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 60s  # Model loading takes time
+    networks:
+      - ruth-ai-internal
+    deploy:
+      resources:
+        limits:
+          memory: 4G
+        reservations:
+          memory: 2G
+
+  # ============================================
+  # Ruth AI Backend API
+  # ============================================
+  ruth-ai-backend:
+    build:
+      context: ./ruth-ai-backend
+      dockerfile: Dockerfile
+    container_name: ruth-ai-vas-backend
+    restart: unless-stopped
+    ports:
+      - "8090:8080"
+    environment:
+      # Application
+      RUTH_AI_ENV: ${RUTH_AI_ENV:-development}
+      RUTH_AI_LOG_LEVEL: ${RUTH_AI_LOG_LEVEL:-info}
+      RUTH_AI_LOG_FORMAT: json
+      # Server
+      HOST: 0.0.0.0
+      PORT: 8080
+      # Database (using asyncpg driver)
+      DATABASE_URL: postgresql+asyncpg://${POSTGRES_USER:-ruth}:${POSTGRES_PASSWORD:-ruth_dev_password}@postgres:5432/${POSTGRES_DB:-ruth_ai}
+      DATABASE_POOL_SIZE: 10
+      DATABASE_POOL_OVERFLOW: 5
+      # Redis
+      REDIS_URL: redis://redis:6379/0
+      REDIS_MAX_CONNECTIONS: 50
+      # AI Runtime - pointing to fall-detection-model service
+      AI_RUNTIME_URL: http://fall-detection-model:8000
+      AI_RUNTIME_TIMEOUT_MS: 5000
+      AI_RUNTIME_RETRY_COUNT: 3
+      # VAS Integration (external service)
+      VAS_BASE_URL: ${VAS_BASE_URL:-http://10.30.250.245:8085}
+      VAS_CLIENT_ID: ${VAS_CLIENT_ID:-ruth-ai-backend}
+      VAS_CLIENT_SECRET: ${VAS_CLIENT_SECRET:-vas-portal-secret-2024}
+      VAS_TOKEN_REFRESH_MARGIN_SEC: 300
+      # JWT Authentication
+      JWT_SECRET_KEY: ${JWT_SECRET_KEY:-ruth-ai-dev-jwt-secret-change-in-prod}
+      JWT_ALGORITHM: HS256
+      JWT_EXPIRY_MINUTES: 60
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      fall-detection-model:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8080/api/v1/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 30s
+    networks:
+      - ruth-ai-internal
+
+  # ============================================
+  # Ruth AI Frontend (React UI via nginx)
+  # ============================================
+  ruth-ai-frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+    container_name: ruth-ai-vas-frontend
+    restart: unless-stopped
+    ports:
+      - "3300:80"
+    environment:
+      # These are baked in at build time via Vite
+      VITE_API_BASE_URL: http://localhost:8080
+      VITE_VAS_WEBRTC_URL: ws://10.30.250.245:3002
+    depends_on:
+      ruth-ai-backend:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://localhost:80/"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 10s
+    networks:
+      - ruth-ai-internal
+      - ruth-ai-frontend
+
+# ============================================
+# Networks
+# ============================================
+networks:
+  ruth-ai-internal:
+    name: ruth-ai-vas-internal
+    driver: bridge
+  ruth-ai-frontend:
+    name: ruth-ai-vas-frontend-net
+    driver: bridge
+
+# ============================================
+# Volumes
+# ============================================
+volumes:
+  ruth-postgres-data:
+    name: ruth-ai-vas-postgres-data
+  ruth-redis-data:
+    name: ruth-ai-vas-redis-data

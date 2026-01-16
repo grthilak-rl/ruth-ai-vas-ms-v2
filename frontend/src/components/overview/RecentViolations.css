@@ -1,0 +1,180 @@
+/**
+ * Recent Violations Section (F4 §4.1)
+ */
+
+.recent-violations {
+  background: #fff;
+  border: 1px solid #e0e0e0;
+  border-radius: 8px;
+  margin-bottom: 1.5rem;
+}
+
+.recent-violations__header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 1rem 1.25rem;
+  border-bottom: 1px solid #e0e0e0;
+}
+
+.recent-violations__title {
+  margin: 0;
+  font-size: 0.9375rem;
+  font-weight: 600;
+  color: #1a1a1a;
+}
+
+.recent-violations__view-all {
+  font-size: 0.8125rem;
+  color: #1a73e8;
+  text-decoration: none;
+}
+
+.recent-violations__view-all:hover {
+  text-decoration: underline;
+}
+
+.recent-violations__list {
+  display: flex;
+  flex-direction: column;
+}
+
+.recent-violations__row {
+  display: grid;
+  grid-template-columns: 2fr 1.5fr 1fr 1fr;
+  gap: 1rem;
+  padding: 0.875rem 1.25rem;
+  align-items: center;
+  text-decoration: none;
+  color: inherit;
+  border-bottom: 1px solid #f0f0f0;
+  transition: background-color 0.15s ease;
+}
+
+.recent-violations__row:last-child {
+  border-bottom: none;
+}
+
+.recent-violations__row:hover {
+  background-color: #f8f9fa;
+}
+
+.recent-violations__row--skeleton {
+  pointer-events: none;
+}
+
+.recent-violations__skeleton-bar {
+  display: block;
+  height: 1rem;
+  background: #e0e0e0;
+  border-radius: 4px;
+  animation: skeleton-pulse 1.5s ease-in-out infinite;
+}
+
+.recent-violations__type {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  font-size: 0.875rem;
+  font-weight: 500;
+  color: #1a1a1a;
+}
+
+.recent-violations__indicator {
+  color: #c5221f;
+  font-size: 0.625rem;
+}
+
+.recent-violations__camera {
+  font-size: 0.8125rem;
+  color: #666;
+}
+
+.recent-violations__confidence {
+  font-size: 0.75rem;
+  font-weight: 500;
+  text-transform: uppercase;
+}
+
+.recent-violations__confidence--high {
+  color: #c5221f;
+}
+
+.recent-violations__confidence--medium {
+  color: #f9a825;
+}
+
+.recent-violations__confidence--low {
+  color: #1a73e8;
+}
+
+.recent-violations__time {
+  font-size: 0.75rem;
+  color: #999;
+  text-align: right;
+}
+
+/* Empty state */
+.recent-violations__empty {
+  padding: 2rem 1.25rem;
+  text-align: center;
+}
+
+.recent-violations__empty p {
+  margin: 0;
+  font-size: 0.9375rem;
+  color: #666;
+}
+
+.recent-violations__empty-hint {
+  margin-top: 0.5rem !important;
+  font-size: 0.8125rem !important;
+  color: #999 !important;
+}
+
+/* Error state */
+.recent-violations__error {
+  padding: 2rem 1.25rem;
+  text-align: center;
+}
+
+.recent-violations__error p {
+  margin: 0 0 1rem 0;
+  font-size: 0.9375rem;
+  color: #666;
+}
+
+.recent-violations__retry {
+  padding: 0.5rem 1rem;
+  font-size: 0.875rem;
+  color: #1a73e8;
+  background: transparent;
+  border: 1px solid #1a73e8;
+  border-radius: 4px;
+  cursor: pointer;
+  transition: background-color 0.15s ease;
+}
+
+.recent-violations__retry:hover {
+  background-color: #e8f0fe;
+}
+
+@keyframes skeleton-pulse {
+  0%, 100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.5;
+  }
+}
+
+@media (max-width: 768px) {
+  .recent-violations__row {
+    grid-template-columns: 1fr 1fr;
+    gap: 0.5rem;
+  }
+
+  .recent-violations__camera {
+    grid-column: 1 / -1;
+  }
+}

@@ -1,0 +1,78 @@
+/**
+ * Violation Actions Styles (F4 §6)
+ */
+
+.violation-actions__title {
+  margin: 0 0 1rem;
+  font-size: 0.875rem;
+  font-weight: 600;
+  color: #666;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+}
+
+.violation-actions__buttons {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.75rem;
+}
+
+.violation-actions__button {
+  padding: 0.625rem 1.25rem;
+  font-size: 0.875rem;
+  font-weight: 500;
+  border-radius: 4px;
+  cursor: pointer;
+  transition: background-color 0.15s, opacity 0.15s;
+}
+
+.violation-actions__button:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
+.violation-actions__button--acknowledge {
+  color: #fff;
+  background-color: #1a73e8;
+  border: none;
+}
+
+.violation-actions__button--acknowledge:hover:not(:disabled) {
+  background-color: #1557b0;
+}
+
+.violation-actions__button--dismiss {
+  color: #666;
+  background-color: #fff;
+  border: 1px solid #ccc;
+}
+
+.violation-actions__button--dismiss:hover:not(:disabled) {
+  background-color: #f5f5f5;
+}
+
+.violation-actions__button--escalate {
+  color: #f9a825;
+  background-color: #fff;
+  border: 1px solid #f9a825;
+}
+
+.violation-actions__button--escalate:hover:not(:disabled) {
+  background-color: #fef8e3;
+}
+
+.violation-actions__button--resolve {
+  color: #fff;
+  background-color: #34a853;
+  border: none;
+}
+
+.violation-actions__button--resolve:hover:not(:disabled) {
+  background-color: #2d8e47;
+}
+
+.violation-actions__empty {
+  margin: 0;
+  font-size: 0.875rem;
+  color: #666;
+}

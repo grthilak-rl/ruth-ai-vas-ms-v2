@@ -1,0 +1,53 @@
+/**
+ * System Status Indicator Styles (F4-aligned)
+ *
+ * Visual states per F4 wireframes:
+ * - Green dot for healthy
+ * - Yellow dot for degraded
+ * - Red dot for offline
+ */
+
+.system-status {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.375rem 0.75rem;
+  font-size: 0.875rem;
+  font-weight: 500;
+  border: 1px solid #e0e0e0;
+  border-radius: 4px;
+  background-color: #fff;
+  cursor: pointer;
+  transition: background-color 0.15s, border-color 0.15s;
+}
+
+.system-status:hover {
+  background-color: #f5f5f5;
+}
+
+.system-status:focus {
+  outline: 2px solid #1a73e8;
+  outline-offset: 2px;
+}
+
+.system-status__dot {
+  font-size: 0.875rem;
+  line-height: 1;
+}
+
+.system-status__text {
+  color: #333;
+}
+
+/* Status variants */
+.system-status--healthy .system-status__dot {
+  color: #34a853;
+}
+
+.system-status--degraded .system-status__dot {
+  color: #fbbc04;
+}
+
+.system-status--offline .system-status__dot {
+  color: #d93025;
+}

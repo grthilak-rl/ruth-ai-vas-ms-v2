@@ -1,0 +1,53 @@
+# Dummy Detector Model Contract v1.1.0
+# For platform validation testing - upgraded version
+
+contract_schema_version: "1.0.0"
+
+model_id: "dummy_detector"
+version: "1.1.0"
+display_name: "Dummy Detector v1.1"
+description: "Upgraded dummy model with enhanced features"
+author: "Ruth AI Team"
+
+input:
+  type: "frame"
+  format: "raw_bgr"
+  min_width: 32
+  min_height: 32
+  max_width: 4096
+  max_height: 4096
+  channels: 3
+
+output:
+  schema_version: "1.0"
+  schema:
+    event_type:
+      type: "string"
+      enum:
+        - "detected"
+        - "not_detected"
+    confidence:
+      type: "number"
+      min: 0.0
+      max: 1.0
+
+hardware:
+  supports_cpu: true
+  supports_gpu: false
+  supports_jetson: true
+
+performance:
+  inference_time_hint_ms: 8
+  recommended_fps: 40
+  max_fps: 80
+  warmup_iterations: 1
+
+limits:
+  max_memory_mb: 128
+  inference_timeout_ms: 1000
+  max_concurrent_inferences: 4
+
+capabilities:
+  supports_batching: false
+  provides_bounding_boxes: false
+  provides_keypoints: false

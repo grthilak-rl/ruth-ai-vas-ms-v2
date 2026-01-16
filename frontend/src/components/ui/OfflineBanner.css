@@ -1,0 +1,97 @@
+/**
+ * Offline Banner Styles (E9)
+ *
+ * Per F3: Non-blocking, visible but not alarming.
+ * Fixed position to be visible regardless of scroll.
+ */
+
+.offline-banner {
+  position: fixed;
+  bottom: 1rem;
+  left: 50%;
+  transform: translateX(-50%);
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.625rem 1rem;
+  font-size: 0.875rem;
+  font-weight: 500;
+  border-radius: 6px;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.15);
+  z-index: 9999;
+  animation: offline-banner-slide-up 0.3s ease-out;
+}
+
+@keyframes offline-banner-slide-up {
+  from {
+    opacity: 0;
+    transform: translateX(-50%) translateY(1rem);
+  }
+  to {
+    opacity: 1;
+    transform: translateX(-50%) translateY(0);
+  }
+}
+
+/* Offline state */
+.offline-banner--offline {
+  color: #fff;
+  background-color: #c5221f;
+}
+
+.offline-banner--offline .offline-banner__icon {
+  color: rgba(255, 255, 255, 0.8);
+}
+
+/* Recovered state */
+.offline-banner--recovered {
+  color: #fff;
+  background-color: #137333;
+  animation: offline-banner-slide-up 0.3s ease-out, offline-banner-fade-out 0.3s ease-in 2.7s forwards;
+}
+
+@keyframes offline-banner-fade-out {
+  to {
+    opacity: 0;
+    transform: translateX(-50%) translateY(0.5rem);
+  }
+}
+
+/* Icon */
+.offline-banner__icon {
+  font-size: 1rem;
+  line-height: 1;
+}
+
+/* Text */
+.offline-banner__text {
+  line-height: 1.25;
+}
+
+/* Mobile adjustments */
+@media (max-width: 480px) {
+  .offline-banner {
+    left: 1rem;
+    right: 1rem;
+    transform: none;
+    justify-content: center;
+  }
+
+  @keyframes offline-banner-slide-up {
+    from {
+      opacity: 0;
+      transform: translateY(1rem);
+    }
+    to {
+      opacity: 1;
+      transform: translateY(0);
+    }
+  }
+
+  @keyframes offline-banner-fade-out {
+    to {
+      opacity: 0;
+      transform: translateY(0.5rem);
+    }
+  }
+}

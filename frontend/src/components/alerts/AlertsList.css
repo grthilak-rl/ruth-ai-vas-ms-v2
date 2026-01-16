@@ -1,0 +1,68 @@
+/**
+ * Alerts List Styles (F4/F5-aligned)
+ *
+ * Per F5 §A1:
+ * - New items prepend without scroll jump
+ * - User position preserved
+ */
+
+.alerts-list {
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+}
+
+/* Error state (F4: friendly message + retry) */
+.alerts-list__error {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  padding: 3rem 1rem;
+  text-align: center;
+}
+
+.alerts-list__error-message {
+  margin: 0 0 1rem;
+  font-size: 1rem;
+  color: #666;
+}
+
+.alerts-list__error-retry {
+  padding: 0.5rem 1.25rem;
+  font-size: 0.875rem;
+  font-weight: 500;
+  color: #fff;
+  background-color: #1a73e8;
+  border: none;
+  border-radius: 4px;
+  cursor: pointer;
+  transition: background-color 0.15s;
+}
+
+.alerts-list__error-retry:hover {
+  background-color: #1557b0;
+}
+
+/* Empty state (F4: "No active violations") */
+.alerts-list__empty {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  padding: 4rem 1rem;
+  text-align: center;
+}
+
+.alerts-list__empty-message {
+  margin: 0 0 0.5rem;
+  font-size: 1.125rem;
+  font-weight: 500;
+  color: #333;
+}
+
+.alerts-list__empty-hint {
+  margin: 0;
+  font-size: 0.875rem;
+  color: #666;
+}

@@ -1,0 +1,93 @@
+# Fall Detection Model Contract
+# Version: 1.0.0
+# This contract describes the model's capabilities and requirements
+
+# Contract schema version (required)
+contract_schema_version: "1.0.0"
+
+# Model identity (required)
+model_id: "fall_detection"
+version: "1.0.0"
+display_name: "Fall Detection"
+description: "Detects falls using human pose estimation and keypoint analysis with YOLOv7-Pose"
+author: "Ruth AI Team"
+
+# Input specification (required)
+input:
+  type: "frame"
+  format: "raw_bgr"
+  min_width: 320
+  min_height: 240
+  max_width: 4096
+  max_height: 4096
+  channels: 3
+
+# Output specification (required)
+output:
+  schema_version: "1.0"
+  schema:
+    event_type:
+      type: "string"
+      enum:
+        - "fall_detected"
+        - "possible_fall"
+        - "no_fall"
+    confidence:
+      type: "number"
+      min: 0.0
+      max: 1.0
+    bounding_boxes:
+      type: "array"
+      items:
+        bbox:
+          type: "array"
+          items: "number"
+        confidence:
+          type: "number"
+        keypoints:
+          type: "array"
+    metadata:
+      allowed_keys:
+        - "detection_count"
+        - "severity"
+        - "violation_type"
+
+# Hardware compatibility (required)
+hardware:
+  supports_cpu: true
+  supports_gpu: true
+  supports_jetson: true
+  min_ram_mb: 2048
+  min_gpu_memory_mb: 512
+
+# Performance hints (required)
+performance:
+  inference_time_hint_ms: 200
+  recommended_fps: 5
+  max_fps: 15
+  recommended_batch_size: 1
+  warmup_iterations: 2
+
+# Resource limits (optional but recommended)
+limits:
+  max_memory_mb: 4096
+  inference_timeout_ms: 5000
+  preprocessing_timeout_ms: 1000
+  postprocessing_timeout_ms: 1000
+  max_concurrent_inferences: 2
+
+# Model capabilities (optional)
+capabilities:
+  supports_batching: false
+  supports_async: false
+  provides_tracking: false
+  confidence_calibrated: false
+  provides_bounding_boxes: true
+  provides_keypoints: true
+
+# Entry points (optional, defaults shown)
+entry_points:
+  inference: "inference.py"
+  preprocess: "preprocess.py"
+  postprocess: "postprocess.py"
+  loader: "loader.py"

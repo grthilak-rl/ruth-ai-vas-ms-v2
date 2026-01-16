@@ -1,0 +1,117 @@
+/**
+ * System Status Modal Styles (F3 Flow 4)
+ *
+ * Non-blocking modal with human-readable status information.
+ */
+
+.status-modal-backdrop {
+  position: fixed;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background-color: rgba(0, 0, 0, 0.4);
+  z-index: 1000;
+}
+
+.status-modal {
+  width: 100%;
+  max-width: 400px;
+  margin: 1rem;
+  background-color: #fff;
+  border-radius: 8px;
+  box-shadow: 0 4px 24px rgba(0, 0, 0, 0.15);
+}
+
+.status-modal__header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 1rem 1.25rem;
+  border-bottom: 1px solid #e0e0e0;
+}
+
+.status-modal__title {
+  margin: 0;
+  font-size: 1.125rem;
+  font-weight: 600;
+  color: #1a1a1a;
+}
+
+.status-modal__close {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 2rem;
+  height: 2rem;
+  padding: 0;
+  font-size: 1.5rem;
+  line-height: 1;
+  color: #666;
+  background: none;
+  border: none;
+  border-radius: 4px;
+  cursor: pointer;
+}
+
+.status-modal__close:hover {
+  background-color: #f5f5f5;
+  color: #333;
+}
+
+.status-modal__close:focus {
+  outline: 2px solid #1a73e8;
+  outline-offset: 2px;
+}
+
+.status-modal__content {
+  padding: 1.25rem;
+}
+
+.status-modal__message {
+  margin: 0;
+  font-size: 0.9375rem;
+  line-height: 1.5;
+  color: #333;
+}
+
+.status-modal__footer {
+  display: flex;
+  justify-content: flex-end;
+  padding: 0.75rem 1.25rem;
+  border-top: 1px solid #e0e0e0;
+}
+
+.status-modal__dismiss {
+  padding: 0.5rem 1rem;
+  font-size: 0.875rem;
+  font-weight: 500;
+  color: #1a73e8;
+  background: none;
+  border: 1px solid #1a73e8;
+  border-radius: 4px;
+  cursor: pointer;
+  transition: background-color 0.15s;
+}
+
+.status-modal__dismiss:hover {
+  background-color: #e8f0fe;
+}
+
+.status-modal__dismiss:focus {
+  outline: 2px solid #1a73e8;
+  outline-offset: 2px;
+}
+
+/* Status-specific border accent */
+.status-modal--healthy {
+  border-top: 3px solid #34a853;
+}
+
+.status-modal--degraded {
+  border-top: 3px solid #fbbc04;
+}
+
+.status-modal--offline {
+  border-top: 3px solid #d93025;
+}

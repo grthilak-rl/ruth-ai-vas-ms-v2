@@ -1,0 +1,87 @@
+/**
+ * Service Status Card Styles (F4 §9.1)
+ */
+
+.service-status-card {
+  padding: 1rem;
+  background-color: #fff;
+  border: 1px solid #e0e0e0;
+  border-radius: 8px;
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+}
+
+.service-status-card--healthy {
+  border-left: 3px solid #34a853;
+}
+
+.service-status-card--degraded {
+  border-left: 3px solid #f9a825;
+}
+
+.service-status-card--offline {
+  border-left: 3px solid #d93025;
+}
+
+.service-status-card__header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+
+.service-status-card__name {
+  margin: 0;
+  font-size: 0.875rem;
+  font-weight: 600;
+  color: #1a1a1a;
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+}
+
+.service-status-card__content {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+
+.service-status-card__indicator {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.375rem;
+  font-size: 0.875rem;
+  font-weight: 600;
+}
+
+.service-status-card__indicator--healthy {
+  color: #137333;
+}
+
+.service-status-card__indicator--degraded {
+  color: #b45309;
+}
+
+.service-status-card__indicator--offline {
+  color: #c5221f;
+}
+
+.service-status-card__icon {
+  font-size: 0.75rem;
+}
+
+.service-status-card__description {
+  margin: 0;
+  font-size: 0.8125rem;
+  color: #666;
+  line-height: 1.4;
+}
+
+.service-status-card__footer {
+  padding-top: 0.5rem;
+  border-top: 1px solid #f0f0f0;
+}
+
+.service-status-card__updated {
+  font-size: 0.6875rem;
+  color: #999;
+}

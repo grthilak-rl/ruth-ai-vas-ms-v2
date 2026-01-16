@@ -1,0 +1,13 @@
+/**
+ * Video Overlay Styles (E10)
+ *
+ * Canvas overlay positioned absolutely over video element.
+ * Canvas size is set via width/height attributes in JS.
+ * CSS width/height inherit from attributes (no stretching).
+ */
+
+.video-overlay {
+  position: absolute;
+  pointer-events: none; /* Allow clicks to pass through to video */
+  z-index: 10;
+}

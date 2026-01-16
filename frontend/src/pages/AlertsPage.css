@@ -1,0 +1,48 @@
+/**
+ * Alerts Page Styles
+ *
+ * Two-column layout with filter sidebar and main content area.
+ */
+
+.alerts-page {
+  display: flex;
+  height: calc(100vh - 60px); /* Subtract header height */
+  overflow: hidden;
+}
+
+.alerts-page__main {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  overflow-y: auto;
+  padding: 1.5rem 2rem;
+}
+
+.alerts-page__header {
+  margin-bottom: 1.5rem;
+  flex-shrink: 0;
+}
+
+.alerts-page__title {
+  margin: 0;
+  font-size: 1.5rem;
+  font-weight: 600;
+  color: var(--color-text-primary, #1a1a1a);
+}
+
+.alerts-page__content {
+  flex: 1;
+  min-height: 0; /* Allow flex child to shrink */
+}
+
+/* Responsive: full width on small screens */
+@media (max-width: 768px) {
+  .alerts-page {
+    flex-direction: column;
+    height: auto;
+  }
+
+  .alerts-page__main {
+    padding: 1rem;
+  }
+}

@@ -1,0 +1,34 @@
+/**
+ * Confidence Badge Styles (F4/F6-aligned)
+ *
+ * Per F6 §12.2:
+ * - High: confidence-high token
+ * - Medium: confidence-medium token
+ * - Low: confidence-low token
+ */
+
+.confidence-badge {
+  display: inline-flex;
+  align-items: center;
+  padding: 0.125rem 0.5rem;
+  font-size: 0.6875rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.02em;
+  border-radius: 3px;
+}
+
+.confidence-badge--high {
+  color: #fff;
+  background-color: #d93025;
+}
+
+.confidence-badge--medium {
+  color: #1a1a1a;
+  background-color: #fbbc04;
+}
+
+.confidence-badge--low {
+  color: #666;
+  background-color: #e0e0e0;
+}

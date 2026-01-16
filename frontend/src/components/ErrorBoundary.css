@@ -1,0 +1,89 @@
+/**
+ * Error Boundary Fallback Styles (E9)
+ *
+ * Per F3: Blame-free, recovery-oriented.
+ * Full-page fallback for unrecoverable render errors.
+ */
+
+.error-boundary-fallback {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 100vh;
+  padding: 2rem;
+  background-color: #fafafa;
+}
+
+.error-boundary-fallback__content {
+  max-width: 400px;
+  padding: 2rem;
+  text-align: center;
+  background-color: #fff;
+  border: 1px solid #e0e0e0;
+  border-radius: 8px;
+  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.05);
+}
+
+.error-boundary-fallback__title {
+  margin: 0 0 0.5rem;
+  font-size: 1.25rem;
+  font-weight: 600;
+  color: #333;
+}
+
+.error-boundary-fallback__message {
+  margin: 0 0 1.5rem;
+  font-size: 0.9375rem;
+  color: #666;
+  line-height: 1.5;
+}
+
+.error-boundary-fallback__actions {
+  display: flex;
+  gap: 1rem;
+  justify-content: center;
+}
+
+.error-boundary-fallback__retry {
+  padding: 0.625rem 1.25rem;
+  font-size: 0.875rem;
+  font-weight: 500;
+  color: #fff;
+  background-color: #1a73e8;
+  border: none;
+  border-radius: 4px;
+  cursor: pointer;
+  transition: background-color 0.15s ease;
+}
+
+.error-boundary-fallback__retry:hover {
+  background-color: #1557b0;
+}
+
+.error-boundary-fallback__retry:focus-visible {
+  outline: 2px solid #1a73e8;
+  outline-offset: 2px;
+}
+
+.error-boundary-fallback__home {
+  display: inline-flex;
+  align-items: center;
+  padding: 0.625rem 1.25rem;
+  font-size: 0.875rem;
+  font-weight: 500;
+  color: #1a73e8;
+  text-decoration: none;
+  background-color: transparent;
+  border: 1px solid #1a73e8;
+  border-radius: 4px;
+  transition: background-color 0.15s ease;
+}
+
+.error-boundary-fallback__home:hover {
+  background-color: rgba(26, 115, 232, 0.04);
+}
+
+.error-boundary-fallback__home:focus-visible {
+  outline: 2px solid #1a73e8;
+  outline-offset: 2px;
+}

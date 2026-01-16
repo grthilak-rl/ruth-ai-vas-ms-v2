@@ -1,0 +1,102 @@
+/**
+ * Violation Metadata Styles (F4 §6.1)
+ */
+
+.violation-metadata {
+  padding: 1rem;
+  background-color: #fff;
+  border: 1px solid #e0e0e0;
+  border-radius: 8px;
+}
+
+.violation-metadata__title {
+  margin: 0 0 1rem;
+  font-size: 0.875rem;
+  font-weight: 600;
+  color: #666;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+}
+
+.violation-metadata__list {
+  margin: 0;
+}
+
+.violation-metadata__item {
+  display: flex;
+  justify-content: space-between;
+  padding: 0.5rem 0;
+  border-bottom: 1px solid #f0f0f0;
+}
+
+.violation-metadata__item:last-child {
+  border-bottom: none;
+}
+
+.violation-metadata__label {
+  font-size: 0.8125rem;
+  color: #666;
+}
+
+.violation-metadata__value {
+  font-size: 0.8125rem;
+  font-weight: 500;
+  color: #1a1a1a;
+  text-align: right;
+}
+
+.violation-metadata__value--secondary {
+  font-weight: 400;
+  color: #666;
+  font-size: 0.75rem;
+}
+
+/* Confidence colors */
+.violation-metadata__confidence--high {
+  color: #d93025;
+}
+
+.violation-metadata__confidence--medium {
+  color: #f9a825;
+}
+
+.violation-metadata__confidence--low {
+  color: #666;
+}
+
+/* Status colors */
+.violation-metadata__status-dot {
+  margin-right: 0.25rem;
+}
+
+.violation-metadata__status--open {
+  color: #1a73e8;
+}
+
+.violation-metadata__status--open .violation-metadata__status-dot {
+  color: #1a73e8;
+}
+
+.violation-metadata__status--reviewed {
+  color: #137333;
+}
+
+.violation-metadata__status--reviewed .violation-metadata__status-dot {
+  color: #34a853;
+}
+
+.violation-metadata__status--dismissed {
+  color: #666;
+}
+
+.violation-metadata__status--dismissed .violation-metadata__status-dot {
+  color: #9e9e9e;
+}
+
+.violation-metadata__status--resolved {
+  color: #137333;
+}
+
+.violation-metadata__status--resolved .violation-metadata__status-dot {
+  color: #34a853;
+}

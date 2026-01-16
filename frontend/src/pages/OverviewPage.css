@@ -1,0 +1,65 @@
+/**
+ * Overview Page Styles (F4 §4)
+ */
+
+.overview-page {
+  padding: 1.5rem;
+  max-width: 1400px;
+  margin: 0 auto;
+}
+
+.overview-page__header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 1.5rem;
+}
+
+.overview-page__title {
+  margin: 0;
+  font-size: 1.5rem;
+  font-weight: 600;
+  color: #1a1a1a;
+}
+
+.overview-page__content {
+  display: flex;
+  flex-direction: column;
+  gap: 1.5rem;
+}
+
+.overview-page__grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 1.5rem;
+}
+
+.overview-page__main {
+  /* Recent violations takes left side */
+}
+
+.overview-page__sidebar {
+  /* Camera grid takes right side */
+}
+
+@media (max-width: 1024px) {
+  .overview-page__grid {
+    grid-template-columns: 1fr;
+  }
+}
+
+@media (max-width: 768px) {
+  .overview-page {
+    padding: 1rem;
+  }
+
+  .overview-page__header {
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 0.5rem;
+  }
+
+  .overview-page__title {
+    font-size: 1.25rem;
+  }
+}

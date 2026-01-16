@@ -1,0 +1,390 @@
+/**
+ * Live Video Player Styles (E10)
+ *
+ * Per E10: Non-alarming, isolated styling.
+ * Video failures should be noticeable but not panic-inducing.
+ */
+
+.live-video-player {
+  position: relative;
+  width: 100%;
+  aspect-ratio: 16 / 9;
+  background-color: #000;
+  border-radius: 8px;
+  overflow: hidden;
+  /* Match POC: flexbox centering */
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+/* Video element - match POC exactly */
+.live-video-player__video {
+  max-width: 100%;
+  max-height: 100%;
+  object-fit: contain;
+}
+
+/* Detection canvas - match POC exactly */
+/* CSS fills container, JS sets internal resolution to match video */
+.live-video-player__detection-canvas {
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 100%;
+  pointer-events: none;
+  z-index: 5;
+}
+
+/* ============================================================================
+   Live Badge
+   ============================================================================ */
+
+.live-video-player__live-badge {
+  position: absolute;
+  top: 12px;
+  left: 12px;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 10px;
+  font-size: 0.6875rem;
+  font-weight: 700;
+  color: #fff;
+  background-color: #c5221f;
+  border-radius: 4px;
+  letter-spacing: 0.05em;
+  z-index: 20;
+}
+
+.live-video-player__live-dot {
+  width: 6px;
+  height: 6px;
+  background-color: #fff;
+  border-radius: 50%;
+  animation: live-pulse 1.5s ease-in-out infinite;
+}
+
+@keyframes live-pulse {
+  0%, 100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.5;
+  }
+}
+
+/* ============================================================================
+   Idle State (Play Button)
+   ============================================================================ */
+
+.live-video-player--idle {
+  background-color: #2a2a2a;
+}
+
+/* Hide video element in idle state (no stream yet) */
+.live-video-player--idle .live-video-player__video {
+  visibility: hidden;
+}
+
+.live-video-player__idle-overlay {
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 10;
+}
+
+.live-video-player__play-button {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 12px;
+  padding: 20px 32px;
+  background-color: transparent;
+  border: 2px solid rgba(255, 255, 255, 0.3);
+  border-radius: 8px;
+  cursor: pointer;
+  transition: border-color 0.2s ease, background-color 0.2s ease;
+}
+
+.live-video-player__play-button:hover {
+  border-color: rgba(255, 255, 255, 0.6);
+  background-color: rgba(255, 255, 255, 0.05);
+}
+
+.live-video-player__play-button:focus-visible {
+  outline: 2px solid #1a73e8;
+  outline-offset: 2px;
+}
+
+.live-video-player__play-icon {
+  font-size: 2rem;
+  color: #fff;
+}
+
+.live-video-player__play-text {
+  font-size: 0.875rem;
+  font-weight: 500;
+  color: rgba(255, 255, 255, 0.9);
+}
+
+/* ============================================================================
+   Loading / Reconnecting State
+   ============================================================================ */
+
+.live-video-player__loading-overlay {
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 12px;
+  background-color: rgba(0, 0, 0, 0.7);
+  z-index: 25;
+}
+
+.live-video-player__spinner {
+  width: 32px;
+  height: 32px;
+  border: 3px solid rgba(255, 255, 255, 0.2);
+  border-top-color: #fff;
+  border-radius: 50%;
+  animation: video-spinner 0.8s linear infinite;
+}
+
+@keyframes video-spinner {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+.live-video-player__loading-text {
+  margin: 0;
+  font-size: 0.875rem;
+  color: rgba(255, 255, 255, 0.9);
+}
+
+/* ============================================================================
+   Error State
+   ============================================================================ */
+
+.live-video-player--error {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background-color: #2a2a2a;
+}
+
+.live-video-player__error-content {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 8px;
+  padding: 24px;
+  text-align: center;
+}
+
+.live-video-player__error-title {
+  margin: 0;
+  font-size: 1rem;
+  font-weight: 500;
+  color: #fff;
+}
+
+.live-video-player__error-message {
+  margin: 0;
+  font-size: 0.8125rem;
+  color: rgba(255, 255, 255, 0.7);
+  max-width: 280px;
+}
+
+.live-video-player__retry-button {
+  margin-top: 8px;
+  padding: 8px 16px;
+  font-size: 0.875rem;
+  font-weight: 500;
+  color: #1a73e8;
+  background-color: #fff;
+  border: none;
+  border-radius: 4px;
+  cursor: pointer;
+  transition: background-color 0.15s ease;
+}
+
+.live-video-player__retry-button:hover {
+  background-color: #f0f0f0;
+}
+
+.live-video-player__retry-button:focus-visible {
+  outline: 2px solid #1a73e8;
+  outline-offset: 2px;
+}
+
+/* ============================================================================
+   Offline State
+   ============================================================================ */
+
+.live-video-player--offline {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background-color: #2a2a2a;
+}
+
+.live-video-player__offline-content {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 8px;
+  padding: 24px;
+  text-align: center;
+}
+
+.live-video-player__offline-icon {
+  font-size: 1.5rem;
+  color: #666;
+}
+
+.live-video-player__offline-title {
+  margin: 0;
+  font-size: 1rem;
+  font-weight: 500;
+  color: #fff;
+}
+
+.live-video-player__offline-message {
+  margin: 0;
+  font-size: 0.8125rem;
+  color: rgba(255, 255, 255, 0.6);
+  max-width: 280px;
+}
+
+/* ============================================================================
+   Paused State
+   ============================================================================ */
+
+.live-video-player__paused-overlay {
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background-color: rgba(0, 0, 0, 0.5);
+  z-index: 25;
+}
+
+.live-video-player__resume-button {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 64px;
+  height: 64px;
+  background-color: rgba(255, 255, 255, 0.9);
+  border: none;
+  border-radius: 50%;
+  cursor: pointer;
+  transition: transform 0.15s ease, background-color 0.15s ease;
+}
+
+.live-video-player__resume-button:hover {
+  transform: scale(1.05);
+  background-color: #fff;
+}
+
+.live-video-player__resume-icon {
+  font-size: 1.5rem;
+  color: #1a1a1a;
+  margin-left: 4px; /* Visual centering for play icon */
+}
+
+/* ============================================================================
+   Video Controls
+   ============================================================================ */
+
+.live-video-player__controls {
+  position: absolute;
+  bottom: 0;
+  left: 0;
+  right: 0;
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  padding: 12px;
+  background: linear-gradient(transparent, rgba(0, 0, 0, 0.6));
+  opacity: 0;
+  transition: opacity 0.2s ease;
+  z-index: 20;
+}
+
+.live-video-player:hover .live-video-player__controls {
+  opacity: 1;
+}
+
+.live-video-player__control-button {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 32px;
+  height: 32px;
+  font-size: 0.75rem;
+  color: #fff;
+  background-color: rgba(255, 255, 255, 0.2);
+  border: none;
+  border-radius: 4px;
+  cursor: pointer;
+  transition: background-color 0.15s ease;
+}
+
+.live-video-player__control-button:hover {
+  background-color: rgba(255, 255, 255, 0.3);
+}
+
+/* ============================================================================
+   Video Error Fallback (from VideoErrorBoundary)
+   ============================================================================ */
+
+.video-error-fallback {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 12px;
+  width: 100%;
+  aspect-ratio: 16 / 9;
+  background-color: #2a2a2a;
+  border-radius: 8px;
+}
+
+.video-error-fallback__message {
+  margin: 0;
+  font-size: 0.9375rem;
+  color: rgba(255, 255, 255, 0.8);
+}
+
+.video-error-fallback__retry {
+  padding: 8px 16px;
+  font-size: 0.875rem;
+  font-weight: 500;
+  color: #1a73e8;
+  background-color: #fff;
+  border: none;
+  border-radius: 4px;
+  cursor: pointer;
+}
+
+.video-error-fallback__retry:hover {
+  background-color: #f0f0f0;
+}

@@ -1,0 +1,65 @@
+/**
+ * Top Navigation Bar Styles (F4-aligned)
+ *
+ * Structural layout with minimal visual styling.
+ * Following F4 wireframe specifications.
+ */
+
+.top-nav {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0.75rem 1.5rem;
+  border-bottom: 1px solid #e0e0e0;
+  background-color: #fff;
+  min-height: 56px;
+}
+
+.top-nav__brand {
+  flex-shrink: 0;
+}
+
+.top-nav__logo {
+  font-weight: 600;
+  font-size: 1.125rem;
+  color: #1a1a1a;
+}
+
+.top-nav__links {
+  display: flex;
+  gap: 0.25rem;
+  align-items: center;
+  flex: 1;
+  justify-content: center;
+}
+
+.top-nav__link {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.375rem;
+  padding: 0.5rem 1rem;
+  text-decoration: none;
+  color: #666;
+  font-size: 0.875rem;
+  font-weight: 500;
+  border-radius: 4px;
+  transition: background-color 0.15s, color 0.15s;
+}
+
+.top-nav__link:hover {
+  background-color: #f5f5f5;
+  color: #333;
+}
+
+.top-nav__link--active {
+  background-color: #e8f0fe;
+  color: #1a73e8;
+}
+
+.top-nav__link--with-badge {
+  position: relative;
+}
+
+.top-nav__status {
+  flex-shrink: 0;
+}

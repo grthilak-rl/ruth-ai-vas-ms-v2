@@ -1,0 +1,78 @@
+/**
+ * Error State Styles (E9)
+ *
+ * Per F3: Non-alarming, recovery-oriented styling.
+ * Error states should be noticeable but not panic-inducing.
+ */
+
+.error-state {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  text-align: center;
+  gap: 1rem;
+}
+
+/* Section variant (standalone) */
+.error-state--section {
+  padding: 2rem;
+  background-color: #fafafa;
+  border: 1px solid #e0e0e0;
+  border-radius: 8px;
+}
+
+/* Inline variant (within a component) */
+.error-state--inline {
+  padding: 1rem;
+  background-color: transparent;
+}
+
+/* Size variants */
+.error-state--small {
+  padding: 0.75rem;
+  gap: 0.5rem;
+}
+
+.error-state--large {
+  padding: 3rem;
+  gap: 1.5rem;
+}
+
+/* Content */
+.error-state__content {
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+}
+
+/* Message - primary text */
+.error-state__message {
+  margin: 0;
+  font-size: 0.9375rem;
+  font-weight: 500;
+  color: #333;
+}
+
+.error-state--small .error-state__message {
+  font-size: 0.8125rem;
+}
+
+.error-state--large .error-state__message {
+  font-size: 1.0625rem;
+}
+
+/* Hint - secondary text */
+.error-state__hint {
+  margin: 0;
+  font-size: 0.8125rem;
+  color: #666;
+}
+
+.error-state--small .error-state__hint {
+  font-size: 0.75rem;
+}
+
+.error-state--large .error-state__hint {
+  font-size: 0.875rem;
+}

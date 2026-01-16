@@ -1,0 +1,171 @@
+/**
+ * Camera Detail View Styles (F4 §7.3)
+ */
+
+.camera-detail {
+  max-width: 1400px;
+  margin: 0 auto;
+  padding: 0 1rem;
+}
+
+.camera-detail__nav {
+  margin-bottom: 1rem;
+}
+
+.camera-detail__back {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.25rem;
+  font-size: 0.875rem;
+  font-weight: 500;
+  color: #1a73e8;
+  text-decoration: none;
+}
+
+.camera-detail__back:hover {
+  text-decoration: underline;
+}
+
+.camera-detail__header {
+  display: flex;
+  align-items: center;
+  gap: 1rem;
+  margin-bottom: 1.5rem;
+}
+
+.camera-detail__title {
+  margin: 0;
+  font-size: 1.5rem;
+  font-weight: 600;
+  color: #1a1a1a;
+}
+
+/* Main content layout */
+.camera-detail__content {
+  display: grid;
+  grid-template-columns: 1fr 320px;
+  gap: 1.5rem;
+}
+
+@media (max-width: 1024px) {
+  .camera-detail__content {
+    grid-template-columns: 1fr;
+  }
+}
+
+/* Video section */
+.camera-detail__video-section {
+  display: flex;
+  flex-direction: column;
+  gap: 1rem;
+}
+
+.camera-detail__detection-status {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  padding: 0.75rem 1rem;
+  background-color: #f8f9fa;
+  border-radius: 8px;
+}
+
+.camera-detail__detection-message {
+  margin: 0;
+  font-size: 0.8125rem;
+  color: #666;
+}
+
+.camera-detail__detection-message--warning {
+  color: #b45309;
+}
+
+.camera-detail__detection-message--muted {
+  color: #999;
+}
+
+/* Sidebar */
+.camera-detail__sidebar {
+  display: flex;
+  flex-direction: column;
+  gap: 1rem;
+}
+
+/* Info card */
+.camera-detail__info-card {
+  padding: 1rem;
+  background-color: #fff;
+  border: 1px solid #e0e0e0;
+  border-radius: 8px;
+}
+
+.camera-detail__info-title {
+  margin: 0 0 1rem;
+  font-size: 0.875rem;
+  font-weight: 600;
+  color: #666;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+}
+
+.camera-detail__info-list {
+  margin: 0;
+}
+
+.camera-detail__info-item {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 0.5rem 0;
+  border-bottom: 1px solid #f0f0f0;
+}
+
+.camera-detail__info-item:last-child {
+  border-bottom: none;
+}
+
+.camera-detail__info-item dt {
+  font-size: 0.8125rem;
+  color: #666;
+}
+
+.camera-detail__info-item dd {
+  margin: 0;
+  font-size: 0.8125rem;
+  font-weight: 500;
+  color: #1a1a1a;
+}
+
+/* Violations card */
+.camera-detail__violations-card {
+  padding: 1rem;
+  background-color: #fff;
+  border: 1px solid #e0e0e0;
+  border-radius: 8px;
+}
+
+.camera-detail__violations-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 1rem;
+}
+
+.camera-detail__violations-title {
+  margin: 0;
+  font-size: 0.875rem;
+  font-weight: 600;
+  color: #666;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+}
+
+.camera-detail__violations-link {
+  font-size: 0.75rem;
+  font-weight: 500;
+  color: #1a73e8;
+  text-decoration: none;
+}
+
+.camera-detail__violations-link:hover {
+  text-decoration: underline;
+}

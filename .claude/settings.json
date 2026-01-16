@@ -1,0 +1,10 @@
+{
+  "permissions": {
+    "allow": [
+      "Read(//home/atgin-rnd-ubuntu/ruth-ai-vas-ms-v2/ruth-ai-backend/**)",
+      "Bash(done)",
+      "Bash(timeout 10 npm run dev:*)",
+      "Bash(docker ps:*)"
+    ]
+  }
+}

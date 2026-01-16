@@ -1,0 +1,165 @@
+/**
+ * Model Status Card Styles (F4 §8.1)
+ */
+
+.model-status-card {
+  background-color: #fff;
+  border: 1px solid #e0e0e0;
+  border-radius: 8px;
+  overflow: hidden;
+}
+
+.model-status-card--healthy {
+  border-left: 3px solid #34a853;
+}
+
+.model-status-card--degraded {
+  border-left: 3px solid #f9a825;
+}
+
+.model-status-card--unhealthy {
+  border-left: 3px solid #d93025;
+}
+
+.model-status-card__header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 1rem;
+  cursor: pointer;
+  transition: background-color 0.1s ease;
+}
+
+.model-status-card__header:hover {
+  background-color: #f8f9fa;
+}
+
+.model-status-card__header:focus {
+  outline: 2px solid #1a73e8;
+  outline-offset: -2px;
+}
+
+.model-status-card__info {
+  display: flex;
+  align-items: baseline;
+  gap: 0.5rem;
+  flex: 1;
+}
+
+.model-status-card__name {
+  margin: 0;
+  font-size: 0.9375rem;
+  font-weight: 600;
+  color: #1a1a1a;
+}
+
+.model-status-card__version {
+  font-size: 0.75rem;
+  color: #666;
+  font-family: monospace;
+}
+
+.model-status-card__status {
+  flex-shrink: 0;
+}
+
+.model-status-card__indicator {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.375rem;
+  font-size: 0.8125rem;
+  font-weight: 500;
+}
+
+.model-status-card__indicator--healthy {
+  color: #137333;
+}
+
+.model-status-card__indicator--degraded {
+  color: #b45309;
+}
+
+.model-status-card__indicator--unhealthy {
+  color: #c5221f;
+}
+
+.model-status-card__expand {
+  margin-left: 0.75rem;
+  font-size: 0.625rem;
+  color: #999;
+}
+
+/* Details panel */
+.model-status-card__details {
+  padding: 1rem;
+  background-color: #f8f9fa;
+  border-top: 1px solid #e0e0e0;
+}
+
+.model-status-card__details-list {
+  margin: 0;
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
+  gap: 0.75rem;
+}
+
+@media (max-width: 480px) {
+  .model-status-card__details-list {
+    grid-template-columns: 1fr;
+  }
+}
+
+.model-status-card__detail-item {
+  display: flex;
+  flex-direction: column;
+  gap: 0.125rem;
+}
+
+.model-status-card__detail-item dt {
+  font-size: 0.6875rem;
+  color: #666;
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+}
+
+.model-status-card__detail-item dd {
+  margin: 0;
+  font-size: 0.8125rem;
+  font-weight: 500;
+  color: #1a1a1a;
+}
+
+.model-status-card__health-value--healthy {
+  color: #137333;
+}
+
+.model-status-card__health-value--degraded {
+  color: #b45309;
+}
+
+.model-status-card__health-value--unhealthy {
+  color: #c5221f;
+}
+
+/* Issue message */
+.model-status-card__issue {
+  margin-top: 1rem;
+  padding: 0.75rem;
+  background-color: rgba(249, 168, 37, 0.1);
+  border-radius: 4px;
+}
+
+.model-status-card__issue-message {
+  margin: 0;
+  font-size: 0.8125rem;
+  color: #b45309;
+  line-height: 1.4;
+}
+
+.model-status-card--unhealthy .model-status-card__issue {
+  background-color: rgba(217, 48, 37, 0.1);
+}
+
+.model-status-card--unhealthy .model-status-card__issue-message {
+  color: #c5221f;
+}

@@ -1,0 +1,159 @@
+/**
+ * Violation Card Styles (F4-aligned)
+ *
+ * Per F4 wireframe and F5 stress tests:
+ * - Visual distinction by confidence level
+ * - High: Solid border, prominent
+ * - Medium: Standard styling
+ * - Low: Muted, dashed border
+ */
+
+.violation-card {
+  display: flex;
+  gap: 1rem;
+  padding: 1rem;
+  background-color: #fff;
+  border: 1px solid #e0e0e0;
+  border-radius: 8px;
+  transition: box-shadow 0.15s;
+}
+
+.violation-card:hover {
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.08);
+}
+
+/* Confidence-based styling (F4 §A3, F6 §12.2) */
+.violation-card--high {
+  border-left: 4px solid #d93025;
+}
+
+.violation-card--medium {
+  border-left: 4px solid #fbbc04;
+}
+
+.violation-card--low {
+  border-left: 4px solid #9e9e9e;
+  border-style: dashed;
+  border-left-style: solid;
+  opacity: 0.9;
+}
+
+/* Thumbnail */
+.violation-card__thumbnail {
+  flex-shrink: 0;
+  width: 120px;
+  height: 80px;
+  border-radius: 4px;
+  overflow: hidden;
+  background-color: #f5f5f5;
+}
+
+/* Content */
+.violation-card__content {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+
+.violation-card__header {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: 0.5rem;
+}
+
+.violation-card__camera {
+  margin: 0;
+  font-size: 1rem;
+  font-weight: 600;
+  color: #1a1a1a;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.violation-card__badges {
+  display: flex;
+  gap: 0.375rem;
+  flex-shrink: 0;
+}
+
+.violation-card__meta {
+  display: flex;
+  gap: 0.75rem;
+  font-size: 0.8125rem;
+  color: #666;
+}
+
+.violation-card__time {
+  color: #666;
+}
+
+.violation-card__type {
+  color: #999;
+}
+
+/* Error display (inline per F5) */
+.violation-card__error {
+  padding: 0.375rem 0.5rem;
+  font-size: 0.8125rem;
+  color: #d93025;
+  background-color: #fce8e6;
+  border-radius: 4px;
+}
+
+/* Actions */
+.violation-card__actions {
+  display: flex;
+  gap: 0.5rem;
+  margin-top: auto;
+  padding-top: 0.5rem;
+}
+
+.violation-card__action {
+  padding: 0.375rem 0.75rem;
+  font-size: 0.8125rem;
+  font-weight: 500;
+  border: 1px solid;
+  border-radius: 4px;
+  cursor: pointer;
+  transition: background-color 0.15s, opacity 0.15s;
+  text-decoration: none;
+}
+
+.violation-card__action:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
+.violation-card__action--view {
+  color: #1a73e8;
+  background-color: transparent;
+  border-color: #1a73e8;
+}
+
+.violation-card__action--view:hover {
+  background-color: #e8f0fe;
+}
+
+.violation-card__action--acknowledge {
+  color: #1a73e8;
+  background-color: #e8f0fe;
+  border-color: transparent;
+}
+
+.violation-card__action--acknowledge:hover:not(:disabled) {
+  background-color: #d2e3fc;
+}
+
+.violation-card__action--dismiss {
+  color: #666;
+  background-color: transparent;
+  border-color: #ccc;
+}
+
+.violation-card__action--dismiss:hover:not(:disabled) {
+  background-color: #f5f5f5;
+}
