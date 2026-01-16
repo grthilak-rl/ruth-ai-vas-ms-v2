@@ -1,5 +1,6 @@
 import { useMemo } from 'react';
 import type { HealthResponse, ModelStatusInfo } from '../../state';
+import { formatUptime } from '../../state';
 import { ServiceStatusCard, type ServiceHealthStatus } from './ServiceStatusCard';
 import { ModelStatusCard } from './ModelStatusCard';
 import { AuditEventList, type AuditEvent } from './AuditEventList';
@@ -16,22 +17,27 @@ interface SystemHealthViewProps {
   auditEvents?: AuditEvent[];
   /** Whether audit events are loading */
   auditLoading?: boolean;
+  /** Callback to refresh health data */
+  onRefresh?: () => void;
+  /** Whether health data is currently refreshing */
+  isRefreshing?: boolean;
 }
 
 /**
- * System Health View (F4 §9)
+ * System Health View (F4 §9) - Enhanced
  *
  * Admin-only diagnostic view for system and model health.
  *
- * Per E8 Task Spec:
- * - Service status cards (Backend, AI Runtime, Video)
+ * Features:
+ * - Service status cards with expandable detailed metrics
  * - Model health summary with expandable details
  * - Audit visibility for rollbacks and health changes
+ * - Manual refresh button
+ * - System uptime display
  *
  * Per E8 Constraints:
  * - No pod, container, node, or process names
- * - No raw metrics (CPU, memory, FPS, latency numbers)
- * - No configuration or mutation actions
+ * - Human-readable descriptions
  * - This is a read-only diagnostic surface
  */
 export function SystemHealthView({
@@ -40,6 +46,8 @@ export function SystemHealthView({
   modelsLoading = false,
   auditEvents = [],
   auditLoading = false,
+  onRefresh,
+  isRefreshing = false,
 }: SystemHealthViewProps) {
   // Derive overall system status
   const systemStatus = useMemo(() => {
@@ -47,7 +55,7 @@ export function SystemHealthView({
       // Check if any component is unhealthy
       const components = health.components;
       if (components) {
-        const hasOffline = Object.values(components).some(c => c === 'unhealthy');
+        const hasOffline = Object.values(components).some(c => c?.status === 'unhealthy');
         if (hasOffline) return 'offline' as const;
       }
       return 'degraded' as const;
@@ -60,9 +68,10 @@ export function SystemHealthView({
     const components = health.components ?? {};
 
     return {
-      backend: deriveServiceStatus(components.database, components.redis),
-      aiRuntime: deriveServiceStatus(components.ai_runtime),
-      video: 'healthy' as ServiceHealthStatus, // Assume healthy if backend is up
+      backend: deriveServiceStatus(components.database?.status, components.redis?.status),
+      aiRuntime: deriveServiceStatus(components.ai_runtime?.status),
+      video: deriveServiceStatus(components.vas?.status),
+      nlpChat: deriveServiceStatus(components.nlp_chat?.status),
     };
   }, [health.components]);
 
@@ -76,6 +85,7 @@ export function SystemHealthView({
 
   const systemStatusLabel = getSystemStatusLabel(systemStatus);
   const systemStatusIcon = getSystemStatusIcon(systemStatus);
+  const uptimeDisplay = formatUptime(health.uptime_seconds);
 
   return (
     <div className="system-health-view">
@@ -86,9 +96,28 @@ export function SystemHealthView({
           <span className="system-health-view__status-icon">{systemStatusIcon}</span>
           <span className="system-health-view__status-label">{systemStatusLabel}</span>
         </div>
-        <span className="system-health-view__updated">
-          Last checked: {formatTimestamp(health.timestamp)}
-        </span>
+        <div className="system-health-view__meta">
+          {uptimeDisplay !== 'Unknown' && (
+            <span className="system-health-view__uptime">
+              Uptime: <strong>{uptimeDisplay}</strong>
+            </span>
+          )}
+          <span className="system-health-view__updated">
+            Last checked: {formatTimestamp(health.timestamp)}
+          </span>
+          {onRefresh && (
+            <button
+              className={`system-health-view__refresh-btn ${isRefreshing ? 'system-health-view__refresh-btn--loading' : ''}`}
+              onClick={onRefresh}
+              disabled={isRefreshing}
+              title="Refresh health status"
+              aria-label="Refresh health status"
+            >
+              <span className="system-health-view__refresh-icon">↻</span>
+              {isRefreshing ? 'Checking...' : 'Refresh'}
+            </button>
+          )}
+        </div>
       </div>
 
       {/* Warning Banner (if degraded/offline) */}
@@ -105,24 +134,43 @@ export function SystemHealthView({
       {/* Service Status Cards */}
       <section className="system-health-view__section">
         <h2 className="system-health-view__section-title">Service Health</h2>
+        <p className="system-health-view__section-hint">Click a card to expand detailed metrics</p>
         <div className="system-health-view__services">
           <ServiceStatusCard
             serviceName="Backend"
             status={serviceStatuses.backend}
             description={getBackendDescription(serviceStatuses.backend)}
             lastUpdated={health.timestamp}
+            expandable={true}
+            serviceType="backend"
+            components={health.components}
           />
           <ServiceStatusCard
             serviceName="AI Runtime"
             status={serviceStatuses.aiRuntime}
             description={getAIRuntimeDescription(serviceStatuses.aiRuntime, modelCounts)}
             lastUpdated={health.timestamp}
+            expandable={true}
+            serviceType="ai_runtime"
+            components={health.components}
           />
           <ServiceStatusCard
             serviceName="Video Streaming"
             status={serviceStatuses.video}
             description={getVideoDescription(serviceStatuses.video)}
             lastUpdated={health.timestamp}
+            expandable={true}
+            serviceType="video"
+            components={health.components}
+          />
+          <ServiceStatusCard
+            serviceName="NLP Chat"
+            status={serviceStatuses.nlpChat}
+            description={getNLPChatDescription(serviceStatuses.nlpChat)}
+            lastUpdated={health.timestamp}
+            expandable={true}
+            serviceType="nlp_chat"
+            components={health.components}
           />
         </div>
       </section>
@@ -181,6 +229,9 @@ export function SystemHealthView({
 function deriveServiceStatus(...components: (string | undefined)[]): ServiceHealthStatus {
   const hasUnhealthy = components.some(c => c === 'unhealthy');
   if (hasUnhealthy) return 'offline';
+
+  const hasDegraded = components.some(c => c === 'degraded');
+  if (hasDegraded) return 'degraded';
 
   const allHealthy = components.every(c => c === 'healthy' || c === undefined);
   if (allHealthy) return 'healthy';
@@ -242,6 +293,17 @@ function getVideoDescription(status: ServiceHealthStatus): string {
       return 'Video streaming experiencing issues.';
     case 'offline':
       return 'Video streaming is not available.';
+  }
+}
+
+function getNLPChatDescription(status: ServiceHealthStatus): string {
+  switch (status) {
+    case 'healthy':
+      return 'Natural language chat service and LLM operating normally.';
+    case 'degraded':
+      return 'Chat service experiencing issues. Responses may be delayed.';
+    case 'offline':
+      return 'Chat service is not available.';
   }
 }
 

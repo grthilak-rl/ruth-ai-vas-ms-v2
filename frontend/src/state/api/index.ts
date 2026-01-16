@@ -33,9 +33,15 @@ export type {
 
   // Health
   HealthStatus,
+  ComponentHealthStatus,
   ComponentHealth,
   HealthComponents,
   HealthResponse,
+  DatabaseHealthDetails,
+  RedisHealthDetails,
+  AIRuntimeHealthDetails,
+  VASHealthDetails,
+  NLPChatHealthDetails,
 
   // Violations
   ViolationType,
@@ -85,7 +91,13 @@ export {
 // Health API
 // ============================================================================
 
-export { fetchHealth, fetchHealthWithFallback } from './health.api';
+export {
+  fetchHealth,
+  fetchHealthWithFallback,
+  formatUptime,
+  getTimeSinceLastCheck,
+  getComponentDisplayName,
+} from './health.api';
 
 // ============================================================================
 // Violations API
@@ -151,3 +163,23 @@ export {
   formatRatio,
 } from './analytics.api';
 export type { StalenessLevel } from './analytics.api';
+
+// ============================================================================
+// Chat API (NLP Chat Service)
+// ============================================================================
+
+export {
+  sendChatMessage,
+  getChatStatus,
+  enableChatService,
+  disableChatService,
+  generateMessageId,
+  formatExecutionTime,
+} from './chat.api';
+export type {
+  ChatRequest,
+  ChatResponse,
+  ChatStatusResponse,
+  ChatErrorDetail,
+  ChatMessage,
+} from './types';

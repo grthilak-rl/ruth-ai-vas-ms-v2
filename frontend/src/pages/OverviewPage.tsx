@@ -1,10 +1,9 @@
-import { useAnalyticsQuery } from '../state';
 import {
-  SummaryCards,
+  TopStatusBar,
   RecentViolations,
   CameraGrid,
 } from '../components/overview';
-import { StalenessIndicator } from '../components/ui';
+import { ChatPanel } from '../components/chat';
 import './OverviewPage.css';
 
 /**
@@ -13,44 +12,45 @@ import './OverviewPage.css';
  * F2 Path: /
  * Primary landing screen providing operator situational awareness.
  *
- * Per F4 §4.1:
- * - Summary cards: Open Alerts, Cameras Live, Models Active
- * - Recent Violations list (last 5)
- * - Camera Grid (2x2 or 3x2)
+ * Layout (compact, no-scroll design):
+ * ┌─────────────────────────────────────────────────────────────────┐
+ * │ [Open Alerts] [Cameras] [Models]              System: ●●●●●    │
+ * ├─────────────────────────────────┬───────────────────────────────┤
+ * │                                 │                               │
+ * │   Recent Violations             │   Ask Ruth (compact chat)     │
+ * │   (last 5 alerts)               │   [suggestion chips]          │
+ * │                                 │   [input field]               │
+ * │                                 ├───────────────────────────────┤
+ * │                                 │   Camera Grid (2x3)           │
+ * │                                 │   compact status tiles        │
+ * │                                 │                               │
+ * └─────────────────────────────────┴───────────────────────────────┘
  *
  * Per F6:
  * - Each section loads independently
  * - Partial failures do not block other sections
- * - Staleness indicator when data is outdated
  *
  * This dashboard answers: "What is happening in the system right now?"
  */
 export function OverviewPage() {
-  // Analytics query for staleness indicator
-  const { data: analyticsData } = useAnalyticsQuery();
-
   return (
     <div className="overview-page">
-      <header className="overview-page__header">
-        <h1 className="overview-page__title">Overview</h1>
-        {analyticsData?.generated_at && (
-          <StalenessIndicator timestamp={analyticsData.generated_at} />
-        )}
-      </header>
+      {/* Top Status Bar: Summary metrics + Health indicators */}
+      <TopStatusBar />
 
+      {/* Main Content: Two-column layout */}
       <div className="overview-page__content">
-        {/* Summary Cards Section */}
-        <SummaryCards />
+        {/* Left Column: Recent Violations */}
+        <div className="overview-page__left">
+          <RecentViolations />
+        </div>
 
-        {/* Main Content Grid */}
-        <div className="overview-page__grid">
-          {/* Recent Violations (left/main) */}
-          <div className="overview-page__main">
-            <RecentViolations />
+        {/* Right Column: Ask Ruth + Camera Grid */}
+        <div className="overview-page__right">
+          <div className="overview-page__chat">
+            <ChatPanel showSql={false} />
           </div>
-
-          {/* Camera Grid (right/sidebar) */}
-          <div className="overview-page__sidebar">
+          <div className="overview-page__cameras">
             <CameraGrid />
           </div>
         </div>

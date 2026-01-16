@@ -66,4 +66,9 @@ export const queryKeys = {
   analytics: {
     summary: ['analytics', 'summary'] as const,
   },
+
+  // Chat domain (NLP Chat Service)
+  chat: {
+    status: ['chat', 'status'] as const,
+  },
 } as const;

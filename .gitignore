@@ -3,6 +3,8 @@ venv/
 .venv/
 env/
 .env
+**/venv/
+**/.venv/
 
 # Python cache
 __pycache__/
@@ -16,6 +18,11 @@ __pycache__/
 *.onnx
 *.weights
 *.h5
+**/weights/
+
+# Large model/ML directories
+fall-detection-model/
+ai/models/*/weights/
 
 # Node modules
 node_modules/

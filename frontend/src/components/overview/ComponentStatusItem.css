@@ -1,0 +1,93 @@
+/**
+ * Component Status Item Styles
+ *
+ * Individual component health indicator
+ */
+
+.component-status {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  padding: 0.75rem 1rem;
+  min-width: 100px;
+  text-align: center;
+}
+
+.component-status__dot {
+  font-size: 1.5rem;
+  line-height: 1;
+  margin-bottom: 0.5rem;
+}
+
+.component-status__dot--healthy {
+  color: #34a853;
+}
+
+.component-status__dot--degraded {
+  color: #fbbc04;
+}
+
+.component-status__dot--unhealthy {
+  color: #d93025;
+}
+
+.component-status__dot--loading {
+  color: #999;
+  animation: pulse 1.5s ease-in-out infinite;
+}
+
+.component-status__info {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 0.125rem;
+}
+
+.component-status__name {
+  font-size: 0.8125rem;
+  font-weight: 600;
+  color: #1a1a1a;
+}
+
+.component-status__latency {
+  font-size: 0.75rem;
+  color: #666;
+}
+
+.component-status__latency--loading {
+  color: #999;
+}
+
+.component-status__detail {
+  font-size: 0.6875rem;
+  color: #999;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 100px;
+}
+
+@keyframes pulse {
+  0%, 100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.4;
+  }
+}
+
+/* Responsive */
+@media (max-width: 768px) {
+  .component-status {
+    min-width: 80px;
+    padding: 0.5rem 0.75rem;
+  }
+
+  .component-status__dot {
+    font-size: 1.25rem;
+  }
+
+  .component-status__name {
+    font-size: 0.75rem;
+  }
+}

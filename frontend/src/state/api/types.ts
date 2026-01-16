@@ -25,13 +25,101 @@ export type UUID = string;
 
 /**
  * System health status (F6 §4.1)
+ *
+ * | Status    | Meaning                                     |
+ * |-----------|---------------------------------------------|
+ * | healthy   | All components operational                  |
+ * | degraded  | Some components unhealthy but core working  |
+ * | unhealthy | Critical components down                    |
  */
-export type HealthStatus = 'healthy' | 'unhealthy';
+export type HealthStatus = 'healthy' | 'degraded' | 'unhealthy';
 
 /**
  * Component health status
  */
-export type ComponentHealth = 'healthy' | 'unhealthy';
+export type ComponentHealthStatus = 'healthy' | 'degraded' | 'unhealthy';
+
+/**
+ * Database health details
+ */
+export interface DatabaseHealthDetails {
+  /** Configured connection pool size */
+  pool_size?: number;
+  /** Connections currently in use */
+  pool_checkedout?: number;
+  /** Overflow connections in use */
+  pool_overflow?: number;
+  /** Connections available in pool */
+  pool_checkedin?: number;
+}
+
+/**
+ * Redis health details
+ */
+export interface RedisHealthDetails {
+  /** Human-readable memory usage (e.g., "1.2MB") */
+  used_memory_human?: string;
+  /** Number of connected clients */
+  connected_clients?: number;
+  /** Server uptime in seconds */
+  uptime_in_seconds?: number;
+  /** Redis server version */
+  redis_version?: string;
+}
+
+/**
+ * AI Runtime health details
+ */
+export interface AIRuntimeHealthDetails {
+  /** Runtime instance identifier */
+  runtime_id?: string;
+  /** List of loaded model IDs */
+  models_loaded?: string[];
+  /** Whether GPU acceleration is available */
+  gpu_available?: boolean;
+  /** Hardware type (cpu, gpu, jetson) */
+  hardware_type?: string;
+}
+
+/**
+ * VAS (Video Analytics Service) health details
+ */
+export interface VASHealthDetails {
+  /** VAS service version */
+  version?: string;
+  /** VAS service name */
+  service?: string;
+}
+
+/**
+ * NLP Chat Service health details
+ */
+export interface NLPChatHealthDetails {
+  /** NLP Chat Service version */
+  version?: string;
+  /** NLP Chat Service name */
+  service?: string;
+  /** Whether the chat service is enabled */
+  enabled?: boolean;
+  /** Ollama LLM status */
+  ollama_status?: string;
+  /** Available LLM models */
+  models_available?: string[];
+}
+
+/**
+ * Extended component health with latency and details
+ */
+export interface ComponentHealth {
+  /** Component health status */
+  status: ComponentHealthStatus;
+  /** Health check latency in milliseconds */
+  latency_ms?: number | null;
+  /** Error message if unhealthy or degraded */
+  error?: string | null;
+  /** Component-specific details */
+  details?: DatabaseHealthDetails | RedisHealthDetails | AIRuntimeHealthDetails | VASHealthDetails | NLPChatHealthDetails | null;
+}
 
 /**
  * Health components breakdown (F6 §4.1)
@@ -42,6 +130,8 @@ export interface HealthComponents {
   database?: ComponentHealth;
   redis?: ComponentHealth;
   ai_runtime?: ComponentHealth;
+  vas?: ComponentHealth;
+  nlp_chat?: ComponentHealth;
 }
 
 /**
@@ -64,6 +154,9 @@ export interface HealthResponse {
 
   /** Per-component health - MAY be absent */
   components?: HealthComponents;
+
+  /** Service uptime in seconds */
+  uptime_seconds?: number | null;
 
   /** Error message if unhealthy - MAY be null */
   error?: string | null;
@@ -389,4 +482,112 @@ export interface ViolationsQueryParams {
 
   /** Items per page */
   limit?: number;
+}
+
+// ============================================================================
+// Chat Domain (NLP Chat Service)
+// ============================================================================
+
+/**
+ * Chat request to NLP Chat Service
+ *
+ * Source: POST /api/v1/chat
+ */
+export interface ChatRequest {
+  /** Natural language question about the data */
+  question: string;
+
+  /** Whether to include raw SQL results in response */
+  include_raw_data?: boolean;
+}
+
+/**
+ * Chat response from NLP Chat Service
+ *
+ * Source: POST /api/v1/chat
+ */
+export interface ChatResponse {
+  /** Natural language answer to the question */
+  answer: string;
+
+  /** Original question that was asked */
+  question: string;
+
+  /** Generated SQL query (for debugging/transparency) */
+  generated_sql?: string | null;
+
+  /** Raw data from SQL query - only present if include_raw_data=true */
+  raw_data?: Record<string, unknown>[] | null;
+
+  /** Number of rows returned by the query */
+  row_count: number;
+
+  /** Time taken to execute the query in milliseconds */
+  execution_time_ms: number;
+
+  /** When the response was generated */
+  timestamp: ISOTimestamp;
+}
+
+/**
+ * Chat service status response
+ *
+ * Source: GET /api/v1/chat/status
+ */
+export interface ChatStatusResponse {
+  /** Whether the NLP Chat Service is enabled */
+  enabled: boolean;
+
+  /** Status message */
+  message?: string;
+}
+
+/**
+ * Chat error response
+ *
+ * Returned when chat request fails
+ */
+export interface ChatErrorDetail {
+  /** Error code */
+  error: 'connection_error' | 'timeout' | 'validation_error' | 'service_disabled' | 'llm_error';
+
+  /** Human-readable error message */
+  message: string;
+
+  /** Original question */
+  question: string;
+
+  /** Generated SQL if available (for debugging) */
+  generated_sql?: string | null;
+}
+
+/**
+ * Chat message for UI display
+ *
+ * Used internally by frontend to track conversation history
+ */
+export interface ChatMessage {
+  /** Unique message ID */
+  id: string;
+
+  /** Message role - user or assistant */
+  role: 'user' | 'assistant';
+
+  /** Message content */
+  content: string;
+
+  /** When message was created */
+  timestamp: ISOTimestamp;
+
+  /** Whether message is currently loading (for assistant messages) */
+  isLoading?: boolean;
+
+  /** Error information if request failed */
+  error?: ChatErrorDetail | null;
+
+  /** Generated SQL for transparency (assistant messages only) */
+  generatedSql?: string | null;
+
+  /** Execution time in ms (assistant messages only) */
+  executionTimeMs?: number | null;
 }

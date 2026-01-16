@@ -128,6 +128,50 @@ class Settings(BaseSettings):
         description="Access token expiry in minutes",
     )
 
+    # Health Check Timeouts (in seconds)
+    health_check_db_timeout: float = Field(
+        default=5.0,
+        ge=1.0,
+        le=30.0,
+        description="Database health check timeout in seconds",
+    )
+    health_check_redis_timeout: float = Field(
+        default=3.0,
+        ge=1.0,
+        le=30.0,
+        description="Redis health check timeout in seconds",
+    )
+    health_check_ai_runtime_timeout: float = Field(
+        default=10.0,
+        ge=1.0,
+        le=60.0,
+        description="AI Runtime health check timeout in seconds",
+    )
+    health_check_vas_timeout: float = Field(
+        default=5.0,
+        ge=1.0,
+        le=30.0,
+        description="VAS health check timeout in seconds",
+    )
+    health_check_nlp_chat_timeout: float = Field(
+        default=5.0,
+        ge=1.0,
+        le=30.0,
+        description="NLP Chat Service health check timeout in seconds",
+    )
+
+    # NLP Chat Service Configuration
+    nlp_chat_service_url: str = Field(
+        default="http://localhost:8081",
+        description="NLP Chat Service base URL",
+    )
+    nlp_chat_timeout_seconds: int = Field(
+        default=120,
+        ge=30,
+        le=300,
+        description="NLP Chat Service request timeout (LLM calls can be slow)",
+    )
+
     @property
     def is_development(self) -> bool:
         """Check if running in development mode."""

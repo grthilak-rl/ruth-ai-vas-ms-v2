@@ -16,7 +16,7 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from app import __version__
 from app.api.internal import events as internal_events
-from app.api.v1 import analytics, devices, events, health, models, violations
+from app.api.v1 import analytics, chat, devices, events, health, models, violations
 from app.core.config import get_settings
 from app.core.errors import register_exception_handlers
 from app.core.lifespan import lifespan
@@ -64,6 +64,7 @@ def create_application() -> FastAPI:
     app.include_router(violations.router, prefix="/api/v1")
     app.include_router(analytics.router, prefix="/api/v1")
     app.include_router(models.router, prefix="/api/v1")
+    app.include_router(chat.router, prefix="/api/v1")
 
     # Internal endpoints (no authentication for vertical slice)
     app.include_router(internal_events.router, prefix="/internal")

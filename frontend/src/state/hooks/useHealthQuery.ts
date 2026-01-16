@@ -34,7 +34,8 @@ export function useHealthQuery() {
  * | Backend State                              | Frontend Display |
  * |--------------------------------------------|------------------|
  * | status = "healthy"                         | "healthy"        |
- * | status = "unhealthy" + component unhealthy | "degraded"       |
+ * | status = "degraded"                        | "degraded"       |
+ * | status = "unhealthy"                       | "degraded"       |
  * | API call fails                             | "offline"        |
  */
 export function deriveGlobalStatus(
@@ -45,11 +46,12 @@ export function deriveGlobalStatus(
     return 'offline';
   }
 
-  if (data.status === 'unhealthy') {
-    return 'degraded';
+  if (data.status === 'healthy') {
+    return 'healthy';
   }
 
-  return 'healthy';
+  // Both 'degraded' and 'unhealthy' from backend show as 'degraded' in UI
+  return 'degraded';
 }
 
 /**

@@ -8,9 +8,12 @@ from collections.abc import AsyncGenerator
 from typing import Annotated
 
 from fastapi import Depends
+from redis.asyncio import Redis
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core.config import get_settings
 from app.deps.db import get_db
+from app.integrations.nlp_chat import NLPChatClient
 from app.integrations.vas import VASClient
 from app.services import (
     DeviceService,
@@ -44,6 +47,83 @@ def get_vas_client() -> VASClient:
     if _vas_client is None:
         raise RuntimeError("VAS client not initialized")
     return _vas_client
+
+
+def get_vas_client_optional() -> VASClient | None:
+    """Get the VAS client instance if available.
+
+    Returns:
+        VAS client or None if not initialized
+    """
+    return _vas_client
+
+
+# -----------------------------------------------------------------------------
+# Redis Client Dependency
+# -----------------------------------------------------------------------------
+
+# Global Redis client instance (initialized on startup)
+_redis_client: Redis | None = None
+
+
+def set_redis_client(client: Redis) -> None:
+    """Set the global Redis client instance (called during app startup)."""
+    global _redis_client
+    _redis_client = client
+
+
+def get_redis_client() -> Redis:
+    """Get the Redis client instance.
+
+    Raises:
+        RuntimeError: If Redis client is not initialized
+    """
+    if _redis_client is None:
+        raise RuntimeError("Redis client not initialized")
+    return _redis_client
+
+
+def get_redis_client_optional() -> Redis | None:
+    """Get the Redis client instance if available.
+
+    Returns:
+        Redis client or None if not initialized
+    """
+    return _redis_client
+
+
+# -----------------------------------------------------------------------------
+# NLP Chat Client Dependency
+# -----------------------------------------------------------------------------
+
+# Global NLP Chat client instance (initialized on startup)
+_nlp_chat_client: NLPChatClient | None = None
+
+
+def set_nlp_chat_client(client: NLPChatClient) -> None:
+    """Set the global NLP Chat client instance (called during app startup)."""
+    global _nlp_chat_client
+    _nlp_chat_client = client
+
+
+def get_nlp_chat_client() -> NLPChatClient:
+    """Get the NLP Chat client instance.
+
+    Raises:
+        RuntimeError: If NLP Chat client is not initialized
+    """
+    if _nlp_chat_client is None:
+        raise RuntimeError("NLP Chat client not initialized")
+    return _nlp_chat_client
+
+
+def get_nlp_chat_client_optional() -> NLPChatClient | None:
+    """Get the NLP Chat client instance if available.
+
+    Returns:
+        NLP Chat client or None if not initialized
+    """
+    return _nlp_chat_client
 
 
 # -----------------------------------------------------------------------------
@@ -146,3 +226,4 @@ EvidenceServiceDep = Annotated[EvidenceService, Depends(get_evidence_service)]
 EventIngestionServiceDep = Annotated[
     EventIngestionService, Depends(get_event_ingestion_service)
 ]
+NLPChatClientDep = Annotated[NLPChatClient, Depends(get_nlp_chat_client)]

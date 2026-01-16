@@ -1,0 +1,126 @@
+/**
+ * System Health Card Styles
+ *
+ * Health status overview card for the Overview dashboard
+ */
+
+.system-health-card {
+  background: #fff;
+  border: 1px solid #e0e0e0;
+  border-radius: 8px;
+  overflow: hidden;
+}
+
+.system-health-card--error {
+  border-color: #f5c6cb;
+  background: #fdf7f7;
+}
+
+.system-health-card__header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0.875rem 1.25rem;
+  border-bottom: 1px solid #eee;
+}
+
+.system-health-card__title {
+  margin: 0;
+  font-size: 0.875rem;
+  font-weight: 600;
+  color: #1a1a1a;
+}
+
+.system-health-card__link {
+  font-size: 0.8125rem;
+  color: #1a73e8;
+  text-decoration: none;
+}
+
+.system-health-card__link:hover {
+  text-decoration: underline;
+}
+
+.system-health-card__body {
+  padding: 1rem 1.25rem;
+}
+
+.system-health-card__body--error {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.5rem;
+  min-height: 100px;
+}
+
+.system-health-card__error-icon {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 1.5rem;
+  height: 1.5rem;
+  background: #d93025;
+  color: #fff;
+  font-size: 0.875rem;
+  font-weight: 700;
+  border-radius: 50%;
+}
+
+.system-health-card__error-text {
+  color: #666;
+  font-size: 0.875rem;
+}
+
+.system-health-card__components {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: space-around;
+  gap: 0.5rem;
+  padding: 0.5rem 0;
+}
+
+.system-health-card__footer {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-top: 1rem;
+  padding-top: 0.75rem;
+  border-top: 1px solid #eee;
+}
+
+.system-health-card__meta {
+  font-size: 0.75rem;
+  color: #666;
+}
+
+.system-health-card__meta strong {
+  font-weight: 600;
+  color: #333;
+}
+
+/* Responsive */
+@media (max-width: 768px) {
+  .system-health-card__header {
+    padding: 0.75rem 1rem;
+  }
+
+  .system-health-card__body {
+    padding: 0.75rem 1rem;
+  }
+
+  .system-health-card__components {
+    gap: 0.25rem;
+  }
+
+  .system-health-card__footer {
+    flex-direction: column;
+    gap: 0.25rem;
+    align-items: flex-start;
+  }
+}
+
+@media (max-width: 480px) {
+  .system-health-card__components {
+    justify-content: center;
+  }
+}

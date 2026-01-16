@@ -47,9 +47,15 @@ export type {
   UUID,
   // Health
   HealthStatus,
+  ComponentHealthStatus,
   ComponentHealth,
   HealthComponents,
   HealthResponse,
+  DatabaseHealthDetails,
+  RedisHealthDetails,
+  AIRuntimeHealthDetails,
+  VASHealthDetails,
+  NLPChatHealthDetails,
   // Violations
   ViolationType,
   ViolationStatus,
@@ -71,6 +77,12 @@ export type {
   // Analytics
   AnalyticsTotals,
   AnalyticsSummaryResponse,
+  // Chat
+  ChatRequest,
+  ChatResponse,
+  ChatStatusResponse,
+  ChatErrorDetail,
+  ChatMessage,
 } from './api';
 
 // Validators
@@ -92,6 +104,9 @@ export {
   // Health
   fetchHealth,
   fetchHealthWithFallback,
+  formatUptime,
+  getTimeSinceLastCheck,
+  getComponentDisplayName,
   // Violations
   fetchViolations,
   fetchViolation,
@@ -123,6 +138,11 @@ export {
   getStalenessMessage,
   formatCount,
   formatRatio,
+  // Chat
+  sendChatMessage,
+  getChatStatus,
+  enableChatService,
+  disableChatService,
 } from './api';
 
 export type {
@@ -159,6 +179,17 @@ export {
   useModelsStatusQuery,
   // Analytics
   useAnalyticsQuery,
+  // Chat
+  useChatStatusQuery,
+  useChatMutation,
+  useEnableChatMutation,
+  useDisableChatMutation,
+  createUserMessage,
+  createAssistantMessage,
+  createLoadingMessage,
+  createErrorMessage,
+  generateMessageId,
+  formatExecutionTime,
 } from './hooks';
 
 // GlobalStatus type from health hook (derived from HealthResponse)

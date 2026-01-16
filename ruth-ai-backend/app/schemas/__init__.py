@@ -1,5 +1,17 @@
 """Pydantic schemas for Ruth AI Backend API."""
 
+from app.schemas.health import (
+    AIRuntimeDetails,
+    ComponentDetails,
+    ComponentHealth,
+    DatabaseDetails,
+    HealthResponse,
+    HealthStatus,
+    LivenessResponse,
+    ReadinessResponse,
+    RedisDetails,
+    VASDetails,
+)
 from app.schemas.analytics import (
     AnalyticsComparison,
     AnalyticsNotImplementedResponse,
@@ -56,6 +68,11 @@ from app.schemas.violation import (
     ViolationResponse,
     ViolationStatusUpdateRequest,
 )
+from app.schemas.chat import (
+    ChatErrorDetail,
+    ChatRequest,
+    ChatResponse,
+)
 
 __all__ = [
     # Device schemas
@@ -110,4 +127,19 @@ __all__ = [
     "ErrorResponse",
     "ValidationErrorDetail",
     "ValidationErrorResponse",
+    # Health schemas
+    "AIRuntimeDetails",
+    "ComponentDetails",
+    "ComponentHealth",
+    "DatabaseDetails",
+    "HealthResponse",
+    "HealthStatus",
+    "LivenessResponse",
+    "ReadinessResponse",
+    "RedisDetails",
+    "VASDetails",
+    # Chat schemas
+    "ChatErrorDetail",
+    "ChatRequest",
+    "ChatResponse",
 ]

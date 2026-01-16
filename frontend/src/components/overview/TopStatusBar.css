@@ -1,0 +1,311 @@
+/**
+ * Top Status Bar Styles
+ *
+ * Layout: 50% metrics cards (left) | 50% system health (right)
+ * Aligns with the two-column layout below:
+ * - Metrics cards align with Recent Violations
+ * - System Health aligns with Ask Ruth + Camera Grid
+ */
+
+.top-status-bar {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 1rem;
+  /* No padding/background - let children handle their own styling */
+}
+
+/* Metric Cards Section - Left Half */
+.top-status-bar__cards {
+  display: flex;
+  gap: 0.75rem;
+}
+
+.top-status-bar__card {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  flex: 1;
+  padding: 1.25rem 1rem;
+  background: #fff;
+  border: 1px solid #e0e0e0;
+  border-radius: 8px;
+  text-align: center;
+  min-width: 0;
+  transition: box-shadow 0.15s ease, border-color 0.15s ease;
+}
+
+.top-status-bar__card:hover {
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.08);
+}
+
+.top-status-bar__card--alert {
+  background: #fef3f2;
+  border-color: #fecaca;
+}
+
+.top-status-bar__card--alert:hover {
+  border-color: #f87171;
+}
+
+.top-status-bar__card--loading {
+  opacity: 0.7;
+}
+
+.top-status-bar__card--error {
+  background: #fdf7f7;
+  border-color: #f5c6cb;
+}
+
+.top-status-bar__card-icon {
+  font-size: 1rem;
+  color: #666;
+  margin-bottom: 0.25rem;
+}
+
+.top-status-bar__card-icon--alert {
+  color: #c5221f;
+}
+
+.top-status-bar__card-value {
+  font-size: 2rem;
+  font-weight: 700;
+  color: #1a1a1a;
+  line-height: 1.2;
+}
+
+.top-status-bar__card-value--alert {
+  color: #c5221f;
+}
+
+.top-status-bar__card-label {
+  font-size: 0.6875rem;
+  font-weight: 600;
+  color: #666;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  margin-top: 0.375rem;
+}
+
+.top-status-bar__card-link {
+  font-size: 0.75rem;
+  color: #1a73e8;
+  text-decoration: none;
+  margin-top: 0.625rem;
+}
+
+.top-status-bar__card-link:hover {
+  text-decoration: underline;
+}
+
+/* System Health Panel - Right Half */
+.top-status-bar__health {
+  display: flex;
+  flex-direction: column;
+  padding: 1rem 1.25rem;
+  background: #fff;
+  border: 1px solid #e0e0e0;
+  border-radius: 8px;
+}
+
+.top-status-bar__health--healthy {
+  border-left: 4px solid #34a853;
+}
+
+.top-status-bar__health--degraded {
+  border-left: 4px solid #fbbc04;
+}
+
+.top-status-bar__health--unhealthy {
+  border-left: 4px solid #d93025;
+}
+
+.top-status-bar__health-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 0.75rem;
+  padding-bottom: 0.625rem;
+  border-bottom: 1px solid #eee;
+}
+
+.top-status-bar__health-title {
+  font-size: 0.875rem;
+  font-weight: 600;
+  color: #1a1a1a;
+}
+
+.top-status-bar__health-badge {
+  font-size: 0.625rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+  padding: 0.1875rem 0.625rem;
+  border-radius: 10px;
+}
+
+.top-status-bar__health-badge--healthy {
+  background: #e6f4ea;
+  color: #137333;
+}
+
+.top-status-bar__health-badge--degraded {
+  background: #fef7e0;
+  color: #b06000;
+}
+
+.top-status-bar__health-badge--unhealthy {
+  background: #fce8e6;
+  color: #c5221f;
+}
+
+.top-status-bar__health-grid {
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
+  gap: 0.5rem 1.5rem;
+  flex: 1;
+  align-content: center;
+}
+
+.top-status-bar__health-item {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.25rem 0;
+}
+
+.top-status-bar__health-dot {
+  font-size: 0.75rem;
+  line-height: 1;
+}
+
+.top-status-bar__health-item--healthy .top-status-bar__health-dot {
+  color: #34a853;
+}
+
+.top-status-bar__health-item--degraded .top-status-bar__health-dot {
+  color: #fbbc04;
+}
+
+.top-status-bar__health-item--unhealthy .top-status-bar__health-dot {
+  color: #d93025;
+}
+
+.top-status-bar__health-item--loading .top-status-bar__health-dot {
+  color: #999;
+  animation: dot-pulse 1.5s ease-in-out infinite;
+}
+
+.top-status-bar__health-name {
+  font-size: 0.8125rem;
+  font-weight: 500;
+  color: #1a1a1a;
+  flex: 1;
+}
+
+.top-status-bar__health-latency {
+  font-size: 0.6875rem;
+  color: #999;
+  font-variant-numeric: tabular-nums;
+}
+
+.top-status-bar__health-footer {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-top: 0.75rem;
+  padding-top: 0.625rem;
+  border-top: 1px solid #eee;
+}
+
+.top-status-bar__health-uptime {
+  font-size: 0.75rem;
+  color: #666;
+}
+
+.top-status-bar__health-uptime strong {
+  color: #333;
+}
+
+.top-status-bar__health-link {
+  font-size: 0.75rem;
+  color: #1a73e8;
+  text-decoration: none;
+}
+
+.top-status-bar__health-link:hover {
+  text-decoration: underline;
+}
+
+.top-status-bar__health-error {
+  font-size: 0.75rem;
+  color: #c5221f;
+  text-align: center;
+  padding: 0.5rem;
+}
+
+@keyframes dot-pulse {
+  0%, 100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.4;
+  }
+}
+
+/* Responsive */
+@media (max-width: 1024px) {
+  .top-status-bar {
+    grid-template-columns: 1fr;
+    gap: 0.75rem;
+  }
+
+  .top-status-bar__cards {
+    flex-wrap: wrap;
+  }
+
+  .top-status-bar__card {
+    min-width: calc(33.33% - 0.5rem);
+    flex: 1 1 calc(33.33% - 0.5rem);
+  }
+
+  .top-status-bar__health-grid {
+    grid-template-columns: repeat(3, 1fr);
+  }
+}
+
+@media (max-width: 768px) {
+  .top-status-bar__cards {
+    gap: 0.5rem;
+  }
+
+  .top-status-bar__card {
+    min-width: calc(50% - 0.25rem);
+    flex: 1 1 calc(50% - 0.25rem);
+    padding: 1rem 0.75rem;
+  }
+
+  .top-status-bar__card-value {
+    font-size: 1.5rem;
+  }
+
+  .top-status-bar__health {
+    padding: 0.875rem 1rem;
+  }
+
+  .top-status-bar__health-grid {
+    grid-template-columns: repeat(2, 1fr);
+    gap: 0.375rem 1rem;
+  }
+}
+
+@media (max-width: 480px) {
+  .top-status-bar__card {
+    min-width: 100%;
+    flex: 1 1 100%;
+  }
+
+  .top-status-bar__health-grid {
+    grid-template-columns: 1fr;
+  }
+}

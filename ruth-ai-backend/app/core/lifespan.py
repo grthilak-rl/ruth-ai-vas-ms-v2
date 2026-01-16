@@ -2,10 +2,12 @@
 
 Provides:
 - Lifespan context manager for FastAPI
-- Startup hooks (database init, VAS client init, logging setup)
-- Shutdown hooks (database cleanup, VAS client cleanup)
+- Startup hooks (database init, Redis init, VAS client init, NLP Chat client init)
+- Shutdown hooks (cleanup for all clients)
+- Startup time tracking for uptime calculation
 """
 
+import time
 from collections.abc import AsyncGenerator
 from contextlib import asynccontextmanager
 
@@ -14,13 +16,39 @@ from fastapi import FastAPI
 from app.core.config import get_settings
 from app.core.database import close_database, init_database
 from app.core.logging import configure_logging, get_logger
-from app.deps.services import set_vas_client
+from app.core.redis import close_redis, init_redis
+from app.deps.services import set_nlp_chat_client, set_redis_client, set_vas_client
+from app.integrations.nlp_chat import NLPChatClient
 from app.integrations.vas import VASClient
 
 logger = get_logger(__name__)
 
-# Global VAS client for cleanup
+# Global clients for cleanup
 _vas_client: VASClient | None = None
+_nlp_chat_client: NLPChatClient | None = None
+
+# Startup timestamp for uptime calculation
+_startup_time: float | None = None
+
+
+def get_startup_time() -> float | None:
+    """Get the application startup timestamp.
+
+    Returns:
+        Unix timestamp when application started, or None if not started
+    """
+    return _startup_time
+
+
+def get_uptime_seconds() -> int | None:
+    """Get the application uptime in seconds.
+
+    Returns:
+        Uptime in seconds, or None if application not started
+    """
+    if _startup_time is None:
+        return None
+    return int(time.time() - _startup_time)
 
 
 @asynccontextmanager
@@ -30,19 +58,26 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     Handles startup and shutdown events for the FastAPI application.
 
     Startup:
-        1. Configure logging
-        2. Initialize database connection pool
-        3. Initialize VAS client
+        1. Record startup time
+        2. Configure logging
+        3. Initialize database connection pool
+        4. Initialize Redis connection pool
+        5. Initialize VAS client
+        6. Initialize NLP Chat client (connects to separate microservice)
 
     Shutdown:
-        1. Close VAS client
-        2. Close database connections
-        3. Release any held resources
+        1. Close NLP Chat client
+        2. Close VAS client
+        3. Close Redis connections
+        4. Close database connections
 
     Args:
         app: FastAPI application instance
     """
-    global _vas_client
+    global _vas_client, _nlp_chat_client, _startup_time
+
+    # Record startup time
+    _startup_time = time.time()
 
     # ===== STARTUP =====
     settings = get_settings()
@@ -64,6 +99,18 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
         logger.error("Failed to initialize database", error=str(e))
         raise
 
+    # Initialize Redis
+    try:
+        redis_client = await init_redis()
+        set_redis_client(redis_client)
+        logger.info("Redis client initialized")
+    except Exception as e:
+        logger.warning(
+            "Failed to initialize Redis client",
+            error=str(e),
+        )
+        # Redis is optional - health check will show as unhealthy
+
     # Initialize VAS client
     try:
         _vas_client = VASClient(
@@ -82,12 +129,49 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
         # VAS is optional for some operations, so we don't raise
         # but the health check will show VAS as unhealthy
 
+    # Initialize NLP Chat client (connects to separate microservice)
+    try:
+        _nlp_chat_client = NLPChatClient(
+            base_url=settings.nlp_chat_service_url,
+            timeout_seconds=settings.nlp_chat_timeout_seconds,
+        )
+        set_nlp_chat_client(_nlp_chat_client)
+
+        # Check if NLP Chat Service is available
+        is_healthy = await _nlp_chat_client.is_healthy()
+        if is_healthy:
+            is_enabled = await _nlp_chat_client.is_enabled()
+            logger.info(
+                "NLP Chat client initialized",
+                base_url=settings.nlp_chat_service_url,
+                service_enabled=is_enabled,
+            )
+        else:
+            logger.warning(
+                "NLP Chat Service not reachable, chat functionality will be unavailable",
+                base_url=settings.nlp_chat_service_url,
+            )
+    except Exception as e:
+        logger.warning(
+            "Failed to initialize NLP Chat client, chat functionality will be unavailable",
+            error=str(e),
+        )
+        # NLP Chat is optional - chat endpoint will return 502 if unavailable
+
     logger.info("Ruth AI Backend startup complete")
 
     yield  # Application runs here
 
     # ===== SHUTDOWN =====
     logger.info("Shutting down Ruth AI Backend")
+
+    # Close NLP Chat client
+    if _nlp_chat_client:
+        try:
+            await _nlp_chat_client.close()
+            logger.info("NLP Chat client closed")
+        except Exception as e:
+            logger.error("Error closing NLP Chat client", error=str(e))
 
     # Close VAS client
     if _vas_client:
@@ -96,6 +180,12 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
             logger.info("VAS client closed")
         except Exception as e:
             logger.error("Error closing VAS client", error=str(e))
+
+    # Close Redis connections
+    try:
+        await close_redis()
+    except Exception as e:
+        logger.error("Error during Redis shutdown", error=str(e))
 
     # Close database connections
     try:

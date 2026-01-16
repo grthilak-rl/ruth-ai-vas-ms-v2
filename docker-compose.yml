@@ -4,6 +4,8 @@
 # This configuration starts all Ruth AI services together:
 # - ruth-ai-backend: FastAPI backend API (port 8090 on host, 8080 internal)
 # - ruth-ai-frontend: React UI served via nginx (port 3300)
+# - ruth-ai-nlp-chat: NLP Chat microservice (port 8081)
+# - ollama: LLM service for NLP (port 11434)
 # - fall-detection-model: AI inference service (port 8010 on host, 8000 internal)
 # - postgres: PostgreSQL database (port 5434 on host, 5432 internal)
 # - redis: Redis cache (port 6382 on host, 6379 internal)
@@ -20,6 +22,8 @@
 #   VAS Frontend:       3200 (external - already running)
 #   Ruth AI Frontend:   3300 (this stack)
 #   Ruth AI Backend:    8090 (this stack, host) -> 8080 (container)
+#   Ruth AI NLP Chat:   8081 (this stack)
+#   Ollama LLM:         11434 (this stack)
 #   Fall Detection AI:  8010 (this stack, host) -> 8000 (container)
 #   PostgreSQL:         5434 (this stack, host) -> 5432 (container)
 #   Redis:              6382 (this stack, host) -> 6379 (container)
@@ -142,6 +146,9 @@ services:
       JWT_SECRET_KEY: ${JWT_SECRET_KEY:-ruth-ai-dev-jwt-secret-change-in-prod}
       JWT_ALGORITHM: HS256
       JWT_EXPIRY_MINUTES: 60
+      # NLP Chat Service (optional - runs as separate microservice)
+      NLP_CHAT_SERVICE_URL: http://ruth-ai-nlp-chat:8081
+      NLP_CHAT_TIMEOUT_SECONDS: ${NLP_CHAT_TIMEOUT_SECONDS:-120}
     depends_on:
       postgres:
         condition: service_healthy
@@ -149,6 +156,7 @@ services:
         condition: service_healthy
       fall-detection-model:
         condition: service_healthy
+      # NLP Chat is optional - backend starts regardless of NLP service status
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:8080/api/v1/health"]
       interval: 30s
@@ -157,6 +165,110 @@ services:
       start_period: 30s
     networks:
       - ruth-ai-internal
+
+  # ============================================
+  # Ruth AI NLP Chat Service (Standalone Microservice)
+  # Natural language queries using Ollama LLM
+  # Can be stopped/started independently via /control/enable and /control/disable
+  # ============================================
+  ruth-ai-nlp-chat:
+    build:
+      context: ./ruth-ai-nlp-chat
+      dockerfile: Dockerfile
+      target: development
+    container_name: ruth-ai-vas-nlp-chat
+    restart: unless-stopped
+    ports:
+      - "8081:8081"
+    environment:
+      # Application
+      NLP_ENV: ${RUTH_AI_ENV:-development}
+      NLP_LOG_LEVEL: ${RUTH_AI_LOG_LEVEL:-info}
+      HOST: 0.0.0.0
+      PORT: 8081
+      # Database (read-only queries to same DB as backend)
+      DATABASE_URL: postgresql+asyncpg://${POSTGRES_USER:-ruth}:${POSTGRES_PASSWORD:-ruth_dev_password}@postgres:5432/${POSTGRES_DB:-ruth_ai}
+      # Ollama LLM Configuration
+      OLLAMA_BASE_URL: http://ollama:11434
+      OLLAMA_SQL_MODEL: ${OLLAMA_SQL_MODEL:-llama3.2:1b}
+      OLLAMA_NLG_MODEL: ${OLLAMA_NLG_MODEL:-llama3.2:1b}
+      OLLAMA_SQL_TEMPERATURE: ${OLLAMA_SQL_TEMPERATURE:-0.0}
+      OLLAMA_NLG_TEMPERATURE: ${OLLAMA_NLG_TEMPERATURE:-0.3}
+      OLLAMA_TIMEOUT_SECONDS: ${OLLAMA_TIMEOUT_SECONDS:-300}
+      # Chat Configuration
+      CHAT_MAX_RESULT_ROWS: ${CHAT_MAX_RESULT_ROWS:-100}
+      CHAT_ALLOWED_TABLES: devices,stream_sessions,events,violations,evidence
+      # Service Control (can be toggled via API)
+      NLP_SERVICE_ENABLED: ${NLP_SERVICE_ENABLED:-true}
+    depends_on:
+      postgres:
+        condition: service_healthy
+      ollama-init:
+        condition: service_completed_successfully
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8081/health/live"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 10s
+    networks:
+      - ruth-ai-internal
+    deploy:
+      resources:
+        limits:
+          memory: 1G
+        reservations:
+          memory: 256M
+
+  # ============================================
+  # Ollama LLM Service
+  # Provides SQL generation and natural language response models
+  # ============================================
+  ollama:
+    image: ollama/ollama:latest
+    container_name: ruth-ai-vas-ollama
+    restart: unless-stopped
+    ports:
+      - "11434:11434"
+    volumes:
+      - ruth-ollama-data:/root/.ollama
+    healthcheck:
+      test: ["CMD-SHELL", "ollama list || exit 1"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 30s
+    networks:
+      - ruth-ai-internal
+    deploy:
+      resources:
+        limits:
+          memory: 8G
+        reservations:
+          memory: 4G
+
+  # ============================================
+  # Ollama Model Initialization
+  # Automatically pulls required models on first startup
+  # ============================================
+  ollama-init:
+    image: ollama/ollama:latest
+    container_name: ruth-ai-vas-ollama-init
+    depends_on:
+      ollama:
+        condition: service_healthy
+    entrypoint: ["/bin/sh", "-c"]
+    command:
+      - |
+        echo "Pulling LLM models for NLP Chat..."
+        ollama pull llama3.2:1b
+        ollama pull anindya/prem1b-sql-ollama-fp116
+        echo "Model pull complete!"
+    environment:
+      OLLAMA_HOST: ollama:11434
+    networks:
+      - ruth-ai-internal
+    restart: "no"
 
   # ============================================
   # Ruth AI Frontend (React UI via nginx)
@@ -205,3 +317,5 @@ volumes:
     name: ruth-ai-vas-postgres-data
   ruth-redis-data:
     name: ruth-ai-vas-redis-data
+  ruth-ollama-data:
+    name: ruth-ai-vas-ollama-data

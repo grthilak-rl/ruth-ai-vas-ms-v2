@@ -1,4 +1,4 @@
-import { useMemo } from 'react';
+import { useMemo, useCallback, useState } from 'react';
 import { Navigate } from 'react-router-dom';
 import {
   useHealthQuery,
@@ -16,15 +16,17 @@ import {
  *
  * Admin-only diagnostic view for system and model health.
  *
- * Per F4 §9:
- * - Service status cards (Backend, AI Runtime, Video)
+ * Features:
+ * - Service status cards with expandable detailed metrics
  * - Model health summary
  * - Audit visibility for rollbacks and health changes
+ * - Manual refresh button with loading state
+ * - System uptime display
  *
  * Per E8 Constraints:
  * - Only visible to Admin role
  * - No pod, container, node, or process names
- * - No raw metrics
+ * - Human-readable descriptions
  * - Read-only diagnostic surface
  */
 export function SystemHealthPage() {
@@ -44,25 +46,43 @@ function SystemHealthContent() {
     isLoading: isHealthLoading,
     isError: isHealthError,
     refetch: refetchHealth,
+    isFetching: isHealthFetching,
   } = useHealthQuery();
 
   const {
     data: modelsData,
     isLoading: isModelsLoading,
+    refetch: refetchModels,
   } = useModelsStatusQuery();
+
+  // Track manual refresh state
+  const [isManualRefresh, setIsManualRefresh] = useState(false);
+
+  // Handle manual refresh
+  const handleRefresh = useCallback(async () => {
+    setIsManualRefresh(true);
+    try {
+      await Promise.all([
+        refetchHealth(),
+        refetchModels(),
+      ]);
+    } finally {
+      setIsManualRefresh(false);
+    }
+  }, [refetchHealth, refetchModels]);
 
   // Generate mock audit events (in production, this would come from API)
   const auditEvents = useMemo<AuditEvent[]>(() => {
     return generateMockAuditEvents();
   }, []);
 
-  // Loading state
-  if (isHealthLoading) {
+  // Loading state (initial load only)
+  if (isHealthLoading && !health) {
     return <SystemHealthSkeleton />;
   }
 
   // Error state
-  if (isHealthError || !health) {
+  if (isHealthError && !health) {
     return (
       <div className="page-container">
         <div className="error-state">
@@ -74,6 +94,11 @@ function SystemHealthContent() {
     );
   }
 
+  // Should not happen, but TypeScript needs this check
+  if (!health) {
+    return <SystemHealthSkeleton />;
+  }
+
   return (
     <SystemHealthView
       health={health}
@@ -81,6 +106,8 @@ function SystemHealthContent() {
       modelsLoading={isModelsLoading}
       auditEvents={auditEvents}
       auditLoading={false}
+      onRefresh={handleRefresh}
+      isRefreshing={isManualRefresh || isHealthFetching}
     />
   );
 }

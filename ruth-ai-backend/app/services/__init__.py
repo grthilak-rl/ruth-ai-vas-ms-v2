@@ -88,6 +88,7 @@ Design Principles:
 from .device_service import DeviceService
 from .event_ingestion_service import EventIngestionService
 from .evidence_service import EvidenceService
+from .health_service import HealthService
 from .exceptions import (
     DeviceError,
     DeviceInactiveError,
@@ -132,6 +133,7 @@ __all__ = [
     "EventIngestionService",
     "ViolationService",
     "EvidenceService",
+    "HealthService",
     # Base Exceptions
     "ServiceError",
     # Device Exceptions
