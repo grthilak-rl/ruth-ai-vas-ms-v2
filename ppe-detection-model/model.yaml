@@ -1,0 +1,380 @@
+# ============================================================================
+# RUTH AI MODEL CONTRACT - PPE Detection Model
+# Schema Version: 1.0.0
+# ============================================================================
+
+# ----------------------------------------------------------------------------
+# SECTION 1: MODEL IDENTITY (REQUIRED)
+# ----------------------------------------------------------------------------
+
+# Unique identifier for this model
+model_id: "ppe_detection"
+
+# Semantic version of this model
+version: "1.0.0"
+
+# Human-readable display name
+display_name: "PPE Detection Model"
+
+# Model description
+description: |
+  Multi-model PPE (Personal Protective Equipment) detection using YOLOv8.
+  Supports detection of: hardhat, vest, goggles, gloves, boots, mask.
+  Operates in three modes: presence detection, violation detection, or full analysis.
+  Uses 12 specialized models for optimal accuracy per PPE item.
+
+# Model author/team
+author: "Ruth AI Team"
+
+# License
+license: "Proprietary"
+
+# Contract schema version this model.yaml conforms to
+contract_schema_version: "1.0.0"
+
+
+# ----------------------------------------------------------------------------
+# SECTION 2: INPUT SPECIFICATION (REQUIRED)
+# ----------------------------------------------------------------------------
+
+input:
+  # Input type: single frame per inference
+  type: "frame"
+
+  # Input format: JPEG encoded images
+  format: "jpeg"
+
+  # Minimum supported input dimensions
+  min_width: 320
+  min_height: 240
+
+  # Maximum supported input dimensions
+  max_width: 4096
+  max_height: 4096
+
+  # Number of color channels (RGB)
+  channels: 3
+
+
+# ----------------------------------------------------------------------------
+# SECTION 3: OUTPUT SPECIFICATION (REQUIRED)
+# ----------------------------------------------------------------------------
+
+output:
+  # Output schema version
+  schema_version: "1.0"
+
+  # Output schema definition
+  schema:
+    # Primary event classification
+    event_type:
+      type: "string"
+      required: true
+      description: "Classification result of the PPE detection"
+      enum:
+        - "ppe_violation"
+        - "ppe_compliant"
+        - "no_person"
+
+    # Confidence score for the classification
+    confidence:
+      type: "float"
+      required: true
+      description: "Overall confidence score for the detection"
+      min: 0.0
+      max: 1.0
+
+    # Bounding boxes for detected PPE items and persons
+    bounding_boxes:
+      type: "array"
+      required: false
+      description: "Detected PPE items and their locations"
+      items:
+        type: "object"
+        properties:
+          x:
+            type: "integer"
+            description: "Top-left X coordinate in pixels"
+          y:
+            type: "integer"
+            description: "Top-left Y coordinate in pixels"
+          width:
+            type: "integer"
+            description: "Box width in pixels"
+          height:
+            type: "integer"
+            description: "Box height in pixels"
+          label:
+            type: "string"
+            description: "PPE item type or detection class"
+          confidence:
+            type: "float"
+            description: "Confidence for this specific detection"
+            min: 0.0
+            max: 1.0
+          status:
+            type: "string"
+            description: "Whether item is present or missing"
+            enum:
+              - "present"
+              - "missing"
+
+    # Additional metadata
+    metadata:
+      type: "object"
+      required: false
+      description: "PPE detection metadata"
+      allowed_keys:
+        - "persons_detected"
+        - "violations"
+        - "ppe_present"
+        - "detection_mode"
+        - "inference_time_ms"
+
+
+# ----------------------------------------------------------------------------
+# SECTION 4: HARDWARE COMPATIBILITY (REQUIRED)
+# ----------------------------------------------------------------------------
+
+hardware:
+  # CPU support
+  supports_cpu: true
+
+  # GPU support (NVIDIA CUDA)
+  supports_gpu: true
+
+  # NVIDIA Jetson support
+  supports_jetson: true
+
+  # Minimum GPU memory required (MB) - for all 12 models
+  min_gpu_memory_mb: 4096
+
+  # Minimum CPU cores recommended
+  min_cpu_cores: 4
+
+  # Minimum system RAM (MB)
+  min_ram_mb: 8192
+
+
+# ----------------------------------------------------------------------------
+# SECTION 5: PERFORMANCE HINTS (REQUIRED)
+# ----------------------------------------------------------------------------
+
+performance:
+  # Expected inference time in milliseconds (all models combined)
+  inference_time_hint_ms: 150
+
+  # Recommended FPS this model can sustain
+  recommended_fps: 15
+
+  # Maximum FPS this model should receive
+  max_fps: 30
+
+  # Warmup iterations needed before stable performance
+  warmup_iterations: 2
+
+
+# ----------------------------------------------------------------------------
+# SECTION 6: RESOURCE LIMITS (OPTIONAL)
+# ----------------------------------------------------------------------------
+
+limits:
+  # Maximum memory this model may use (MB)
+  max_memory_mb: 8192
+
+  # Custom inference timeout (ms)
+  inference_timeout_ms: 10000
+
+  # Custom preprocessing timeout (ms)
+  preprocessing_timeout_ms: 2000
+
+  # Custom postprocessing timeout (ms)
+  postprocessing_timeout_ms: 2000
+
+  # Maximum concurrent inferences
+  max_concurrent_inferences: 2
+
+
+# ----------------------------------------------------------------------------
+# SECTION 7: ENTRY POINTS (OPTIONAL)
+# ----------------------------------------------------------------------------
+
+entry_points:
+  # Inference entry point file
+  inference: "detector.py"
+
+  # No separate preprocessing - handled internally
+  preprocess: null
+
+  # No separate postprocessing - handled internally
+  postprocess: null
+
+
+# ----------------------------------------------------------------------------
+# SECTION 8: DEPENDENCIES (OPTIONAL)
+# ----------------------------------------------------------------------------
+
+dependencies:
+  # Python version requirement
+  python_version: ">=3.9,<3.13"
+
+  # Runtime framework
+  framework: "pytorch"
+  framework_version: ">=2.0.0"
+
+  # Model has custom requirements.txt
+  has_requirements: true
+
+
+# ----------------------------------------------------------------------------
+# SECTION 9: CAPABILITIES (OPTIONAL)
+# ----------------------------------------------------------------------------
+
+capabilities:
+  # Model supports batched inference
+  supports_batching: true
+
+  # Model supports async inference
+  supports_async: false
+
+  # Model provides tracking IDs across frames
+  provides_tracking: false
+
+  # Model provides confidence calibration
+  confidence_calibrated: true
+
+  # Model provides bounding boxes
+  provides_bounding_boxes: true
+
+  # Model provides keypoints (pose estimation)
+  provides_keypoints: false
+
+  # Custom capabilities for PPE detection
+  custom:
+    # Detection modes supported
+    detection_modes:
+      - "presence"
+      - "violation"
+      - "full"
+
+    # PPE items detectable (presence)
+    presence_items:
+      - "hardhat"
+      - "vest"
+      - "goggles"
+      - "gloves"
+      - "boots"
+      - "person"
+
+    # PPE items detectable (violation)
+    violation_items:
+      - "hardhat"
+      - "vest"
+      - "goggles"
+      - "gloves"
+      - "boots"
+      - "mask"
+
+    # Number of specialized models
+    model_count: 12
+
+
+# ----------------------------------------------------------------------------
+# SECTION 10: LABELS & TAGS (OPTIONAL)
+# ----------------------------------------------------------------------------
+
+labels:
+  # Category for UI grouping
+  category: "safety"
+
+  # Tags for search/filtering
+  tags:
+    - "ppe"
+    - "safety"
+    - "construction"
+    - "industrial"
+    - "compliance"
+    - "hardhat"
+    - "vest"
+    - "goggles"
+    - "gloves"
+    - "boots"
+    - "mask"
+
+  # Priority hint for scheduling
+  priority: "high"
+
+
+# ----------------------------------------------------------------------------
+# SECTION 11: VALIDATION (OPTIONAL)
+# ----------------------------------------------------------------------------
+
+validation:
+  # Enable strict output schema validation
+  strict_output_validation: true
+
+  # Enable input dimension validation
+  validate_input_dimensions: true
+
+  # Sample input for warmup validation
+  warmup_input:
+    width: 640
+    height: 480
+    format: "jpeg"
+
+
+# ----------------------------------------------------------------------------
+# SECTION 12: PPE-SPECIFIC CONFIGURATION
+# ----------------------------------------------------------------------------
+
+ppe_config:
+  # Default confidence thresholds per PPE item
+  thresholds:
+    hardhat: 0.5
+    vest: 0.5
+    goggles: 0.45
+    gloves: 0.4
+    boots: 0.45
+    mask: 0.45
+    person: 0.5
+    # Violation thresholds
+    no_hardhat: 0.5
+    no_vest: 0.5
+    no_goggles: 0.45
+    no_gloves: 0.4
+    no_boots: 0.45
+    no_mask: 0.45
+
+  # Critical PPE items (affect severity calculation)
+  critical_items:
+    - "hardhat"
+    - "vest"
+
+  # Model file mapping
+  models:
+    presence:
+      - name: "hardhat"
+        weight_file: "both_classes/hardhat.pt"
+      - name: "vest"
+        weight_file: "both_classes/vest.pt"
+      - name: "goggles"
+        weight_file: "both_classes/goggles.pt"
+      - name: "gloves"
+        weight_file: "both_classes/gloves.pt"
+      - name: "boots"
+        weight_file: "both_classes/boots.pt"
+      - name: "person"
+        weight_file: "both_classes/person.pt"
+    violation:
+      - name: "no_hardhat"
+        weight_file: "no_classes/no_hardhat.pt"
+      - name: "no_vest"
+        weight_file: "no_classes/no_vest.pt"
+      - name: "no_goggles"
+        weight_file: "no_classes/no_goggles.pt"
+      - name: "no_gloves"
+        weight_file: "no_classes/no_gloves.pt"
+      - name: "no_boots"
+        weight_file: "no_classes/no_boots.pt"
+      - name: "no_mask"
+        weight_file: "no_classes/no_mask.pt"

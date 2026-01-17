@@ -1,0 +1,21 @@
+# Core FastAPI and web framework
+fastapi==0.104.1
+uvicorn[standard]==0.24.0
+python-multipart==0.0.6
+
+# YOLOv8 and Computer Vision
+ultralytics==8.0.200
+opencv-python-headless==4.8.1.78
+
+# PyTorch (CPU version - use GPU version for CUDA support)
+# For GPU: torch==2.1.0+cu118 --extra-index-url https://download.pytorch.org/whl/cu118
+torch==2.1.0
+torchvision==0.16.0
+
+# Core utilities
+numpy>=1.24.0,<2.0.0
+Pillow>=10.0.0
+pydantic>=2.4.0
+
+# Optional: for better performance monitoring
+psutil>=5.9.0

@@ -12,19 +12,26 @@ __pycache__/
 *$py.class
 *.so
 
-# Model weights (large files)
+# Model weights (large files) - these are too large for git
 *.pt
 *.pth
 *.onnx
 *.weights
 *.h5
-**/weights/
 
-# Large model/ML directories
-fall-detection-model/
-ppe-detection-model/
-ppe-detection/
+# Weight directories inside model services
+fall-detection-model/weights/
+ppe-detection-model/weights/
 ai/models/*/weights/
+
+# Legacy PPE detection directory (R-CNN models, not used in production)
+ppe-detection/
+
+# Virtual environments inside model directories
+fall-detection-model/venv/
+fall-detection-model/.venv/
+ppe-detection-model/venv/
+ppe-detection-model/.venv/
 
 # Node modules
 node_modules/
