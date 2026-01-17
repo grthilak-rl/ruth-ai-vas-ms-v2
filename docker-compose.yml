@@ -7,10 +7,11 @@
 # - ruth-ai-nlp-chat: NLP Chat microservice (port 8081)
 # - ollama: LLM service for NLP (port 11434)
 # - fall-detection-model: AI inference service (port 8010 on host, 8000 internal)
+# - ppe-detection-model: PPE detection AI service (port 8011 on host, 8000 internal)
 # - postgres: PostgreSQL database (port 5434 on host, 5432 internal)
 # - redis: Redis cache (port 6382 on host, 6379 internal)
 #
-# External dependency: VAS-MS-V2 at http://10.30.250.245:8085
+# External dependency: VAS-MS-V2 (configurable via VAS_BASE_URL env var)
 #
 # Usage:
 #   docker compose up          # Start all services
@@ -25,6 +26,7 @@
 #   Ruth AI NLP Chat:   8081 (this stack)
 #   Ollama LLM:         11434 (this stack)
 #   Fall Detection AI:  8010 (this stack, host) -> 8000 (container)
+#   PPE Detection AI:   8011 (this stack, host) -> 8000 (container)
 #   PostgreSQL:         5434 (this stack, host) -> 5432 (container)
 #   Redis:              6382 (this stack, host) -> 6379 (container)
 #   VAS Backend API:    8085 (external - already running)
@@ -108,6 +110,41 @@ services:
           memory: 2G
 
   # ============================================
+  # PPE Detection Model (AI Inference Service)
+  # Detects Personal Protective Equipment presence and violations
+  # ============================================
+  ppe-detection-model:
+    build:
+      context: ./ppe-detection-model
+      dockerfile: Dockerfile
+    container_name: ruth-ai-vas-ppe-detection
+    restart: unless-stopped
+    ports:
+      - "8011:8000"
+    volumes:
+      # Model weights are baked into the image from ppe-detection-model/weights/
+      - ./ppe-detection-model/weights:/app/weights:ro
+    environment:
+      - ENVIRONMENT=production
+      - LOG_LEVEL=info
+      - AI_DEVICE=auto
+      - PPE_CONFIDENCE_THRESHOLD=0.5
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 120s  # 12 models take longer to load
+    networks:
+      - ruth-ai-internal
+    deploy:
+      resources:
+        limits:
+          memory: 6G
+        reservations:
+          memory: 3G
+
+  # ============================================
   # Ruth AI Backend API
   # ============================================
   ruth-ai-backend:
@@ -133,10 +170,14 @@ services:
       # Redis
       REDIS_URL: redis://redis:6379/0
       REDIS_MAX_CONNECTIONS: 50
-      # AI Runtime - pointing to fall-detection-model service
+      # AI Runtime - pointing to AI model services
       AI_RUNTIME_URL: http://fall-detection-model:8000
       AI_RUNTIME_TIMEOUT_MS: 5000
       AI_RUNTIME_RETRY_COUNT: 3
+      # PPE Detection Service
+      PPE_DETECTION_URL: http://ppe-detection-model:8000
+      PPE_DETECTION_TIMEOUT_MS: 10000
+      PPE_DETECTION_RETRY_COUNT: 3
       # VAS Integration (external service)
       VAS_BASE_URL: ${VAS_BASE_URL:-http://10.30.250.245:8085}
       VAS_CLIENT_ID: ${VAS_CLIENT_ID:-ruth-ai-backend}
@@ -282,9 +323,12 @@ services:
     ports:
       - "3300:80"
     environment:
+      # VAS proxy URL for nginx (substituted at container startup)
+      # Change VAS_BASE_URL in .env or via environment to point to your VAS server
+      VAS_PROXY_URL: ${VAS_BASE_URL:-http://10.30.250.245:8085}
       # These are baked in at build time via Vite
       VITE_API_BASE_URL: http://localhost:8080
-      VITE_VAS_WEBRTC_URL: ws://10.30.250.245:3002
+      VITE_VAS_WEBRTC_URL: ${VAS_WEBRTC_URL:-ws://10.30.250.245:3002}
     depends_on:
       ruth-ai-backend:
         condition: service_healthy

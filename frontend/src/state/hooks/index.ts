@@ -47,3 +47,10 @@ export {
   generateMessageId,
   formatExecutionTime,
 } from './useChatMutation';
+
+export {
+  useHardwareQuery,
+  deriveCapacityStatus,
+  getCapacityStatusDisplay,
+  type CapacityStatus,
+} from './useHardwareQuery';

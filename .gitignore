@@ -22,6 +22,8 @@ __pycache__/
 
 # Large model/ML directories
 fall-detection-model/
+ppe-detection-model/
+ppe-detection/
 ai/models/*/weights/
 
 # Node modules

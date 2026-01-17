@@ -316,6 +316,72 @@ export async function reportFallEvent(
   return response.json();
 }
 
+// ============================================================================
+// PPE Detection Event APIs
+// ============================================================================
+
+export interface PPEViolationDetail {
+  person_index: number;
+  missing_ppe: string[];
+  bounding_box: BoundingBox;
+}
+
+export interface PPEEventIngestRequest {
+  device_id: string;
+  stream_session_id?: string;
+  vas_stream_id?: string;  // VAS stream ID for snapshot capture
+  event_type: string;
+  confidence: number;
+  timestamp: string;
+  model_id: string;
+  model_version: string;
+  ppe_violations?: PPEViolationDetail[];
+}
+
+/**
+ * Report a PPE violation event to the backend
+ * This creates an Event and optionally a Violation if PPE items are missing
+ * If vasStreamId is provided, the backend will attempt to capture a snapshot via VAS
+ */
+export async function reportPPEEvent(
+  deviceId: string,
+  confidence: number,
+  violations: PPEViolationDetail[],
+  vasStreamId?: string,
+  modelId: string = 'ppe-detection-yolov8',
+  modelVersion: string = '1.0.0'
+): Promise<EventResponse> {
+  const payload: PPEEventIngestRequest = {
+    device_id: deviceId,
+    event_type: 'ppe_violation',
+    confidence,
+    timestamp: new Date().toISOString(),
+    model_id: modelId,
+    model_version: modelVersion,
+    ppe_violations: violations,
+  };
+
+  // Only include vas_stream_id if it has a value
+  if (vasStreamId) {
+    payload.vas_stream_id = vasStreamId;
+  }
+
+  const response = await fetch('/internal/events', {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify(payload),
+  });
+
+  if (!response.ok) {
+    const errorText = await response.text();
+    throw new Error(`Failed to report PPE event: ${response.status} - ${errorText}`);
+  }
+
+  return response.json();
+}
+
 /**
  * Wait for stream to become LIVE
  */

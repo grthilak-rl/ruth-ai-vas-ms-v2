@@ -40,6 +40,12 @@ export const POLLING_INTERVALS = {
    * F6 §11.1: 60 seconds - Analytics can be stale
    */
   ANALYTICS: 60 * 1000,
+
+  /**
+   * Hardware monitoring polling interval
+   * 5 seconds - Real-time resource monitoring for dashboard
+   */
+  HARDWARE: 5 * 1000,
 } as const;
 
 /**

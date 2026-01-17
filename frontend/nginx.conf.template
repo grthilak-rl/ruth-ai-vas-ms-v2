@@ -1,5 +1,8 @@
 # Ruth AI Frontend - nginx Configuration
 # Serves static React files and proxies API requests to backend
+#
+# Environment variables (substituted at container startup):
+# - VAS_PROXY_URL: VAS backend URL (default: http://localhost:8085)
 
 server {
     listen 80;
@@ -93,12 +96,9 @@ server {
     }
 
     # Proxy VAS API requests (if frontend needs direct VAS access)
-    # These are proxied to VAS external service
-    # Note: Adjust VAS_BASE_URL via environment if needed
+    # VAS_PROXY_URL is substituted at container startup from environment
     location /v2/ {
-        # VAS API - external service
-        # In production, replace with actual VAS URL or use upstream
-        proxy_pass http://10.30.250.245:8085;
+        proxy_pass ${VAS_PROXY_URL};
         proxy_http_version 1.1;
         proxy_set_header Host $host;
         proxy_set_header X-Real-IP $remote_addr;

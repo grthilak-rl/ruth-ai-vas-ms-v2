@@ -11,3 +11,4 @@ export { CameraGrid } from './CameraGrid';
 export { SystemHealthCard } from './SystemHealthCard';
 export { ComponentStatusItem } from './ComponentStatusItem';
 export { TopStatusBar } from './TopStatusBar';
+export { HardwareCapacityCard } from './HardwareCapacityCard';

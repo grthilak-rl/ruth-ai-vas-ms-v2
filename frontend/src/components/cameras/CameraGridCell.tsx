@@ -73,6 +73,10 @@ export function CameraGridCell({
   const isDetectionActive = detectionStatus === 'active' || detectionStatus === 'degraded';
   const showOverlays = detectionStatus === 'active';
 
+  // Determine which detection types are active
+  const isFallDetectionActive = aiModels.find(m => m.id === 'fall_detection')?.state === 'active';
+  const isPPEDetectionActive = aiModels.find(m => m.id === 'ppe_detection')?.state === 'active';
+
   const handleModelToggle = (modelId: string, enabled: boolean) => {
     onModelToggle(camera.id, modelId, enabled);
   };
@@ -91,6 +95,8 @@ export function CameraGridCell({
           isAvailable={status === 'live' || status === 'connecting'}
           isDetectionActive={isDetectionActive}
           showOverlays={showOverlays}
+          isFallDetectionEnabled={isFallDetectionActive}
+          isPPEDetectionEnabled={isPPEDetectionActive}
         />
       </div>
 

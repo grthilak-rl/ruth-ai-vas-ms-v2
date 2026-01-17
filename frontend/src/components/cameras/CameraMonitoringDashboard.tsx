@@ -120,6 +120,7 @@ export function CameraMonitoringDashboard({
       // Mock AI models - in real implementation, this would come from API
       // Default to inactive (false) - user must explicitly enable AI detection
       const isFallDetectionEnabled = aiModelToggles[cameraId]?.['fall_detection'] === true;
+      const isPPEDetectionEnabled = aiModelToggles[cameraId]?.['ppe_detection'] === true;
 
       const fallDetectionModel: AIModel = {
         id: 'fall_detection',
@@ -127,7 +128,13 @@ export function CameraMonitoringDashboard({
         state: isFallDetectionEnabled ? 'active' : 'inactive',
       };
 
-      return [fallDetectionModel];
+      const ppeDetectionModel: AIModel = {
+        id: 'ppe_detection',
+        name: 'PPE Detection',
+        state: isPPEDetectionEnabled ? 'active' : 'inactive',
+      };
+
+      return [fallDetectionModel, ppeDetectionModel];
     },
     [aiModelToggles]
   );

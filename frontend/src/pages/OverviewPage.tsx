@@ -2,6 +2,7 @@ import {
   TopStatusBar,
   RecentViolations,
   CameraGrid,
+  HardwareCapacityCard,
 } from '../components/overview';
 import { ChatPanel } from '../components/chat';
 import './OverviewPage.css';
@@ -13,18 +14,20 @@ import './OverviewPage.css';
  * Primary landing screen providing operator situational awareness.
  *
  * Layout (compact, no-scroll design):
- * ┌─────────────────────────────────────────────────────────────────┐
- * │ [Open Alerts] [Cameras] [Models]              System: ●●●●●    │
- * ├─────────────────────────────────┬───────────────────────────────┤
- * │                                 │                               │
- * │   Recent Violations             │   Ask Ruth (compact chat)     │
- * │   (last 5 alerts)               │   [suggestion chips]          │
- * │                                 │   [input field]               │
- * │                                 ├───────────────────────────────┤
- * │                                 │   Camera Grid (2x3)           │
- * │                                 │   compact status tiles        │
- * │                                 │                               │
- * └─────────────────────────────────┴───────────────────────────────┘
+ * ┌──────────────────────────────────────────────────────────────────────────┐
+ * │ Row 1: [Open Alerts] [Cameras Live] [Models Active] | [System Health]   │
+ * ├──────────────────────────────────────────────────────────────────────────┤
+ * │ Row 2:                                                                   │
+ * │   Left Column:              │  Right Column:                             │
+ * │   ┌─────────────────────┐   │  ┌─────────────────────────────────────┐   │
+ * │   │ Recent Violations   │   │  │ Ask Ruth                            │   │
+ * │   │ (4 entries max)     │   │  │                                     │   │
+ * │   └─────────────────────┘   │  │                                     │   │
+ * │   ┌─────────────────────┐   │  ├─────────────────────────────────────┤   │
+ * │   │ Hardware Capacity   │   │  │ Camera Grid                         │   │
+ * │   │                     │   │  │                                     │   │
+ * │   └─────────────────────┘   │  └─────────────────────────────────────┘   │
+ * └──────────────────────────────────────────────────────────────────────────┘
  *
  * Per F6:
  * - Each section loads independently
@@ -40,9 +43,10 @@ export function OverviewPage() {
 
       {/* Main Content: Two-column layout */}
       <div className="overview-page__content">
-        {/* Left Column: Recent Violations */}
+        {/* Left Column: Recent Violations + Hardware Capacity */}
         <div className="overview-page__left">
           <RecentViolations />
+          <HardwareCapacityCard />
         </div>
 
         {/* Right Column: Ask Ruth + Camera Grid */}

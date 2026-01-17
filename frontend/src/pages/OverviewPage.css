@@ -9,12 +9,11 @@
  * │ [Metrics Cards]                     │    [System Health]                  │
  * │ Open Alerts | Cameras | Models      │    Detailed health panel            │
  * ├─────────────────────────────────────┼─────────────────────────────────────┤
- * │                                     │                                     │
- * │   Recent Violations                 │   Ask Ruth                          │
- * │   (full height of right column)     │   (chat panel)                      │
- * │                                     ├─────────────────────────────────────┤
- * │                                     │   Camera Grid                       │
- * │                                     │   (2x3 tiles)                       │
+ * │   Recent Violations (compact)       │   Ask Ruth                          │
+ * │   (4 entries max)                   │   (chat panel)                      │
+ * ├─────────────────────────────────────┼─────────────────────────────────────┤
+ * │   Hardware Capacity                 │   Camera Grid                       │
+ * │   (GPU/CPU/RAM/Models)              │   (2x3 tiles)                       │
  * └─────────────────────────────────────┴─────────────────────────────────────┘
  */
 
@@ -45,18 +44,23 @@
   min-height: 0; /* Allow content to shrink */
 }
 
-/* Left column: Recent Violations (full height) */
+/* Left column: Recent Violations + Hardware Capacity stacked */
 .overview-page__left {
   display: flex;
   flex-direction: column;
+  gap: 1rem;
   min-height: 0;
 }
 
-.overview-page__left > * {
+/* Recent Violations: compact height (auto-sized by content) */
+.overview-page__left > .recent-violations {
+  flex-shrink: 0;
+}
+
+/* Hardware Capacity: takes remaining space */
+.overview-page__left > .hardware-capacity-card {
   flex: 1;
   min-height: 0;
-  display: flex;
-  flex-direction: column;
 }
 
 /* Right column: Ask Ruth + Camera Grid stacked */

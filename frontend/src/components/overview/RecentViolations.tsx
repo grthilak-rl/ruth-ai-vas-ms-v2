@@ -4,8 +4,8 @@ import { useViolationsQuery, getConfidenceLabel } from '../../state';
 import type { Violation } from '../../state';
 import './RecentViolations.css';
 
-/** Maximum violations to display */
-const MAX_VIOLATIONS = 5;
+/** Maximum violations to display (reduced for compact layout) */
+const MAX_VIOLATIONS = 4;
 
 /**
  * Recent Violations Section (F4 §4.1)

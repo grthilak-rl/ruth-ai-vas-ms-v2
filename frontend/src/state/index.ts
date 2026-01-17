@@ -143,6 +143,12 @@ export {
   getChatStatus,
   enableChatService,
   disableChatService,
+  // Hardware
+  fetchHardware,
+  getUsageLevel,
+  formatGB,
+  formatPercent,
+  getTimeSinceUpdate,
 } from './api';
 
 export type {
@@ -153,6 +159,15 @@ export type {
   ModelDisplayInfo,
   OverallModelHealth,
   StalenessLevel,
+  // Hardware
+  HardwareResponse,
+  GPUMetrics,
+  CPUMetrics,
+  RAMMetrics,
+  ModelServiceStatus,
+  ModelsMetrics,
+  CapacityMetrics,
+  UsageLevel,
 } from './api';
 
 // ============================================================================
@@ -190,10 +205,14 @@ export {
   createErrorMessage,
   generateMessageId,
   formatExecutionTime,
+  // Hardware
+  useHardwareQuery,
+  deriveCapacityStatus,
+  getCapacityStatusDisplay,
 } from './hooks';
 
 // GlobalStatus type from health hook (derived from HealthResponse)
-export type { GlobalStatus } from './hooks';
+export type { GlobalStatus, CapacityStatus } from './hooks';
 
 // ============================================================================
 // Auth Context

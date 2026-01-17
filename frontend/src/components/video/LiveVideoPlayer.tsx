@@ -2,7 +2,8 @@ import { useState, useRef, useCallback, useEffect } from 'react';
 import { VideoErrorBoundary } from './VideoErrorBoundary';
 import { connectToStream, disconnectStream, type WebRTCConnection } from '../../services/webrtc';
 import { FallDetectionManager, type FallDetectionResult, type Detection, SKELETON_CONNECTIONS } from '../../services/fallDetection';
-import { reportFallEvent, type BoundingBox } from '../../services/api';
+import { PPEDetectionManager, type PPEDetectionResult, type PPEPersonDetection, drawPPEDetections } from '../../services/ppeDetection';
+import { reportFallEvent, reportPPEEvent, type BoundingBox, type PPEViolationDetail } from '../../services/api';
 import './LiveVideoPlayer.css';
 
 // Model outputs coordinates in 640x640 space (matching POC)
@@ -24,6 +25,8 @@ interface LiveVideoPlayerProps {
   streamId?: string | null;
   isDetectionActive?: boolean;
   showOverlays?: boolean;
+  isFallDetectionEnabled?: boolean;
+  isPPEDetectionEnabled?: boolean;
 }
 
 /**
@@ -165,23 +168,29 @@ export function LiveVideoPlayer({
   streamId: _streamId,
   isDetectionActive = true,
   showOverlays = true,
+  isFallDetectionEnabled = true,
+  isPPEDetectionEnabled = false,
 }: LiveVideoPlayerProps) {
   const [playerState, setPlayerState] = useState<PlayerState>(
     isAvailable ? 'idle' : 'offline'
   );
   const [connectionStatus, setConnectionStatus] = useState<string>('');
   const [fallDetection, setFallDetection] = useState<FallDetectionResult | null>(null);
+  const [ppeDetection, setPPEDetection] = useState<PPEDetectionResult | null>(null);
 
   const videoRef = useRef<HTMLVideoElement>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const connectionRef = useRef<WebRTCConnection | null>(null);
   const reconnectTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const fallDetectionRef = useRef<FallDetectionManager | null>(null);
+  const ppeDetectionRef = useRef<PPEDetectionManager | null>(null);
   const lastFallReportTimeRef = useRef<number>(0);
+  const lastPPEReportTimeRef = useRef<number>(0);
   const streamIdRef = useRef<string | null>(null);  // Use ref for immediate access in callbacks
 
-  // Debounce interval for fall reporting (30 seconds between reports for same device)
+  // Debounce interval for reporting (30 seconds between reports for same device)
   const FALL_REPORT_DEBOUNCE_MS = 30000;
+  const PPE_REPORT_DEBOUNCE_MS = 30000;
 
   /**
    * Report a fall detection to the backend (with debouncing)
@@ -238,14 +247,81 @@ export function LiveVideoPlayer({
     }
   }, [deviceId]);  // Use ref for streamId, so no dependency needed
 
-  // Draw detections on canvas whenever fallDetection updates (from POC)
+  /**
+   * Report a PPE violation to the backend (with debouncing)
+   */
+  const reportPPEToBackend = useCallback(async (
+    detections: PPEPersonDetection[],
+    confidence: number
+  ) => {
+    const now = Date.now();
+
+    // Check debounce
+    if (now - lastPPEReportTimeRef.current < PPE_REPORT_DEBOUNCE_MS) {
+      console.log('[LiveVideoPlayer] Skipping PPE report - debounced');
+      return;
+    }
+
+    // Convert detections to violation details for the API
+    const violations: PPEViolationDetail[] = detections
+      .filter(d => d.violations.length > 0)
+      .map((d, idx) => ({
+        person_index: idx,
+        missing_ppe: d.missing_ppe,
+        bounding_box: {
+          x: Math.round(d.person_bbox.x1),
+          y: Math.round(d.person_bbox.y1),
+          w: Math.round(d.person_bbox.x2 - d.person_bbox.x1),
+          h: Math.round(d.person_bbox.y2 - d.person_bbox.y1),
+        },
+      }));
+
+    if (violations.length === 0) {
+      return;
+    }
+
+    try {
+      const streamId = streamIdRef.current;
+      console.log('[LiveVideoPlayer] Reporting PPE violation to backend for device:', deviceId, 'stream:', streamId);
+      const response = await reportPPEEvent(
+        deviceId,
+        confidence,
+        violations,
+        streamId || undefined
+      );
+      lastPPEReportTimeRef.current = now;
+      console.log('[LiveVideoPlayer] PPE violation reported successfully:', response);
+
+      if (response.violation_id) {
+        console.log('[LiveVideoPlayer] Violation created:', response.violation_id);
+      }
+    } catch (error) {
+      console.error('[LiveVideoPlayer] Failed to report PPE violation:', error);
+    }
+  }, [deviceId]);
+
+  // Draw detections on canvas whenever fallDetection or ppeDetection updates
   useEffect(() => {
-    console.log('[LiveVideoPlayer] Draw effect triggered, fallDetection:', fallDetection ? 'present' : 'null');
     const canvas = canvasRef.current;
     const video = videoRef.current;
 
-    if (!canvas || !video || !fallDetection || !showOverlays || !isDetectionActive) {
-      console.log('[LiveVideoPlayer] Early return - canvas:', !!canvas, 'video:', !!video, 'fallDetection:', !!fallDetection, 'showOverlays:', showOverlays, 'isDetectionActive:', isDetectionActive);
+    const hasFallDetection = fallDetection && isFallDetectionEnabled;
+    const hasPPEDetection = ppeDetection && isPPEDetectionEnabled;
+
+    // Debug logging
+    if (ppeDetection) {
+      console.log('[LiveVideoPlayer] PPE Draw check:', {
+        hasPPEDetection,
+        isPPEDetectionEnabled,
+        showOverlays,
+        isDetectionActive,
+        detectionsCount: ppeDetection.detections?.length || 0,
+        canvasExists: !!canvas,
+        videoExists: !!video,
+      });
+    }
+
+    if (!canvas || !video || (!hasFallDetection && !hasPPEDetection) || !showOverlays || !isDetectionActive) {
       // Clear canvas if detection is disabled
       if (canvas) {
         const ctx = canvas.getContext('2d');
@@ -256,15 +332,11 @@ export function LiveVideoPlayer({
       return;
     }
 
-    // Update canvas size to match video display size (from POC)
+    // Update canvas size to match video display size
     const rect = video.getBoundingClientRect();
-    console.log('[LiveVideoPlayer] Video rect:', rect.width, 'x', rect.height);
-    console.log('[LiveVideoPlayer] Video native:', video.videoWidth, 'x', video.videoHeight);
-    console.log('[LiveVideoPlayer] Canvas before:', canvas.width, 'x', canvas.height);
     if (canvas.width !== rect.width || canvas.height !== rect.height) {
       canvas.width = rect.width;
       canvas.height = rect.height;
-      console.log('[LiveVideoPlayer] Canvas after:', canvas.width, 'x', canvas.height);
     }
 
     const ctx = canvas.getContext('2d');
@@ -273,11 +345,8 @@ export function LiveVideoPlayer({
     // Clear previous drawings
     ctx.clearRect(0, 0, canvas.width, canvas.height);
 
-    // Draw new detections
-    if (fallDetection.detections && fallDetection.detections.length > 0) {
-      console.log('[LiveVideoPlayer] Drawing detections:', fallDetection.detections.length);
-      console.log('[LiveVideoPlayer] First detection bbox:', fallDetection.detections[0].bbox);
-      console.log('[LiveVideoPlayer] Canvas size for drawing:', canvas.width, 'x', canvas.height);
+    // Draw fall detections if enabled and available
+    if (hasFallDetection && fallDetection.detections && fallDetection.detections.length > 0) {
       drawDetections(
         ctx,
         fallDetection.detections,
@@ -286,7 +355,17 @@ export function LiveVideoPlayer({
         fallDetection.violation_detected
       );
     }
-  }, [fallDetection, showOverlays, isDetectionActive]);
+
+    // Draw PPE detections if enabled and available
+    if (hasPPEDetection && ppeDetection.detections && ppeDetection.detections.length > 0) {
+      drawPPEDetections(
+        ctx,
+        ppeDetection.detections,
+        canvas.width,
+        canvas.height
+      );
+    }
+  }, [fallDetection, ppeDetection, showOverlays, isDetectionActive, isFallDetectionEnabled, isPPEDetectionEnabled]);
 
   // Cleanup function
   const cleanup = useCallback(async () => {
@@ -300,6 +379,11 @@ export function LiveVideoPlayer({
       fallDetectionRef.current = null;
     }
 
+    if (ppeDetectionRef.current) {
+      ppeDetectionRef.current.stop();
+      ppeDetectionRef.current = null;
+    }
+
     if (connectionRef.current) {
       await disconnectStream(connectionRef.current);
       connectionRef.current = null;
@@ -310,6 +394,7 @@ export function LiveVideoPlayer({
     }
 
     setFallDetection(null);
+    setPPEDetection(null);
     streamIdRef.current = null;
   }, []);
 
@@ -338,23 +423,38 @@ export function LiveVideoPlayer({
         setPlayerState('playing');
         console.log('[LiveVideoPlayer] WebRTC stream playing');
 
-        // Start fall detection after video is playing (from POC)
+        // Start AI detection after video is playing
         if (isDetectionActive) {
-          // Previous: fps: 5 (200ms) caused 30s delay due to slow CPU inference
-          fallDetectionRef.current = new FallDetectionManager({ fps: 2 });  // 500ms interval
-          fallDetectionRef.current.start(video, (result) => {
-            console.log('[LiveVideoPlayer] Got detection result:', result.detections?.length || 0, 'detections');
-            setFallDetection(result);
+          // Start fall detection if enabled
+          if (isFallDetectionEnabled) {
+            fallDetectionRef.current = new FallDetectionManager({ fps: 2 });  // 500ms interval
+            fallDetectionRef.current.start(video, (result) => {
+              console.log('[LiveVideoPlayer] Got fall detection result:', result.detections?.length || 0, 'detections');
+              setFallDetection(result);
 
-            // Check if any person in the frame is fallen (using our per-detection logic)
-            const fallenDetections = result.detections?.filter(d => isPersonFallen(d)) || [];
-            if (fallenDetections.length > 0) {
-              console.log('[LiveVideoPlayer] Fall detected!', fallenDetections.length, 'person(s) fallen');
-              // Report to backend (with debouncing)
-              reportFallToBackend(result.detections || [], result.confidence);
-            }
-          });
-          console.log('[LiveVideoPlayer] Fall detection started');
+              const fallenDetections = result.detections?.filter(d => isPersonFallen(d)) || [];
+              if (fallenDetections.length > 0) {
+                console.log('[LiveVideoPlayer] Fall detected!', fallenDetections.length, 'person(s) fallen');
+                reportFallToBackend(result.detections || [], result.confidence);
+              }
+            });
+            console.log('[LiveVideoPlayer] Fall detection started');
+          }
+
+          // Start PPE detection if enabled
+          if (isPPEDetectionEnabled) {
+            ppeDetectionRef.current = new PPEDetectionManager({ fps: 0.02, mode: 'full' });  // 1 FPS due to 12 models, full mode for persons + PPE
+            ppeDetectionRef.current.start(video, (result) => {
+              console.log('[LiveVideoPlayer] Got PPE detection result:', result.detections?.length || 0, 'detections');
+              setPPEDetection(result);
+
+              if (result.violation_detected) {
+                console.log('[LiveVideoPlayer] PPE violation detected!');
+                reportPPEToBackend(result.detections || [], result.detections?.[0]?.person_bbox.confidence || 0.5);
+              }
+            });
+            console.log('[LiveVideoPlayer] PPE detection started');
+          }
         }
       } else {
         console.error('[LiveVideoPlayer] Video element not found');
@@ -366,7 +466,7 @@ export function LiveVideoPlayer({
       setPlayerState('error');
       setConnectionStatus('Connection failed');
     }
-  }, [deviceId, isDetectionActive, reportFallToBackend]);
+  }, [deviceId, isDetectionActive, isFallDetectionEnabled, isPPEDetectionEnabled, reportFallToBackend, reportPPEToBackend]);
 
   // Handle retry
   const handleRetry = useCallback(async () => {
@@ -406,36 +506,60 @@ export function LiveVideoPlayer({
     }
   }, [isAvailable, playerState, cleanup]);
 
-  // Handle isDetectionActive changes while stream is playing
+  // Handle detection toggle changes while stream is playing
   useEffect(() => {
     const video = videoRef.current;
+
+    // Debug: Log detection state changes
+    console.log('[LiveVideoPlayer] Detection toggle effect:', {
+      playerState,
+      isDetectionActive,
+      isPPEDetectionEnabled,
+      isFallDetectionEnabled,
+      showOverlays,
+      hasVideo: !!video,
+      ppeDetectionRunning: !!ppeDetectionRef.current,
+    });
 
     if (playerState !== 'playing' || !video) {
       return;
     }
 
-    if (isDetectionActive && !fallDetectionRef.current) {
-      // Start detection if enabled and not already running
+    // Handle fall detection toggle
+    if (isDetectionActive && isFallDetectionEnabled && !fallDetectionRef.current) {
       console.log('[LiveVideoPlayer] Starting fall detection (enabled while playing)');
       fallDetectionRef.current = new FallDetectionManager({ fps: 2 });
       fallDetectionRef.current.start(video, (result) => {
-        console.log('[LiveVideoPlayer] Got detection result:', result.detections?.length || 0, 'detections');
         setFallDetection(result);
-
         const fallenDetections = result.detections?.filter(d => isPersonFallen(d)) || [];
         if (fallenDetections.length > 0) {
-          console.log('[LiveVideoPlayer] Fall detected!', fallenDetections.length, 'person(s) fallen');
           reportFallToBackend(result.detections || [], result.confidence);
         }
       });
-    } else if (!isDetectionActive && fallDetectionRef.current) {
-      // Stop detection if disabled
-      console.log('[LiveVideoPlayer] Stopping fall detection (disabled while playing)');
+    } else if ((!isDetectionActive || !isFallDetectionEnabled) && fallDetectionRef.current) {
+      console.log('[LiveVideoPlayer] Stopping fall detection');
       fallDetectionRef.current.stop();
       fallDetectionRef.current = null;
       setFallDetection(null);
     }
-  }, [isDetectionActive, playerState, reportFallToBackend]);
+
+    // Handle PPE detection toggle
+    if (isDetectionActive && isPPEDetectionEnabled && !ppeDetectionRef.current) {
+      console.log('[LiveVideoPlayer] Starting PPE detection (enabled while playing)');
+      ppeDetectionRef.current = new PPEDetectionManager({ fps: 0.02, mode: 'full' });
+      ppeDetectionRef.current.start(video, (result) => {
+        setPPEDetection(result);
+        if (result.violation_detected) {
+          reportPPEToBackend(result.detections || [], result.detections?.[0]?.person_bbox.confidence || 0.5);
+        }
+      });
+    } else if ((!isDetectionActive || !isPPEDetectionEnabled) && ppeDetectionRef.current) {
+      console.log('[LiveVideoPlayer] Stopping PPE detection');
+      ppeDetectionRef.current.stop();
+      ppeDetectionRef.current = null;
+      setPPEDetection(null);
+    }
+  }, [isDetectionActive, isFallDetectionEnabled, isPPEDetectionEnabled, playerState, reportFallToBackend, reportPPEToBackend]);
 
   // Cleanup on unmount
   useEffect(() => {

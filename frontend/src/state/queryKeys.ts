@@ -71,4 +71,7 @@ export const queryKeys = {
   chat: {
     status: ['chat', 'status'] as const,
   },
+
+  // Hardware domain
+  hardware: ['hardware'] as const,
 } as const;

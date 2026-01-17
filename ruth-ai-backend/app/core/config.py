@@ -73,10 +73,10 @@ class Settings(BaseSettings):
         description="Max Redis connections",
     )
 
-    # AI Runtime
+    # AI Runtime (Fall Detection)
     ai_runtime_url: str = Field(
-        default="ruth-ai-runtime:50051",
-        description="AI Runtime gRPC endpoint",
+        default="http://fall-detection-model:8000",
+        description="AI Runtime (Fall Detection) endpoint",
     )
     ai_runtime_timeout_ms: int = Field(
         default=5000,
@@ -89,6 +89,24 @@ class Settings(BaseSettings):
         ge=0,
         le=10,
         description="AI Runtime retry attempts",
+    )
+
+    # PPE Detection Service
+    ppe_detection_url: str = Field(
+        default="http://ppe-detection-model:8000",
+        description="PPE Detection model service endpoint",
+    )
+    ppe_detection_timeout_ms: int = Field(
+        default=10000,
+        ge=100,
+        le=60000,
+        description="PPE Detection request timeout in milliseconds",
+    )
+    ppe_detection_retry_count: int = Field(
+        default=3,
+        ge=0,
+        le=10,
+        description="PPE Detection retry attempts",
     )
 
     # VAS Integration
@@ -158,6 +176,32 @@ class Settings(BaseSettings):
         ge=1.0,
         le=30.0,
         description="NLP Chat Service health check timeout in seconds",
+    )
+
+    # Hardware Monitoring Configuration
+    hardware_model_service_timeout: float = Field(
+        default=5.0,
+        ge=1.0,
+        le=30.0,
+        description="Timeout for querying AI model services for hardware status",
+    )
+    hardware_avg_vram_per_camera_gb: float = Field(
+        default=0.8,
+        ge=0.1,
+        le=4.0,
+        description="Estimated VRAM usage per camera for capacity calculation",
+    )
+    hardware_avg_ram_per_camera_gb: float = Field(
+        default=0.5,
+        ge=0.1,
+        le=2.0,
+        description="Estimated RAM usage per camera in CPU-only mode",
+    )
+    hardware_capacity_safety_factor: float = Field(
+        default=0.8,
+        ge=0.5,
+        le=1.0,
+        description="Safety factor for capacity estimation (0.8 = 80% utilization target)",
     )
 
     # NLP Chat Service Configuration

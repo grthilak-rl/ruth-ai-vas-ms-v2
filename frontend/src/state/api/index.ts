@@ -183,3 +183,25 @@ export type {
   ChatErrorDetail,
   ChatMessage,
 } from './types';
+
+// ============================================================================
+// Hardware API
+// ============================================================================
+
+export {
+  fetchHardware,
+  getUsageLevel,
+  formatGB,
+  formatPercent,
+  getTimeSinceUpdate,
+} from './hardware.api';
+export type {
+  HardwareResponse,
+  GPUMetrics,
+  CPUMetrics,
+  RAMMetrics,
+  ModelServiceStatus,
+  ModelsMetrics,
+  CapacityMetrics,
+  UsageLevel,
+} from './hardware.api';
