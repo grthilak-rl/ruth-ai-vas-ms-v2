@@ -5,7 +5,7 @@
 }
 
 .camera-performance-page__header {
-  margin-bottom: 2rem;
+  margin-bottom: 1.5rem;
 }
 
 .camera-performance-page__back {
@@ -30,7 +30,7 @@
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
   gap: 1.5rem;
-  margin-bottom: 2rem;
+  margin: 1.5rem 0;
 }
 
 .camera-performance-summary__card {
@@ -76,14 +76,74 @@
   color: var(--color-text-primary, #222);
 }
 
+.camera-performance-th--expand {
+  width: 40px;
+}
+
+.camera-performance-th--sortable {
+  cursor: pointer;
+  user-select: none;
+  transition: background 0.15s ease;
+}
+
+.camera-performance-th--sortable:hover {
+  background: var(--color-surface-active, #eee);
+}
+
+.sort-icon {
+  margin-left: 0.5rem;
+  font-size: 12px;
+}
+
+.sort-icon--inactive {
+  opacity: 0.4;
+}
+
+.sort-icon--active {
+  opacity: 1;
+  color: var(--color-primary, #0066cc);
+}
+
 .camera-performance-page__table td {
   padding: 1rem;
   border-bottom: 1px solid var(--color-border-light, #eee);
   font-size: 14px;
 }
 
-.camera-performance-page__table tbody tr:hover {
+.camera-performance-row {
+  cursor: pointer;
+  transition: background 0.15s ease;
+}
+
+.camera-performance-row:hover {
   background: var(--color-surface-hover, #f5f5f5);
+}
+
+.camera-performance-row--expanded {
+  background: var(--color-surface-hover, #f9fafb);
+}
+
+.camera-performance-td--expand {
+  width: 40px;
+  text-align: center;
+}
+
+.camera-performance-expand-btn {
+  width: 24px;
+  height: 24px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border: none;
+  background: transparent;
+  cursor: pointer;
+  font-size: 10px;
+  color: var(--color-text-secondary, #666);
+  transition: color 0.15s ease;
+}
+
+.camera-performance-expand-btn:hover {
+  color: var(--color-text-primary, #222);
 }
 
 .camera-performance-table__name {
@@ -91,8 +151,170 @@
   color: var(--color-text-primary, #222);
 }
 
+.camera-performance-td--warning {
+  color: var(--color-warning, #d97706);
+  font-weight: 600;
+}
+
+.camera-performance-details-row td {
+  padding: 0;
+  background: var(--color-surface-hover, #f9fafb);
+}
+
 .camera-performance-page__empty {
   padding: 3rem;
   text-align: center;
   color: var(--color-text-secondary, #666);
+}
+
+/* Camera Details Panel (Expanded) */
+.camera-details-panel {
+  padding: 1.5rem;
+  display: grid;
+  grid-template-columns: 1fr 1fr auto;
+  gap: 2rem;
+  border-top: 1px solid var(--color-border, #ddd);
+}
+
+.camera-details-panel__section {
+  min-width: 0;
+}
+
+.camera-details-panel__title {
+  margin: 0 0 0.75rem 0;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--color-text-secondary, #666);
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+
+.camera-details-panel__text {
+  margin: 0;
+  font-size: 14px;
+  color: var(--color-text-primary, #222);
+}
+
+.camera-details-panel__empty {
+  margin: 0;
+  font-size: 14px;
+  color: var(--color-text-tertiary, #9ca3af);
+  font-style: italic;
+}
+
+/* Violation Type Bars */
+.camera-details-panel__bars {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+
+.camera-details-bar {
+  display: grid;
+  grid-template-columns: 120px 1fr 50px;
+  align-items: center;
+  gap: 0.75rem;
+}
+
+.camera-details-bar__label {
+  font-size: 13px;
+  color: var(--color-text-secondary, #666);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.camera-details-bar__track {
+  height: 8px;
+  background: var(--color-border-light, #e5e7eb);
+  border-radius: 4px;
+  overflow: hidden;
+}
+
+.camera-details-bar__fill {
+  height: 100%;
+  background: var(--color-primary, #3b82f6);
+  border-radius: 4px;
+  transition: width 0.3s ease;
+}
+
+.camera-details-bar__value {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--color-text-primary, #222);
+  text-align: right;
+}
+
+/* Panel Actions */
+.camera-details-panel__actions {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+  align-items: flex-start;
+}
+
+.camera-details-panel__link {
+  font-size: 13px;
+  color: var(--color-primary, #0066cc);
+  text-decoration: none;
+  white-space: nowrap;
+}
+
+.camera-details-panel__link:hover {
+  text-decoration: underline;
+}
+
+/* Responsive */
+@media (max-width: 1024px) {
+  .camera-details-panel {
+    grid-template-columns: 1fr;
+    gap: 1.5rem;
+  }
+
+  .camera-details-panel__actions {
+    flex-direction: row;
+    gap: 1rem;
+  }
+}
+
+@media (max-width: 768px) {
+  .camera-performance-page {
+    padding: 1rem;
+  }
+
+  .camera-performance-page__summary {
+    grid-template-columns: 1fr 1fr;
+    gap: 1rem;
+  }
+
+  .camera-performance-summary__card {
+    padding: 1rem;
+  }
+
+  .camera-performance-summary__value {
+    font-size: 24px;
+  }
+
+  .camera-performance-page__table {
+    overflow-x: auto;
+  }
+
+  .camera-performance-page__table table {
+    min-width: 700px;
+  }
+
+  .camera-details-bar {
+    grid-template-columns: 100px 1fr 40px;
+    gap: 0.5rem;
+  }
+}
+
+@media (max-width: 480px) {
+  .camera-performance-page__header h1 {
+    font-size: 24px;
+  }
+
+  .camera-performance-page__summary {
+    grid-template-columns: 1fr;
+  }
 }

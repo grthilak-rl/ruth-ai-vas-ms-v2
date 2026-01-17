@@ -4,17 +4,63 @@
   margin: 0 auto;
 }
 
-.analytics-page__header {
+/* Time Range Card - contains selector and action buttons */
+.analytics-time-range-card {
   display: flex;
   justify-content: space-between;
-  align-items: flex-start;
-  margin-bottom: 1.5rem;
+  align-items: center;
+  padding: 16px 20px;
+  background: var(--color-surface, #fff);
+  border: 1px solid var(--color-border, #ddd);
+  border-radius: 4px;
+  margin-bottom: 24px;
 }
 
-.analytics-page__header h1 {
-  margin: 0 0 0.5rem 0;
-  font-size: 28px;
-  font-weight: 700;
+.analytics-time-range-card__left {
+  display: flex;
+  align-items: center;
+  gap: 1rem;
+}
+
+.analytics-time-range-card__staleness {
+  font-size: 13px;
+  color: var(--color-text-secondary, #666);
+  font-weight: 400;
+}
+
+.analytics-time-range-card__staleness--warning {
+  color: var(--color-warning, #cc6600);
+  font-weight: 500;
+}
+
+.analytics-time-range-card__actions {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+}
+
+.analytics-page__refresh-btn-icon {
+  width: 40px;
+  height: 40px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 20px;
+  background: var(--color-surface, #fff);
+  border: 1px solid var(--color-border, #ddd);
+  border-radius: 4px;
+  cursor: pointer;
+  transition: background 0.2s ease, border-color 0.2s ease;
+}
+
+.analytics-page__refresh-btn-icon:hover {
+  background: var(--color-surface-hover, #f5f5f5);
+  border-color: var(--color-border-hover, #ccc);
+}
+
+.analytics-page__refresh-btn-icon:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
 }
 
 .analytics-page__staleness {
@@ -104,11 +150,20 @@
   background: var(--color-primary-dark, #0052a3);
 }
 
-.analytics-page__charts {
+/* Primary Charts Row: Violations Over Time (wide) + Status Distribution (narrow) */
+.analytics-page__primary-charts {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(400px, 1fr));
+  grid-template-columns: 2fr 1fr;
   gap: 1.5rem;
   margin-top: 2rem;
+}
+
+/* Secondary Charts Row: By Camera + By Type (equal width) */
+.analytics-page__charts {
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
+  gap: 1.5rem;
+  margin-top: 1.5rem;
 }
 
 .analytics-page__chart-card {
@@ -116,6 +171,14 @@
   border: 1px solid var(--color-border, #ddd);
   border-radius: 4px;
   overflow: hidden;
+}
+
+.analytics-page__chart-card--wide {
+  /* Takes 2/3 of the width in primary charts */
+}
+
+.analytics-page__chart-card--narrow {
+  /* Takes 1/3 of the width in primary charts */
 }
 
 .analytics-page__chart-title {
@@ -143,4 +206,116 @@
 
 .analytics-page__chart-footer a:hover {
   text-decoration: underline;
+}
+
+/* ============================================
+   Responsive Design
+   ============================================ */
+
+/* Tablet (768-1199px) */
+@media (max-width: 1199px) {
+  .analytics-page {
+    padding: 1.5rem;
+  }
+
+  .analytics-page__primary-charts {
+    grid-template-columns: 1fr;
+  }
+
+  .analytics-page__charts {
+    grid-template-columns: repeat(2, 1fr);
+  }
+}
+
+/* Mobile (< 768px) */
+@media (max-width: 768px) {
+  .analytics-page {
+    padding: 1rem;
+  }
+
+  .analytics-time-range-card {
+    flex-direction: column;
+    gap: 1rem;
+    padding: 12px 16px;
+    margin-bottom: 16px;
+  }
+
+  .analytics-time-range-card__left {
+    width: 100%;
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 0.5rem;
+  }
+
+  .analytics-time-range-card__actions {
+    width: 100%;
+    justify-content: space-between;
+  }
+
+  .analytics-page__export-link {
+    flex: 1;
+    text-align: center;
+  }
+
+  .analytics-page__stale-banner {
+    flex-direction: column;
+    gap: 0.75rem;
+    text-align: center;
+  }
+
+  .analytics-page__primary-charts {
+    grid-template-columns: 1fr;
+    gap: 1rem;
+    margin-top: 1.5rem;
+  }
+
+  .analytics-page__charts {
+    grid-template-columns: 1fr;
+    gap: 1rem;
+    margin-top: 1rem;
+  }
+
+  .analytics-page__chart-title {
+    padding: 0.75rem 1rem;
+    font-size: 14px;
+  }
+
+  .analytics-page__chart-footer {
+    padding: 0.75rem 1rem;
+  }
+
+  .analytics-page__empty {
+    padding: 2rem 1rem;
+    margin: 1.5rem 0;
+  }
+
+  .analytics-page__empty h2 {
+    font-size: 18px;
+  }
+}
+
+/* Small Mobile (< 480px) */
+@media (max-width: 480px) {
+  .analytics-page {
+    padding: 0.75rem;
+  }
+
+  .analytics-time-range-card {
+    padding: 10px 12px;
+  }
+
+  .analytics-time-range-card__actions {
+    flex-direction: column;
+    gap: 0.5rem;
+  }
+
+  .analytics-page__refresh-btn-icon {
+    width: 100%;
+  }
+
+  .analytics-page__export-link {
+    width: 100%;
+    padding: 0.625rem 1rem;
+    font-size: 14px;
+  }
 }

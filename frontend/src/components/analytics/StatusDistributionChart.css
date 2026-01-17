@@ -1,0 +1,172 @@
+/**
+ * Status Distribution Chart Styles
+ * Per analytics-design.md §5.2.5
+ */
+
+.status-chart {
+  background: var(--color-surface, #fff);
+  border-radius: 4px;
+  padding: 1rem;
+}
+
+.status-chart--loading,
+.status-chart--empty {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 280px;
+  color: var(--color-text-secondary, #666);
+}
+
+.status-chart__skeleton {
+  width: 160px;
+  height: 160px;
+  border-radius: 50%;
+  background: linear-gradient(
+    90deg,
+    var(--color-skeleton-start, #f0f0f0) 25%,
+    var(--color-skeleton-mid, #e0e0e0) 50%,
+    var(--color-skeleton-start, #f0f0f0) 75%
+  );
+  background-size: 200% 100%;
+  animation: skeleton-loading 1.5s infinite;
+}
+
+@keyframes skeleton-loading {
+  0% {
+    background-position: 200% 0;
+  }
+  100% {
+    background-position: -200% 0;
+  }
+}
+
+.status-chart__container {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  position: relative;
+}
+
+.status-chart__svg {
+  width: 200px;
+  height: 200px;
+}
+
+.status-chart__segment {
+  cursor: pointer;
+  transition: opacity 0.15s ease, transform 0.15s ease;
+  transform-origin: center;
+}
+
+.status-chart__segment:hover,
+.status-chart__segment:focus {
+  outline: none;
+}
+
+.status-chart__center-value {
+  font-size: 28px;
+  font-weight: 700;
+  fill: var(--color-text-primary, #111827);
+}
+
+.status-chart__center-label {
+  font-size: 12px;
+  fill: var(--color-text-secondary, #6b7280);
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+
+.status-chart__hover-info {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  margin-top: 0.75rem;
+  padding: 0.5rem 0.75rem;
+  background: var(--color-surface-hover, #f9fafb);
+  border-radius: 4px;
+  font-size: 13px;
+  color: var(--color-text-primary, #111827);
+}
+
+.status-chart__hover-dot {
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+}
+
+.status-chart__hover-text {
+  font-weight: 500;
+}
+
+/* Legend */
+.status-chart__legend {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+  margin-top: 1rem;
+  padding-top: 1rem;
+  border-top: 1px solid var(--color-border, #e5e7eb);
+  width: 100%;
+}
+
+.status-chart__legend-item {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.375rem 0.5rem;
+  border-radius: 4px;
+  cursor: pointer;
+  transition: background 0.15s ease;
+}
+
+.status-chart__legend-item:hover,
+.status-chart__legend-item:focus,
+.status-chart__legend-item--active {
+  background: var(--color-surface-hover, #f9fafb);
+  outline: none;
+}
+
+.status-chart__legend-color {
+  width: 12px;
+  height: 12px;
+  border-radius: 2px;
+  flex-shrink: 0;
+}
+
+.status-chart__legend-label {
+  font-size: 13px;
+  color: var(--color-text-primary, #374151);
+  flex: 1;
+}
+
+.status-chart__legend-value {
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--color-text-secondary, #6b7280);
+}
+
+/* Responsive */
+@media (max-width: 768px) {
+  .status-chart {
+    padding: 0.75rem;
+  }
+
+  .status-chart__svg {
+    width: 160px;
+    height: 160px;
+  }
+
+  .status-chart__center-value {
+    font-size: 24px;
+  }
+
+  .status-chart__legend-item {
+    padding: 0.25rem 0.375rem;
+  }
+
+  .status-chart__legend-label,
+  .status-chart__legend-value {
+    font-size: 12px;
+  }
+}

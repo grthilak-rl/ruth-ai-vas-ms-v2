@@ -1,0 +1,161 @@
+/**
+ * Violations Over Time Chart Styles
+ * Per analytics-design.md §5.2.3
+ */
+
+.violations-chart {
+  background: var(--color-surface, #fff);
+  border-radius: 4px;
+  padding: 1rem;
+}
+
+.violations-chart--loading,
+.violations-chart--empty {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 300px;
+  color: var(--color-text-secondary, #666);
+}
+
+.violations-chart__skeleton {
+  width: 100%;
+  height: 200px;
+  background: linear-gradient(
+    90deg,
+    var(--color-skeleton-start, #f0f0f0) 25%,
+    var(--color-skeleton-mid, #e0e0e0) 50%,
+    var(--color-skeleton-start, #f0f0f0) 75%
+  );
+  background-size: 200% 100%;
+  animation: skeleton-loading 1.5s infinite;
+  border-radius: 4px;
+}
+
+@keyframes skeleton-loading {
+  0% {
+    background-position: 200% 0;
+  }
+  100% {
+    background-position: -200% 0;
+  }
+}
+
+.violations-chart__svg {
+  width: 100%;
+  height: auto;
+  display: block;
+}
+
+.violations-chart__grid-line {
+  stroke: var(--color-border, #e5e7eb);
+  stroke-width: 1;
+  stroke-dasharray: 4 4;
+}
+
+.violations-chart__axis-label {
+  font-size: 11px;
+  fill: var(--color-text-secondary, #6b7280);
+}
+
+.violations-chart__line {
+  stroke: var(--color-primary, #3b82f6);
+  transition: opacity 0.2s ease;
+}
+
+.violations-chart__line--total {
+  stroke: #3b82f6;
+  stroke-width: 2.5;
+}
+
+.violations-chart__point {
+  fill: #3b82f6;
+  stroke: white;
+  stroke-width: 2;
+  cursor: pointer;
+  transition: r 0.15s ease, fill 0.15s ease;
+}
+
+.violations-chart__point:hover,
+.violations-chart__point:focus {
+  r: 8;
+  fill: #2563eb;
+  outline: none;
+}
+
+/* Legend */
+.violations-chart__legend {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 1rem;
+  margin-top: 1rem;
+  padding-top: 1rem;
+  border-top: 1px solid var(--color-border, #e5e7eb);
+}
+
+.violations-chart__legend-item {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  font-size: 13px;
+  color: var(--color-text-secondary, #6b7280);
+}
+
+.violations-chart__legend-color {
+  width: 12px;
+  height: 12px;
+  border-radius: 2px;
+}
+
+/* Tooltip */
+.violations-chart__tooltip {
+  background: var(--color-surface, #fff);
+  border: 1px solid var(--color-border, #e5e7eb);
+  border-radius: 6px;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
+  padding: 0.75rem;
+  z-index: 1000;
+  pointer-events: none;
+  min-width: 140px;
+}
+
+.violations-chart__tooltip-header {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--color-text-primary, #111827);
+  margin-bottom: 0.5rem;
+  padding-bottom: 0.5rem;
+  border-bottom: 1px solid var(--color-border, #e5e7eb);
+}
+
+.violations-chart__tooltip-content {
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+}
+
+.violations-chart__tooltip-row {
+  display: flex;
+  justify-content: space-between;
+  font-size: 12px;
+  color: var(--color-text-secondary, #6b7280);
+}
+
+.violations-chart__tooltip-row strong {
+  color: var(--color-text-primary, #111827);
+}
+
+/* Responsive */
+@media (max-width: 768px) {
+  .violations-chart {
+    padding: 0.75rem;
+  }
+
+  .violations-chart__legend {
+    gap: 0.75rem;
+  }
+
+  .violations-chart__legend-item {
+    font-size: 12px;
+  }
+}
