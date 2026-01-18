@@ -162,11 +162,13 @@ Table `evidence` has columns:
         # 1. Preprocess question for date handling
         processed_question, date_hint = self._preprocess_question(question)
 
-        # 2. Generate SQL
-        try:
-            sql = await self._generate_sql(processed_question, date_hint)
-        except OllamaError as e:
-            raise ChatLLMError(f"Failed to generate SQL: {e}") from e
+        # 2. Generate SQL - try template matching first
+        sql = self._try_template_match(processed_question)
+        if not sql:
+            try:
+                sql = await self._generate_sql(processed_question, date_hint)
+            except OllamaError as e:
+                raise ChatLLMError(f"Failed to generate SQL: {e}") from e
 
         logger.info("Generated SQL", question=question[:100], sql=sql[:200])
 
@@ -191,11 +193,15 @@ Table `evidence` has columns:
             ) from e
 
         # 5. Generate natural language answer
-        try:
-            answer = await self._generate_answer(question, results)
-        except OllamaError as e:
-            logger.warning("NLG failed, using fallback", error=str(e))
-            answer = self._fallback_answer(results)
+        # For simple count/list queries, use direct answer to avoid hallucination
+        if self._is_simple_query(safe_sql, results):
+            answer = self._direct_answer(question, safe_sql, results)
+        else:
+            try:
+                answer = await self._generate_answer(question, results)
+            except OllamaError as e:
+                logger.warning("NLG failed, using fallback", error=str(e))
+                answer = self._fallback_answer(results)
 
         execution_time_ms = int((time.time() - start_time) * 1000)
 
@@ -207,6 +213,41 @@ Table `evidence` has columns:
             "row_count": len(results),
             "execution_time_ms": execution_time_ms,
         }
+
+    def _try_template_match(self, question: str) -> str | None:
+        """Try to match question to predefined SQL templates."""
+        q_lower = question.lower().strip()
+
+        # Common patterns
+        patterns = {
+            # Violations
+            r"how many violations": "SELECT COUNT(*) FROM violations",
+            r"count violations": "SELECT COUNT(*) FROM violations",
+            r"show.*open violations": "SELECT * FROM violations WHERE status = 'open'",
+            r"list.*open violations": "SELECT * FROM violations WHERE status = 'open'",
+            r"open violations": "SELECT * FROM violations WHERE status = 'open'",
+            r"show.*violations": "SELECT * FROM violations",
+            r"list.*violations": "SELECT * FROM violations",
+
+            # Devices/Cameras
+            r"how many (devices|cameras)": "SELECT COUNT(*) FROM devices",
+            r"count (devices|cameras)": "SELECT COUNT(*) FROM devices",
+            r"show.*(devices|cameras)": "SELECT * FROM devices",
+            r"list.*(devices|cameras)": "SELECT * FROM devices",
+
+            # Events
+            r"how many events": "SELECT COUNT(*) FROM events",
+            r"count events": "SELECT COUNT(*) FROM events",
+            r"show.*events": "SELECT * FROM events",
+            r"list.*events": "SELECT * FROM events",
+        }
+
+        import re
+        for pattern, sql in patterns.items():
+            if re.search(pattern, q_lower):
+                return sql
+
+        return None
 
     def _preprocess_question(self, question: str) -> tuple[str, str]:
         """Extract date references from question."""
@@ -270,10 +311,18 @@ Table `evidence` has columns:
         prompt = f"""Generate a PostgreSQL SELECT query for this question.
 
 Schema:
-- violations: id, device_id, type, status, confidence, timestamp, camera_name
-- events: id, device_id, event_type, confidence, timestamp
-- devices: id, vas_device_id, name, description, location, is_active
-- stream_sessions: id, device_id, model_id, state, started_at, stopped_at
+- violations: id, device_id, type (ENUM: 'fall_detected', 'ppe_violation'), status (ENUM: 'open', 'reviewed', 'dismissed', 'resolved'), confidence, timestamp, camera_name
+- events: id, device_id, event_type (ENUM: 'fall_detected', 'no_fall', 'person_detected', 'ppe_violation', 'ppe_compliant', 'unknown'), confidence, timestamp
+- devices: id, vas_device_id, name, description, location, is_active (NOTE: "cameras" refers to devices table)
+- stream_sessions: id, device_id, model_id, state (ENUM: 'live', 'stopped', 'starting', 'stopping', 'error'), started_at, stopped_at
+
+RULES:
+1. violations.type is the violation TYPE ('fall_detected' or 'ppe_violation')
+2. violations.status is the lifecycle STATUS ('open', 'reviewed', 'dismissed', or 'resolved')
+3. Use 'open' for unreviewed violations, NOT 'pending' or 'active'
+4. "cameras" = "devices" table
+5. Keep queries SIMPLE - use COUNT(*) for counting, avoid JOIN unless necessary
+6. Match the examples exactly for similar questions
 
 Examples:
 Q: How many violations are there?
@@ -282,14 +331,29 @@ A: SELECT COUNT(*) FROM violations
 Q: How many devices are there?
 A: SELECT COUNT(*) FROM devices
 
+Q: How many cameras are there?
+A: SELECT COUNT(*) FROM devices
+
 Q: How many events are there?
 A: SELECT COUNT(*) FROM events
 
 Q: List all violations
 A: SELECT * FROM violations
 
+Q: List all devices
+A: SELECT * FROM devices
+
+Q: List all cameras
+A: SELECT * FROM devices
+
 Q: Show open violations
 A: SELECT * FROM violations WHERE status = 'open'
+
+Q: Show fall detection violations
+A: SELECT * FROM violations WHERE type = 'fall_detected'
+
+Q: How many unresolved violations?
+A: SELECT COUNT(*) FROM violations WHERE status IN ('open', 'reviewed')
 
 Q: "{question}"
 A: """
@@ -344,9 +408,10 @@ The user asked: "{question}"
 The SQL query returned these results:
 {rows_text}
 
-Write a **short, direct answer** (1-3 sentences max).
+CRITICAL: Use ONLY the data shown above. Do NOT invent, guess, or hallucinate any information.
+If you see "count: 5", say "5". If you see 3 rows of data, say "3 records".
+Write a **short, direct answer** (1-3 sentences max) using ONLY the actual data provided.
 Be clear and concise. Do not add extra commentary or questions.
-If showing counts or statistics, be precise with numbers.
 """
 
         answer = await self._ollama.generate(
@@ -356,6 +421,61 @@ If showing counts or statistics, be precise with numbers.
         )
 
         return answer.strip()
+
+    def _is_simple_query(self, sql: str, results: list[dict[str, Any]]) -> bool:
+        """Check if this is a simple count or list query."""
+        sql_upper = sql.upper()
+
+        # Count queries
+        if "COUNT(*)" in sql_upper or "COUNT(1)" in sql_upper:
+            return True
+
+        # Simple SELECT * queries with few results
+        if sql_upper.startswith("SELECT *") and len(results) <= 10:
+            return True
+
+        # Single aggregate result
+        if len(results) == 1 and len(results[0]) == 1:
+            return True
+
+        return False
+
+    def _direct_answer(self, question: str, sql: str, results: list[dict[str, Any]]) -> str:
+        """Generate direct answer without LLM for simple queries."""
+        if not results:
+            return "No results found."
+
+        sql_upper = sql.upper()
+
+        # Handle COUNT queries
+        if "COUNT(*)" in sql_upper or "COUNT(1)" in sql_upper:
+            count_value = list(results[0].values())[0]
+
+            # Detect what we're counting from SQL
+            if "violations" in sql.lower():
+                if "status = 'open'" in sql.lower():
+                    return f"There are {count_value} open violations."
+                return f"There are {count_value} violations."
+            elif "devices" in sql.lower():
+                return f"There are {count_value} devices."
+            elif "events" in sql.lower():
+                return f"There are {count_value} events."
+            else:
+                return f"Count: {count_value}"
+
+        # Handle SELECT * queries - just return count
+        if sql_upper.startswith("SELECT *"):
+            count = len(results)
+            if "violations" in sql.lower():
+                if "status = 'open'" in sql.lower():
+                    return f"There are {count} open violations."
+                return f"Found {count} violations."
+            elif "devices" in sql.lower():
+                return f"Found {count} devices."
+            return f"Found {count} records."
+
+        # Default fallback
+        return self._fallback_answer(results)
 
     def _fallback_answer(self, results: list[dict[str, Any]]) -> str:
         """Generate basic answer when NLG fails."""

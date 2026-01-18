@@ -1,0 +1,38 @@
+# Ruth AI Unified Runtime - Python Dependencies
+# MVP Phase 1 - Core dependencies only
+# Phase 2 will add model-specific dependencies (PyTorch with CUDA, etc.)
+
+# Web Framework
+fastapi==0.109.0
+uvicorn[standard]==0.27.0
+
+# Data Validation
+pydantic==2.5.3
+pydantic-settings==2.1.0
+
+# HTTP Client (for frame resolution in Phase 2)
+httpx==0.26.0
+
+# YAML parsing (for model.yaml contracts)
+pyyaml==6.0.1
+
+# Basic compute (CPU-only for MVP)
+# Phase 2 will switch to GPU-enabled torch
+torch==2.1.2+cpu --extra-index-url https://download.pytorch.org/whl/cpu
+torchvision==0.16.2+cpu --extra-index-url https://download.pytorch.org/whl/cpu
+
+# Image processing
+opencv-python-headless==4.9.0.80
+numpy==1.26.3
+pillow==10.2.0
+
+# Observability (Phase 3)
+prometheus-client==0.19.0
+
+# Utilities
+python-multipart==0.0.6
+
+# Testing (development/CI only)
+# pytest==7.4.3
+# pytest-asyncio==0.23.2
+# locust==2.20.0

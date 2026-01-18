@@ -1,0 +1,92 @@
+# Ruth AI Unified Runtime - Standalone Docker Compose
+#
+# This is a STANDALONE compose file for the unified runtime ONLY.
+# It does NOT modify the main docker-compose.yml (which contains demo-critical services).
+#
+# Usage:
+#   docker-compose -f ai/docker-compose.unified.yml up --build
+#
+# For integration with main stack:
+#   docker-compose -f docker-compose.yml -f ai/docker-compose.unified.yml up
+#
+# Phase 1 MVP: CPU-only, single service
+# Phase 3: Add GPU support
+
+version: '3.8'
+
+networks:
+  ruth-ai-internal:
+    external: true
+    name: ruth-ai-vas-ms-v2_ruth-ai-internal  # Reference existing network from main compose
+
+services:
+  # ============================================
+  # Unified AI Runtime (NEW - Phase 1 MVP)
+  # Multi-model inference platform
+  # ============================================
+  unified-ai-runtime:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: ruth-ai-unified-runtime
+    restart: unless-stopped
+    ports:
+      - "8012:8000"  # NEW port (8010=fall, 8011=ppe, 8012=unified)
+    volumes:
+      # Mount model plugins directory
+      - ./models:/app/ai/models:ro
+    environment:
+      - ENVIRONMENT=production
+      - LOG_LEVEL=info
+      - MODELS_ROOT=/app/ai/models
+      - MAX_CONCURRENT_INFERENCES=10
+      - SERVER_HOST=0.0.0.0
+      - SERVER_PORT=8000
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 90s  # Models need time to load
+    networks:
+      - ruth-ai-internal
+    deploy:
+      resources:
+        limits:
+          memory: 4G  # Adjust based on models
+        reservations:
+          memory: 2G
+          # GPU support will be added in Phase 3:
+          # devices:
+          #   - driver: nvidia
+          #     count: 1
+          #     capabilities: [gpu]
+
+  # ============================================
+  # Development Helper (Optional)
+  # Hot-reload server for development
+  # ============================================
+  unified-ai-runtime-dev:
+    profiles: ["dev"]  # Only starts with --profile dev
+    build:
+      context: .
+      dockerfile: Dockerfile
+      target: base  # Use base stage for dev
+    container_name: ruth-ai-unified-runtime-dev
+    restart: "no"
+    ports:
+      - "8013:8000"  # Dev port
+    volumes:
+      # Mount source code for hot-reload
+      - ./runtime:/app/ai/runtime
+      - ./server:/app/ai/server
+      - ./models:/app/ai/models
+    environment:
+      - ENVIRONMENT=development
+      - LOG_LEVEL=debug
+      - MODELS_ROOT=/app/ai/models
+    command: >
+      sh -c "pip install -r /tmp/requirements.txt &&
+             uvicorn ai.server.main:app --host 0.0.0.0 --port 8000 --reload"
+    networks:
+      - ruth-ai-internal

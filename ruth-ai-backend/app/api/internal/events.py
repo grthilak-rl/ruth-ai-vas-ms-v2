@@ -271,9 +271,25 @@ async def _ensure_device(db: DBSession, device_id) -> Device:
 
     Args:
         db: Database session
-        device_id: VAS device ID
+        device_id: Could be either Ruth AI device UUID or VAS device ID
     """
-    # Query by ID (which we'll use as vas_device_id for stubs)
+    # First, check if this is a Ruth AI device ID (primary key lookup)
+    try:
+        stmt = select(Device).where(Device.id == device_id)
+        result = await db.execute(stmt)
+        device = result.scalar_one_or_none()
+        if device is not None:
+            logger.info(
+                "Found device by Ruth AI ID (should use VAS device ID instead)",
+                device_id=str(device.id),
+                vas_device_id=device.vas_device_id,
+                name=device.name
+            )
+            return device
+    except Exception:
+        pass  # Not a valid UUID for Ruth AI device, try VAS device ID
+
+    # Query by VAS device ID
     stmt = select(Device).where(Device.vas_device_id == str(device_id))
     result = await db.execute(stmt)
     device = result.scalar_one_or_none()

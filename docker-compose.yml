@@ -201,6 +201,12 @@ services:
       # NLP Chat Service (optional - runs as separate microservice)
       NLP_CHAT_SERVICE_URL: http://ruth-ai-nlp-chat:8081
       NLP_CHAT_TIMEOUT_SECONDS: ${NLP_CHAT_TIMEOUT_SECONDS:-120}
+      # Unified AI Runtime (note: env_prefix + field name = full env var)
+      UNIFIED_RUNTIME_UNIFIED_RUNTIME_URL: ${UNIFIED_RUNTIME_UNIFIED_RUNTIME_URL:-http://host.docker.internal:8012}
+      UNIFIED_RUNTIME_ENABLE_UNIFIED_RUNTIME: ${UNIFIED_RUNTIME_ENABLE_UNIFIED_RUNTIME:-true}
+      UNIFIED_RUNTIME_UNIFIED_RUNTIME_TIMEOUT: ${UNIFIED_RUNTIME_UNIFIED_RUNTIME_TIMEOUT:-30.0}
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
     depends_on:
       postgres:
         condition: service_healthy
@@ -242,7 +248,7 @@ services:
       DATABASE_URL: postgresql+asyncpg://${POSTGRES_USER:-ruth}:${POSTGRES_PASSWORD:-ruth_dev_password}@postgres:5432/${POSTGRES_DB:-ruth_ai}
       # Ollama LLM Configuration
       OLLAMA_BASE_URL: http://ollama:11434
-      OLLAMA_SQL_MODEL: ${OLLAMA_SQL_MODEL:-llama3.2:1b}
+      OLLAMA_SQL_MODEL: ${OLLAMA_SQL_MODEL:-anindya/prem1b-sql-ollama-fp116}
       OLLAMA_NLG_MODEL: ${OLLAMA_NLG_MODEL:-llama3.2:1b}
       OLLAMA_SQL_TEMPERATURE: ${OLLAMA_SQL_TEMPERATURE:-0.0}
       OLLAMA_NLG_TEMPERATURE: ${OLLAMA_NLG_TEMPERATURE:-0.3}
@@ -297,6 +303,10 @@ services:
         limits:
           memory: 8G
         reservations:
+          devices:
+            - driver: nvidia
+              count: 1
+              capabilities: [gpu]
           memory: 4G
 
   # ============================================

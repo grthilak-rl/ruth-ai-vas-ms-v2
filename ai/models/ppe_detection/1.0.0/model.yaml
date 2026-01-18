@@ -1,16 +1,16 @@
-# Fall Detection Model Contract
+# PPE Detection Model Contract
 # Version: 1.0.0
 # This contract describes the model's capabilities and requirements
-# Adapted from the existing fall-detection-model container
+# Multi-model PPE detector using YOLOv8
 
 # Contract schema version (required)
 contract_schema_version: "1.0.0"
 
 # Model identity (required)
-model_id: "fall_detection"
+model_id: "ppe_detection"
 version: "1.0.0"
-display_name: "Fall Detection"
-description: "Detects falls using human pose estimation and keypoint analysis with YOLOv7-Pose"
+display_name: "PPE Detection"
+description: "Detects Personal Protective Equipment (PPE) violations using multiple YOLOv8 models"
 author: "Ruth AI Team"
 
 # Input specification (required)
@@ -29,14 +29,19 @@ output:
   schema:
     violation_detected:
       type: "boolean"
-      description: "True if fall detected"
+      description: "True if PPE violation detected"
     violation_type:
       type: "string"
       enum:
-        - "fall_detected"
-        - "possible_fall"
+        - "ppe_violation"
+        - "missing_hardhat"
+        - "missing_vest"
+        - "missing_goggles"
+        - "missing_gloves"
+        - "missing_boots"
+        - "missing_mask"
         - null
-      description: "Type of violation detected"
+      description: "Type of PPE violation detected"
     severity:
       type: "string"
       enum:
@@ -49,27 +54,40 @@ output:
       type: "number"
       min: 0.0
       max: 1.0
-      description: "Detection confidence score"
+      description: "Overall detection confidence score"
     detections:
       type: "array"
-      description: "Array of detected persons with poses"
+      description: "Array of PPE detections"
       items:
         type: "object"
         properties:
+          item:
+            type: "string"
+            description: "PPE item name"
+          status:
+            type: "string"
+            enum:
+              - "present"
+              - "missing"
+            description: "PPE item status"
           bbox:
             type: "array"
             items: "number"
             description: "Bounding box [x1, y1, x2, y2]"
-          keypoints:
-            type: "array"
-            items: "number"
-            description: "Pose keypoints (17 x 3: x, y, confidence)"
           confidence:
             type: "number"
             description: "Detection confidence"
-    detection_count:
+    persons_detected:
       type: "integer"
       description: "Number of persons detected"
+    violations:
+      type: "array"
+      items: "string"
+      description: "List of missing PPE items"
+    ppe_present:
+      type: "array"
+      items: "string"
+      description: "List of detected PPE items"
     metadata:
       type: "object"
       description: "Additional metadata"
@@ -79,20 +97,20 @@ hardware:
   supports_cpu: true
   supports_gpu: true
   supports_jetson: true
-  min_ram_mb: 2048
-  min_gpu_memory_mb: 512
+  min_ram_mb: 3072
+  min_gpu_memory_mb: 1024
 
 # Performance hints (required)
 performance:
-  inference_time_hint_ms: 200
-  recommended_fps: 5
-  max_fps: 15
+  inference_time_hint_ms: 300
+  recommended_fps: 3
+  max_fps: 10
   recommended_batch_size: 1
   warmup_iterations: 2
 
 # Resource limits (optional but recommended)
 limits:
-  max_memory_mb: 4096
+  max_memory_mb: 6144
   inference_timeout_ms: 5000
   preprocessing_timeout_ms: 1000
   postprocessing_timeout_ms: 1000
@@ -105,10 +123,8 @@ capabilities:
   provides_tracking: false
   confidence_calibrated: false
   provides_bounding_boxes: true
-  provides_keypoints: true
+  provides_keypoints: false
 
 # Entry points (optional, defaults shown)
 entry_points:
   inference: "inference.py"
-  # preprocess: "preprocess.py"  # Preprocessing is done internally in inference.py
-  # postprocess: "postprocess.py"  # Not used for this model

@@ -1,0 +1,114 @@
+"""
+Fall Detection Model - Preprocessing
+
+Converts raw BGR frames to format expected by YOLOv7-Pose model.
+Adapted from fall-detection-model/detector.py preprocessing logic.
+"""
+
+import torch
+import cv2
+import numpy as np
+from typing import Any, Tuple
+
+
+def preprocess(frame: np.ndarray, **kwargs) -> Tuple[torch.Tensor, Tuple[int, int]]:
+    """
+    Preprocess frame for YOLOv7-Pose inference.
+
+    Args:
+        frame: Input frame as numpy array (H, W, 3) in BGR format
+        **kwargs: Additional preprocessing parameters
+
+    Returns:
+        Tuple of (preprocessed_tensor, original_shape)
+        - preprocessed_tensor: (1, 3, H, W) tensor ready for model
+        - original_shape: (height, width) of original frame for postprocessing
+
+    Raises:
+        ValueError: If frame is invalid
+    """
+    if frame is None or frame.size == 0:
+        raise ValueError("Invalid frame: empty or None")
+
+    if len(frame.shape) != 3 or frame.shape[2] != 3:
+        raise ValueError(f"Invalid frame shape: {frame.shape}, expected (H, W, 3)")
+
+    original_shape = frame.shape[:2]  # (height, width)
+
+    # Resize to model input size (640x640 for YOLOv7)
+    target_size = kwargs.get("target_size", 640)
+    img_resized = letterbox_resize(frame, new_shape=target_size)
+
+    # Convert BGR to RGB
+    img_rgb = cv2.cvtColor(img_resized, cv2.COLOR_BGR2RGB)
+
+    # Normalize to [0, 1] and convert to CHW format
+    img_normalized = img_rgb.astype(np.float32) / 255.0
+    img_chw = np.transpose(img_normalized, (2, 0, 1))  # HWC -> CHW
+
+    # Convert to tensor and add batch dimension
+    img_tensor = torch.from_numpy(img_chw).unsqueeze(0)  # (1, 3, H, W)
+
+    return img_tensor, original_shape
+
+
+def letterbox_resize(
+    img: np.ndarray,
+    new_shape: int = 640,
+    color: Tuple[int, int, int] = (114, 114, 114),
+    auto: bool = True,
+    scaleFill: bool = False,
+    scaleup: bool = True,
+    stride: int = 32,
+) -> np.ndarray:
+    """
+    Resize image with letterboxing (padding to maintain aspect ratio).
+
+    This matches the preprocessing used in YOLOv7-Pose training.
+
+    Args:
+        img: Input image
+        new_shape: Target size
+        color: Padding color (BGR)
+        auto: Automatically adjust padding to be stride-multiple
+        scaleFill: Stretch image to fill (no letterbox)
+        scaleup: Allow scaling up
+        stride: Model stride for auto padding
+
+    Returns:
+        Resized and padded image
+    """
+    shape = img.shape[:2]  # current shape [height, width]
+
+    if isinstance(new_shape, int):
+        new_shape = (new_shape, new_shape)
+
+    # Scale ratio (new / old)
+    r = min(new_shape[0] / shape[0], new_shape[1] / shape[1])
+    if not scaleup:  # only scale down, do not scale up (for better val mAP)
+        r = min(r, 1.0)
+
+    # Compute padding
+    new_unpad = int(round(shape[1] * r)), int(round(shape[0] * r))
+    dw, dh = new_shape[1] - new_unpad[0], new_shape[0] - new_unpad[1]  # wh padding
+
+    if auto:  # minimum rectangle
+        dw, dh = np.mod(dw, stride), np.mod(dh, stride)  # wh padding
+    elif scaleFill:  # stretch
+        dw, dh = 0, 0
+        new_unpad = (new_shape[1], new_shape[0])
+        r = min(new_shape[0] / shape[0], new_shape[1] / shape[1])  # scales
+
+    dw /= 2  # divide padding into 2 sides
+    dh /= 2
+
+    if shape[::-1] != new_unpad:  # resize
+        img = cv2.resize(img, new_unpad, interpolation=cv2.INTER_LINEAR)
+
+    top, bottom = int(round(dh - 0.1)), int(round(dh + 0.1))
+    left, right = int(round(dw - 0.1)), int(round(dw + 0.1))
+    img = cv2.copyMakeBorder(
+        img, top, bottom, left, right, cv2.BORDER_CONSTANT, value=color
+    )  # add border
+
+    return img

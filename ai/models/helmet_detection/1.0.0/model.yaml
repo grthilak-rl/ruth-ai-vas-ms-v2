@@ -1,16 +1,15 @@
-# Fall Detection Model Contract
+# Helmet Detection Model Contract
 # Version: 1.0.0
-# This contract describes the model's capabilities and requirements
-# Adapted from the existing fall-detection-model container
+# Detects safety helmet presence/absence on workers
 
 # Contract schema version (required)
 contract_schema_version: "1.0.0"
 
 # Model identity (required)
-model_id: "fall_detection"
+model_id: "helmet_detection"
 version: "1.0.0"
-display_name: "Fall Detection"
-description: "Detects falls using human pose estimation and keypoint analysis with YOLOv7-Pose"
+display_name: "Helmet Detection"
+description: "Detects presence or absence of safety helmets on workers in construction/industrial environments"
 author: "Ruth AI Team"
 
 # Input specification (required)
@@ -29,14 +28,15 @@ output:
   schema:
     violation_detected:
       type: "boolean"
-      description: "True if fall detected"
+      description: "True if worker without helmet detected"
     violation_type:
       type: "string"
       enum:
-        - "fall_detected"
-        - "possible_fall"
+        - "no_helmet"
+        - "helmet_present"
+        - "no_person"
         - null
-      description: "Type of violation detected"
+      description: "Type of detection"
     severity:
       type: "string"
       enum:
@@ -52,7 +52,7 @@ output:
       description: "Detection confidence score"
     detections:
       type: "array"
-      description: "Array of detected persons with poses"
+      description: "Array of detected persons with helmet status"
       items:
         type: "object"
         properties:
@@ -60,13 +60,19 @@ output:
             type: "array"
             items: "number"
             description: "Bounding box [x1, y1, x2, y2]"
-          keypoints:
-            type: "array"
-            items: "number"
-            description: "Pose keypoints (17 x 3: x, y, confidence)"
+          label:
+            type: "string"
+            enum:
+              - "person_with_helmet"
+              - "person_without_helmet"
+            description: "Detection class"
           confidence:
             type: "number"
             description: "Detection confidence"
+          helmet_bbox:
+            type: "array"
+            items: "number"
+            description: "Helmet bounding box [x1, y1, x2, y2] if detected"
     detection_count:
       type: "integer"
       description: "Number of persons detected"
@@ -79,24 +85,24 @@ hardware:
   supports_cpu: true
   supports_gpu: true
   supports_jetson: true
-  min_ram_mb: 2048
-  min_gpu_memory_mb: 512
+  min_ram_mb: 1024
+  min_gpu_memory_mb: 256
 
 # Performance hints (required)
 performance:
-  inference_time_hint_ms: 200
-  recommended_fps: 5
-  max_fps: 15
+  inference_time_hint_ms: 100
+  recommended_fps: 10
+  max_fps: 30
   recommended_batch_size: 1
   warmup_iterations: 2
 
 # Resource limits (optional but recommended)
 limits:
-  max_memory_mb: 4096
-  inference_timeout_ms: 5000
-  preprocessing_timeout_ms: 1000
-  postprocessing_timeout_ms: 1000
-  max_concurrent_inferences: 2
+  max_memory_mb: 2048
+  inference_timeout_ms: 3000
+  preprocessing_timeout_ms: 500
+  postprocessing_timeout_ms: 500
+  max_concurrent_inferences: 4
 
 # Model capabilities (optional)
 capabilities:
@@ -105,10 +111,9 @@ capabilities:
   provides_tracking: false
   confidence_calibrated: false
   provides_bounding_boxes: true
-  provides_keypoints: true
+  provides_keypoints: false
 
 # Entry points (optional, defaults shown)
 entry_points:
   inference: "inference.py"
-  # preprocess: "preprocess.py"  # Preprocessing is done internally in inference.py
-  # postprocess: "postprocess.py"  # Not used for this model
+  preprocess: "preprocess.py"

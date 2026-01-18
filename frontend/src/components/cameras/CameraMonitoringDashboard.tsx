@@ -13,6 +13,7 @@ import {
   autoSelectCameras,
   getMaxCameras,
 } from '../../utils/cameraGridPreferences';
+import { fetchModelsStatus, type ModelStatusInfo } from '../../state/api/models.api';
 import './CameraMonitoringDashboard.css';
 
 /**
@@ -57,6 +58,27 @@ export function CameraMonitoringDashboard({
   // AI model toggles (session-scoped, per F7)
   // Map of cameraId -> modelId -> enabled
   const [aiModelToggles, setAiModelToggles] = useState<Record<string, Record<string, boolean>>>({});
+
+  // Available AI models from backend
+  const [availableModels, setAvailableModels] = useState<ModelStatusInfo[]>([]);
+  const [modelsLoading, setModelsLoading] = useState(true);
+
+  // Fetch available models from backend
+  useEffect(() => {
+    async function loadModels() {
+      try {
+        setModelsLoading(true);
+        const response = await fetchModelsStatus();
+        setAvailableModels(response.models);
+      } catch (error) {
+        console.error('[CameraMonitoring] Failed to fetch models:', error);
+        setAvailableModels([]);
+      } finally {
+        setModelsLoading(false);
+      }
+    }
+    loadModels();
+  }, []);
 
   // Auto-select cameras when cameras list or grid size changes
   useEffect(() => {
@@ -114,29 +136,56 @@ export function CameraMonitoringDashboard({
     return cameras.filter((camera) => selectedCameraIds.includes(camera.id));
   }, [cameras, selectedCameraIds]);
 
-  // Get AI models for a camera (mock for now, will be replaced with actual API data)
-  const getAIModelsForCamera = useCallback(
-    (cameraId: string): AIModel[] => {
-      // Mock AI models - in real implementation, this would come from API
-      // Default to inactive (false) - user must explicitly enable AI detection
-      const isFallDetectionEnabled = aiModelToggles[cameraId]?.['fall_detection'] === true;
-      const isPPEDetectionEnabled = aiModelToggles[cameraId]?.['ppe_detection'] === true;
+  // Convert backend model to frontend AIModel format
+  const convertToAIModel = useCallback(
+    (model: ModelStatusInfo, cameraId: string): AIModel => {
+      const isEnabled = aiModelToggles[cameraId]?.[model.model_id] === true;
 
-      const fallDetectionModel: AIModel = {
-        id: 'fall_detection',
-        name: 'Fall Detection',
-        state: isFallDetectionEnabled ? 'active' : 'inactive',
+      // Determine state based on toggle and backend health
+      let state: AIModel['state'];
+      if (model.health === 'unhealthy' || model.status === 'error') {
+        state = 'unavailable';
+      } else if (model.health === 'degraded') {
+        state = isEnabled ? 'degraded' : 'inactive';
+      } else if (isEnabled) {
+        state = 'active';
+      } else {
+        state = 'inactive';
+      }
+
+      // Create display name - add suffix for clarity
+      let displayName = model.model_id
+        .split('_')
+        .map(word => word.charAt(0).toUpperCase() + word.slice(1))
+        .join(' ');
+
+      // Add suffix to distinguish unified vs container versions
+      if (model.model_id.includes('_container')) {
+        displayName = displayName.replace(' Container', ' (Legacy)');
+      }
+
+      return {
+        id: model.model_id,
+        name: displayName,
+        state,
       };
-
-      const ppeDetectionModel: AIModel = {
-        id: 'ppe_detection',
-        name: 'PPE Detection',
-        state: isPPEDetectionEnabled ? 'active' : 'inactive',
-      };
-
-      return [fallDetectionModel, ppeDetectionModel];
     },
     [aiModelToggles]
+  );
+
+  // Get AI models for a camera
+  const getAIModelsForCamera = useCallback(
+    (cameraId: string): AIModel[] => {
+      if (modelsLoading || availableModels.length === 0) {
+        return [];
+      }
+
+      // Convert all available models to AIModel format
+      return availableModels
+        .filter((model: ModelStatusInfo) => model.health === 'healthy' || model.health === 'degraded')
+        .map((model: ModelStatusInfo) => convertToAIModel(model, cameraId));
+    },
+    [availableModels, modelsLoading, convertToAIModel]
   );
 
   // Get detection status for a camera
