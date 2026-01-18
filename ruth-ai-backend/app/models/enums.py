@@ -29,9 +29,15 @@ class EventType(str, enum.Enum):
     From API Contract Section 3.1 - Event Schema.
     """
 
+    # Fall Detection Events
     FALL_DETECTED = "fall_detected"
     NO_FALL = "no_fall"
     PERSON_DETECTED = "person_detected"
+
+    # PPE Detection Events
+    PPE_VIOLATION = "ppe_violation"
+    PPE_COMPLIANT = "ppe_compliant"
+
     UNKNOWN = "unknown"
 
 
@@ -43,6 +49,7 @@ class ViolationType(str, enum.Enum):
     """
 
     FALL_DETECTED = "fall_detected"
+    PPE_VIOLATION = "ppe_violation"
 
 
 class ViolationStatus(str, enum.Enum):

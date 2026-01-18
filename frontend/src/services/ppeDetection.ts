@@ -107,13 +107,10 @@ export const PPE_LABELS: Record<string, string> = {
 };
 
 const DEFAULT_CONFIG: PPEDetectionConfig = {
-  fps: 0.02,  // 1 frame every 50 seconds - PPE detection with 12 models on CPU is very slow (~30-60s)
+  fps: 1,  // 1 FPS - PPE detection with 12 models on GPU (~500ms-1s per frame)
   enabled: true,
   mode: 'full',  // Full mode: detect persons, present PPE items, and missing/violation items
 };
-
-// Model outputs coordinates in 640x640 space
-const MODEL_SIZE = 640;
 
 /**
  * Transform raw API response to the expected PPEDetectionResult format
@@ -330,10 +327,14 @@ export async function detectPPE(
 
     const rawResult: RawPPEAPIResponse = await response.json();
     console.log('[PPEDetection] Raw API response:', rawResult);
+    console.log('[PPEDetection] Raw detections count:', rawResult.detections?.length || 0);
+    console.log('[PPEDetection] Raw detections:', rawResult.detections);
 
     // Transform the flat API response into person-centric structure
     const transformedResult = transformAPIResponse(rawResult, videoWidth, videoHeight);
     console.log('[PPEDetection] Transformed result:', transformedResult);
+    console.log('[PPEDetection] Transformed detections count:', transformedResult.detections?.length || 0);
+    console.log('[PPEDetection] Transformed detections:', transformedResult.detections);
 
     return transformedResult;
   } catch (error) {
@@ -363,11 +364,26 @@ export function drawPPEDetections(
   ctx: CanvasRenderingContext2D,
   detections: PPEPersonDetection[],
   canvasWidth: number,
-  canvasHeight: number
+  canvasHeight: number,
+  videoWidth?: number,
+  videoHeight?: number
 ): void {
-  // Scale factors from model coordinates (640x640) to canvas size
-  const scaleX = canvasWidth / MODEL_SIZE;
-  const scaleY = canvasHeight / MODEL_SIZE;
+  console.log('[PPEDetection] drawPPEDetections called:', {
+    detectionsCount: detections.length,
+    canvasWidth,
+    canvasHeight,
+    videoWidth,
+    videoHeight,
+    detections: JSON.stringify(detections, null, 2)
+  });
+
+  // IMPORTANT: Coordinates from the API are in the VIDEO frame dimensions,
+  // NOT in 640x640 model space. We need to scale from video dimensions to canvas dimensions.
+  // If videoWidth/Height are not provided, assume they match canvas (no scaling needed)
+  const scaleX = videoWidth ? canvasWidth / videoWidth : 1;
+  const scaleY = videoHeight ? canvasHeight / videoHeight : 1;
+
+  console.log('[PPEDetection] Scale factors:', { scaleX, scaleY, videoWidth, videoHeight, canvasWidth, canvasHeight });
 
   detections.forEach((detection, personIdx) => {
     const { person_bbox, ppe_items, violations, missing_ppe } = detection;

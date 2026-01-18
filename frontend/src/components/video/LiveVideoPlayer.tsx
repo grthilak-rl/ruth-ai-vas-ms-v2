@@ -362,7 +362,9 @@ export function LiveVideoPlayer({
         ctx,
         ppeDetection.detections,
         canvas.width,
-        canvas.height
+        canvas.height,
+        ppeDetection.videoWidth,
+        ppeDetection.videoHeight
       );
     }
   }, [fallDetection, ppeDetection, showOverlays, isDetectionActive, isFallDetectionEnabled, isPPEDetectionEnabled]);
@@ -443,7 +445,7 @@ export function LiveVideoPlayer({
 
           // Start PPE detection if enabled
           if (isPPEDetectionEnabled) {
-            ppeDetectionRef.current = new PPEDetectionManager({ fps: 0.02, mode: 'full' });  // 1 FPS due to 12 models, full mode for persons + PPE
+            ppeDetectionRef.current = new PPEDetectionManager({ fps: 1, mode: 'full' });  // 1 FPS with GPU acceleration
             ppeDetectionRef.current.start(video, (result) => {
               console.log('[LiveVideoPlayer] Got PPE detection result:', result.detections?.length || 0, 'detections');
               setPPEDetection(result);
@@ -546,7 +548,7 @@ export function LiveVideoPlayer({
     // Handle PPE detection toggle
     if (isDetectionActive && isPPEDetectionEnabled && !ppeDetectionRef.current) {
       console.log('[LiveVideoPlayer] Starting PPE detection (enabled while playing)');
-      ppeDetectionRef.current = new PPEDetectionManager({ fps: 0.02, mode: 'full' });
+      ppeDetectionRef.current = new PPEDetectionManager({ fps: 1, mode: 'full' });
       ppeDetectionRef.current.start(video, (result) => {
         setPPEDetection(result);
         if (result.violation_detected) {

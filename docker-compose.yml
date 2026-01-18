@@ -140,9 +140,13 @@ services:
     deploy:
       resources:
         limits:
-          memory: 6G
+          memory: 8G
         reservations:
-          memory: 3G
+          devices:
+            - driver: nvidia
+              count: 1
+              capabilities: [gpu]
+          memory: 4G
 
   # ============================================
   # Ruth AI Backend API
@@ -155,6 +159,13 @@ services:
     restart: unless-stopped
     ports:
       - "8090:8080"
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: all
+              capabilities: [gpu, utility]
     environment:
       # Application
       RUTH_AI_ENV: ${RUTH_AI_ENV:-development}

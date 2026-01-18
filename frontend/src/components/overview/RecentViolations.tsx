@@ -162,7 +162,7 @@ function formatViolationType(type: string): string {
     case 'fall_detected':
       return 'Fall Detected';
     case 'ppe_violation':
-      return 'PPE Missing';
+      return 'PPE Violation';
     case 'unauthorized_access':
       return 'Unauthorized Entry';
     default:

@@ -28,6 +28,20 @@ function formatRelativeTime(isoTimestamp: string): string {
 }
 
 /**
+ * Get violation type display label
+ */
+function getTypeLabel(type: Violation['type']): string {
+  switch (type) {
+    case 'fall_detected':
+      return 'Fall Detected';
+    case 'ppe_violation':
+      return 'PPE Violation';
+    default:
+      return type;
+  }
+}
+
+/**
  * Get status display label (F6 §3.3)
  */
 function getStatusLabel(status: Violation['status']): string {
@@ -69,6 +83,7 @@ export function ViolationMetadata({
 }: ViolationMetadataProps) {
   const relativeTime = formatRelativeTime(violation.timestamp);
   const statusLabel = getStatusLabel(violation.status);
+  const typeLabel = getTypeLabel(violation.type);
 
   return (
     <div className="violation-metadata">
@@ -77,7 +92,7 @@ export function ViolationMetadata({
       <dl className="violation-metadata__list">
         <div className="violation-metadata__item">
           <dt className="violation-metadata__label">Type</dt>
-          <dd className="violation-metadata__value">Fall Detected</dd>
+          <dd className="violation-metadata__value">{typeLabel}</dd>
         </div>
 
         <div className="violation-metadata__item">

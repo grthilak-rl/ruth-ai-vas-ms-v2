@@ -77,6 +77,7 @@ DETECTION_CLASS_TO_EVENT_TYPE: dict[str, EventType] = {
 # Event types that can trigger violations
 ACTIONABLE_EVENT_TYPES: set[EventType] = {
     EventType.FALL_DETECTED,
+    EventType.PPE_VIOLATION,
 }
 
 

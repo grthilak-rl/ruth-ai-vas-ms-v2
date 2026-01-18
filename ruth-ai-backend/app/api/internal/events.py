@@ -107,7 +107,7 @@ async def ingest_event(
     1. Ensures Device exists (fetches from VAS if missing)
     2. Ensures StreamSession exists (creates stub if missing)
     3. Persists the Event
-    4. Creates a Violation if event_type == "fall_detected"
+    4. Creates a Violation if event_type is "fall_detected" or "ppe_violation"
     5. Links Event → Violation
     """
     logger.info(
@@ -178,13 +178,20 @@ async def ingest_event(
 
     logger.info("Event persisted", event_id=str(event.id))
 
-    # 6. Create Violation if fall_detected
+    # 6. Create Violation if fall_detected or ppe_violation
     violation = None
-    if event_type_enum == EventType.FALL_DETECTED:
+    if event_type_enum in (EventType.FALL_DETECTED, EventType.PPE_VIOLATION):
+        # Determine violation type based on event type
+        violation_type = (
+            ViolationType.FALL_DETECTED
+            if event_type_enum == EventType.FALL_DETECTED
+            else ViolationType.PPE_VIOLATION
+        )
+
         violation = Violation(
             device_id=device.id,
             stream_session_id=stream_session.id if stream_session else None,
-            type=ViolationType.FALL_DETECTED,
+            type=violation_type,
             status=ViolationStatus.OPEN,
             confidence=request.confidence,
             timestamp=request.timestamp,
@@ -203,6 +210,7 @@ async def ingest_event(
             "Violation created",
             violation_id=str(violation.id),
             event_id=str(event.id),
+            violation_type=violation_type.value,
         )
 
         # 7. Trigger evidence capture (fire-and-forget, don't block on failures)
