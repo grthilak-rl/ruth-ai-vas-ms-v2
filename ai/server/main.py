@@ -38,6 +38,13 @@ from ai.runtime.sandbox import SandboxManager
 from ai.runtime.pipeline import InferencePipeline
 from ai.runtime.concurrency import ConcurrencyManager, AdmissionController
 from ai.runtime.gpu_manager import GPUManager
+from ai.runtime.reporting import (
+    CapabilityPublisher,
+    HealthAggregator,
+    RuntimeCapacityTracker,
+    create_reporting_stack,
+)
+from ai.runtime.backend_client import HTTPBackendClient, BackendClientConfig
 
 from ai.server import dependencies
 from ai.server.config import get_config
@@ -52,16 +59,6 @@ from ai.observability.metrics import (
 
 # Will be configured by configure_logging()
 logger = None
-
-
-# Simple CapabilityReporter for MVP
-class SimpleCapabilityReporter:
-    """Simple capability reporter for MVP (replaces complex CapabilityPublisher)."""
-
-    def __init__(self, registry: ModelRegistry):
-        self.registry = registry
-        self.runtime_id = os.getenv("RUNTIME_ID", f"unified-runtime-{uuid.uuid4().hex[:8]}")
-        logger.info(f"CapabilityReporter initialized with runtime_id={self.runtime_id}")
 
 
 @asynccontextmanager
@@ -134,16 +131,55 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
         admission_controller=admission_controller,
     )
 
-    # Capability reporter (simplified for MVP)
-    reporter = SimpleCapabilityReporter(registry=registry)
+    # ==========================================================================
+    # Backend Integration - Capability Publisher
+    # ==========================================================================
+
+    backend_client = None
+    capability_publisher = None
+
+    if config.backend_integration_enabled:
+        logger.info("Initializing backend integration...", extra={
+            "backend_url": config.backend_url
+        })
+
+        # Create backend client
+        backend_client_config = BackendClientConfig(
+            backend_url=config.backend_url,
+            api_key=config.backend_api_key,
+            service_token=config.backend_service_token,
+            connect_timeout=config.backend_connect_timeout_seconds,
+            read_timeout=config.backend_read_timeout_seconds,
+        )
+
+        backend_client = HTTPBackendClient(
+            config=backend_client_config,
+            runtime_id=config.runtime_id,
+        )
+
+        # Create reporting stack with actual backend client
+        capability_publisher, health_reporter, capacity_tracker = create_reporting_stack(
+            registry=registry,
+            backend_client=backend_client,
+            max_concurrent=config.max_concurrent_inferences,
+            runtime_id=config.runtime_id,
+            concurrency_manager=concurrency_manager,
+        )
+
+        # Store in dependencies
+        dependencies.set_backend_client(backend_client)
+        dependencies.set_capability_publisher(capability_publisher)
+
+        logger.info("Backend integration initialized")
+    else:
+        logger.info("Backend integration disabled by configuration")
 
     # Store in global dependencies
     dependencies.set_registry(registry)
     dependencies.set_pipeline(pipeline)
-    dependencies.set_reporter(reporter)
     dependencies.set_sandbox_manager(sandbox_manager)
 
-    # Store GPU manager (will add setter to dependencies)
+    # Store GPU manager
     app.state.gpu_manager = gpu_manager
     app.state.config = config
 
@@ -246,6 +282,15 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     except Exception as e:
         logger.error(f"Error during model discovery/loading: {e}", exc_info=True)
 
+    # ==========================================================================
+    # Start Capability Publisher (after models loaded)
+    # ==========================================================================
+
+    if capability_publisher is not None:
+        logger.info("Starting capability publisher...")
+        capability_publisher.start()
+        logger.info("Capability publisher started - will register with backend")
+
     yield  # Server runs
 
     # ==========================================================================
@@ -258,13 +303,29 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
 
     shutdown_start = asyncio.get_event_loop().time()
 
-    # Step 1: Stop accepting new inference requests
+    # Step 1: Stop capability publisher and deregister from backend
+    try:
+        if capability_publisher is not None:
+            logger.info("Stopping capability publisher...")
+            capability_publisher.stop(timeout=5.0)
+            logger.info("Capability publisher stopped")
+
+        if backend_client is not None:
+            logger.info("Deregistering from backend...")
+            correlation_id = str(uuid.uuid4())
+            backend_client.deregister(correlation_id)
+            backend_client.close()
+            logger.info("Backend client closed")
+    except Exception as e:
+        logger.error(f"Error during backend deregistration: {e}")
+
+    # Step 2: Stop accepting new inference requests
     # (uvicorn handles this automatically via readiness probe returning 503)
 
-    # Step 2: Wait for in-flight requests to complete
+    # Step 3: Wait for in-flight requests to complete
     # (uvicorn's --timeout-graceful-shutdown handles this)
 
-    # Step 3: Shutdown sandbox executors
+    # Step 4: Shutdown sandbox executors
     try:
         if sandbox_manager:
             logger.info("Shutting down sandbox executors...")
@@ -273,7 +334,7 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     except Exception as e:
         logger.error(f"Error during sandbox shutdown: {e}")
 
-    # Step 4: Unload models and release GPU memory
+    # Step 5: Unload models and release GPU memory
     try:
         all_versions = registry.get_all_versions()
         for version_info in all_versions:
@@ -297,7 +358,7 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     except Exception as e:
         logger.error(f"Error during model cleanup: {e}")
 
-    # Step 5: Release GPU resources
+    # Step 6: Release GPU resources
     try:
         if gpu_manager:
             gpu_manager.release_all()
@@ -305,7 +366,7 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     except Exception as e:
         logger.error(f"Error releasing GPU resources: {e}")
 
-    # Step 6: Clear dependencies
+    # Step 7: Clear dependencies
     dependencies.clear_all()
 
     shutdown_duration = asyncio.get_event_loop().time() - shutdown_start

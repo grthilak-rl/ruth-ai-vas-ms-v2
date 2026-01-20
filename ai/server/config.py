@@ -198,6 +198,51 @@ class RuntimeConfig(BaseSettings):
     )
 
     # =========================================================================
+    # Backend Integration Configuration
+    # =========================================================================
+
+    backend_url: str = Field(
+        default="http://localhost:8080",
+        description="Ruth AI Backend URL for capability registration"
+    )
+
+    backend_integration_enabled: bool = Field(
+        default=True,
+        description="Enable push-based registration with backend"
+    )
+
+    backend_api_key: Optional[str] = Field(
+        default=None,
+        description="API key for backend authentication"
+    )
+
+    backend_service_token: Optional[str] = Field(
+        default=None,
+        description="Service token for backend authentication"
+    )
+
+    backend_health_push_interval_seconds: float = Field(
+        default=30.0,
+        ge=5.0,
+        le=300.0,
+        description="Interval for pushing health updates to backend"
+    )
+
+    backend_connect_timeout_seconds: float = Field(
+        default=5.0,
+        ge=1.0,
+        le=30.0,
+        description="Backend connection timeout"
+    )
+
+    backend_read_timeout_seconds: float = Field(
+        default=10.0,
+        ge=1.0,
+        le=60.0,
+        description="Backend read timeout"
+    )
+
+    # =========================================================================
     # Pydantic Configuration
     # =========================================================================
 

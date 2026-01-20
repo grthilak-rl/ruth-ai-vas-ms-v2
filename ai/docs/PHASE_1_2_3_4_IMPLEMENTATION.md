@@ -1,4 +1,4 @@
-# AI Runtime Hardening - Phase 1, 2, 3, 4 Implementation
+# AI Runtime Hardening - Phase 1, 2, 3, 4 Implementation + Backend Integration
 
 **Branch:** `ai-runtime-fix`
 **Date:** January 2026
@@ -8,7 +8,7 @@
 
 ## Overview
 
-This document describes the implementation of four phases of AI Runtime hardening based on the code review findings. These changes prepare the unified runtime for production containerization without affecting the currently running Ruth AI system.
+This document describes the implementation of four phases of AI Runtime hardening based on the code review findings, plus the Backend Integration component. These changes prepare the unified runtime for production containerization and enable push-based communication with ruth-ai-backend.
 
 ---
 
@@ -412,12 +412,13 @@ class InferenceRequest(BaseModel):
 | Phase 2: Server & Observability | 18 | ✅ Passing |
 | Phase 3: Containerization | 27 | ✅ Passing |
 | Phase 4: Production Hardening | 24 | ✅ Passing |
-| **Total** | **96** | ✅ **All Passing** |
+| Backend Integration | 19 | ✅ Passing |
+| **Total** | **115** | ✅ **All Passing** |
 
 **Run Tests:**
 ```bash
 source ai/venv/bin/activate
-python -m pytest ai/tests/test_runtime_phase1.py ai/tests/test_runtime_phase2.py ai/tests/test_runtime_phase3.py ai/tests/test_runtime_phase4.py -v
+python -m pytest ai/tests/test_runtime_phase1.py ai/tests/test_runtime_phase2.py ai/tests/test_runtime_phase3.py ai/tests/test_runtime_phase4.py ai/tests/test_backend_integration.py -v
 ```
 
 ---
@@ -457,6 +458,71 @@ python -m pytest ai/tests/test_runtime_phase1.py ai/tests/test_runtime_phase2.py
 | `ai/runtime/registry.py` | Fixed RWLock writer starvation |
 | `ai/server/routes/inference.py` | Added comprehensive input validation |
 | `ai/tests/test_runtime_phase4.py` | NEW - 24 tests |
+
+### Backend Integration
+| File | Change |
+|------|--------|
+| `ai/runtime/backend_client.py` | NEW - HTTP client for backend communication |
+| `ai/server/config.py` | Added backend integration configuration |
+| `ai/server/dependencies.py` | Added backend_client and capability_publisher |
+| `ai/server/main.py` | Integrated backend client lifecycle |
+| `ai/tests/test_backend_integration.py` | NEW - 19 tests |
+
+---
+
+## Backend Integration
+
+### Overview
+
+The Backend Integration component enables push-based capability registration and health reporting from the AI Runtime to ruth-ai-backend.
+
+### Architecture
+
+```
+AI Runtime                              Ruth AI Backend
+    │                                          │
+    │  POST /internal/v1/ai-runtime/register   │
+    │  {runtime_id, models, capacity}          │
+    │ ────────────────────────────────────────>│
+    │                                          │
+    │  POST /internal/v1/ai-runtime/health     │
+    │  {runtime_health, model_healths}         │
+    │ ────────────────────────────────────────>│
+    │                                          │
+    │  POST /internal/v1/ai-runtime/deregister │
+    │  {runtime_id, reason}                    │
+    │ ────────────────────────────────────────>│
+```
+
+### Configuration
+
+Environment variables for backend integration:
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `BACKEND_URL` | `http://localhost:8080` | Backend service URL |
+| `BACKEND_INTEGRATION_ENABLED` | `true` | Enable/disable integration |
+| `BACKEND_API_KEY` | - | API key for authentication |
+| `BACKEND_SERVICE_TOKEN` | - | Service token for authentication |
+| `BACKEND_HEALTH_PUSH_INTERVAL_SECONDS` | `30.0` | Health push interval |
+| `BACKEND_CONNECT_TIMEOUT_SECONDS` | `5.0` | Connection timeout |
+| `BACKEND_READ_TIMEOUT_SECONDS` | `10.0` | Read timeout |
+
+### Key Components
+
+**HTTPBackendClient** (`ai/runtime/backend_client.py`)
+- Synchronous HTTP client using httpx
+- Retry logic with exponential backoff
+- Registration, health push, and deregistration APIs
+- Correlation ID tracking for all requests
+
+**AsyncHTTPBackendClient**
+- Async variant for use in FastAPI async endpoints
+
+**Server Integration** (`ai/server/main.py`)
+- Backend client initialized at startup (if enabled)
+- CapabilityPublisher started after models loaded
+- Graceful deregistration on shutdown
 
 ---
 
