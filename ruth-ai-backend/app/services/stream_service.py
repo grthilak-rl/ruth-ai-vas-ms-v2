@@ -546,17 +546,25 @@ class StreamService:
         """Get active session for device.
 
         Active means STARTING, LIVE, or STOPPING.
+
+        Note: If multiple active sessions exist (data integrity issue),
+        returns the most recently started one to avoid MultipleResultsFound.
         """
         active_states = [
             StreamState.STARTING,
             StreamState.LIVE,
             StreamState.STOPPING,
         ]
-        stmt = select(StreamSession).where(
-            and_(
-                StreamSession.device_id == device_id,
-                StreamSession.state.in_(active_states),
+        stmt = (
+            select(StreamSession)
+            .where(
+                and_(
+                    StreamSession.device_id == device_id,
+                    StreamSession.state.in_(active_states),
+                )
             )
+            .order_by(StreamSession.started_at.desc())
+            .limit(1)
         )
         result = await self._db.execute(stmt)
         return result.scalar_one_or_none()
