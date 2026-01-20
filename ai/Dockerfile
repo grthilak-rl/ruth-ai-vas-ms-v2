@@ -44,6 +44,7 @@ COPY --from=dependencies /usr/local/bin /usr/local/bin
 # Copy application code
 COPY runtime/ /app/ai/runtime/
 COPY server/ /app/ai/server/
+COPY observability/ /app/ai/observability/
 COPY models/ /app/ai/models/
 COPY __init__.py /app/ai/__init__.py
 
@@ -61,9 +62,10 @@ ENV MAX_CONCURRENT_INFERENCES=10
 # Expose HTTP port
 EXPOSE 8000
 
-# Health check
+# Health check - uses /health/ready for proper readiness validation
+# start-period allows 90s for model loading before health checks begin
 HEALTHCHECK --interval=30s --timeout=10s --retries=3 --start-period=90s \
-    CMD curl -f http://localhost:8000/health || exit 1
+    CMD curl -f http://localhost:8000/health/ready || exit 1
 
 # Run server
 CMD ["python", "-m", "uvicorn", "ai.server.main:app", "--host", "0.0.0.0", "--port", "8000"]

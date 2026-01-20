@@ -1,14 +1,24 @@
 """
-Ruth AI Unified Runtime - Health Endpoint
+Ruth AI Unified Runtime - Health Endpoints
 
-Provides runtime health status and model availability.
+Provides runtime health status, liveness, and readiness probes.
+
+Endpoint Design:
+- GET /health         - Detailed health status (verbose mode available)
+- GET /health/live    - Liveness probe (is the process alive?)
+- GET /health/ready   - Readiness probe (can it serve requests?)
+
+Container Orchestrator Usage:
+- Kubernetes: livenessProbe → /health/live, readinessProbe → /health/ready
+- Docker: HEALTHCHECK → /health/ready
 """
 
 from typing import Any, Dict, List, Optional
 from fastapi import APIRouter, Query, HTTPException, Request, status
+from fastapi.responses import JSONResponse
 from pydantic import BaseModel, Field
 
-from ai.server.dependencies import get_registry, get_reporter
+from ai.server.dependencies import get_registry, get_reporter, get_sandbox_manager
 from ai.runtime.models import HealthStatus, LoadState
 
 router = APIRouter()
@@ -167,3 +177,121 @@ async def health_check(
         ]
 
     return response
+
+
+class LivenessResponse(BaseModel):
+    """Liveness probe response - minimal check that process is alive."""
+
+    status: str = Field(description="alive or dead")
+    timestamp: str = Field(description="Current server timestamp")
+
+
+class ReadinessResponse(BaseModel):
+    """Readiness probe response - checks if runtime can serve requests."""
+
+    ready: bool = Field(description="True if runtime can accept inference requests")
+    status: str = Field(description="ready, not_ready, or degraded")
+    models_ready: int = Field(description="Number of models ready for inference")
+    reason: Optional[str] = Field(None, description="Reason if not ready")
+
+
+@router.get("/live", response_model=LivenessResponse, tags=["health"])
+async def liveness_probe() -> LivenessResponse:
+    """
+    Liveness probe - checks if the process is alive.
+
+    This endpoint always returns 200 if the HTTP server is responsive.
+    It does NOT check model state or dependencies.
+
+    Use case: Kubernetes livenessProbe - restart container if this fails.
+
+    Returns:
+        LivenessResponse with status "alive"
+    """
+    from datetime import datetime, timezone
+
+    return LivenessResponse(
+        status="alive",
+        timestamp=datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
+    )
+
+
+@router.get("/ready", response_model=ReadinessResponse, tags=["health"])
+async def readiness_probe(request: Request) -> ReadinessResponse:
+    """
+    Readiness probe - checks if runtime can serve inference requests.
+
+    This endpoint checks:
+    1. Registry is initialized
+    2. At least one model is loaded and READY
+    3. Sandbox manager is available
+
+    Use case: Kubernetes readinessProbe - stop routing traffic if not ready.
+
+    Returns:
+        ReadinessResponse with ready status
+
+    Raises:
+        503: Runtime not ready to serve requests
+    """
+    from datetime import datetime
+
+    registry = get_registry()
+    sandbox_manager = get_sandbox_manager()
+
+    # Check 1: Components initialized
+    if not registry:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail=ReadinessResponse(
+                ready=False,
+                status="not_ready",
+                models_ready=0,
+                reason="Registry not initialized"
+            ).model_dump()
+        )
+
+    if not sandbox_manager:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail=ReadinessResponse(
+                ready=False,
+                status="not_ready",
+                models_ready=0,
+                reason="Sandbox manager not initialized"
+            ).model_dump()
+        )
+
+    # Check 2: At least one model is READY
+    all_versions = registry.get_all_versions()
+    models_ready = sum(1 for v in all_versions if v.state == LoadState.READY)
+
+    if models_ready == 0:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail=ReadinessResponse(
+                ready=False,
+                status="not_ready",
+                models_ready=0,
+                reason="No models ready for inference"
+            ).model_dump()
+        )
+
+    # Check 3: Determine if degraded (some models unhealthy)
+    models_unhealthy = sum(1 for v in all_versions if v.health == HealthStatus.UNHEALTHY)
+    models_degraded = sum(1 for v in all_versions if v.health == HealthStatus.DEGRADED)
+
+    if models_unhealthy > 0 or models_degraded > 0:
+        return ReadinessResponse(
+            ready=True,
+            status="degraded",
+            models_ready=models_ready,
+            reason=f"{models_unhealthy} unhealthy, {models_degraded} degraded models"
+        )
+
+    return ReadinessResponse(
+        ready=True,
+        status="ready",
+        models_ready=models_ready,
+        reason=None
+    )
