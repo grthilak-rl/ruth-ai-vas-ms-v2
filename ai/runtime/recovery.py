@@ -45,17 +45,150 @@ Usage:
 
 from __future__ import annotations
 
+import json
 import logging
+import os
 import threading
 import time
 from dataclasses import dataclass, field
-from datetime import datetime
+from datetime import datetime, timezone
 from enum import Enum
+from pathlib import Path
 from typing import Any, Callable, Optional
 
 from ai.runtime.models import HealthStatus, LoadState
 
 logger = logging.getLogger(__name__)
+
+
+# =============================================================================
+# PERSISTENCE - File-based circuit breaker state storage
+# =============================================================================
+
+
+class CircuitBreakerPersistence:
+    """
+    File-based persistence for circuit breaker state.
+
+    Survives container restarts by saving state to a JSON file.
+    State is loaded on startup and saved on significant changes.
+
+    The persistence file location can be configured via environment
+    variable CIRCUIT_BREAKER_STATE_FILE, defaulting to /app/data/circuit_breaker_state.json.
+
+    Thread-safe: uses a lock for file operations.
+    """
+
+    DEFAULT_STATE_FILE = "/app/data/circuit_breaker_state.json"
+
+    def __init__(self, state_file: Optional[str] = None):
+        """
+        Initialize persistence manager.
+
+        Args:
+            state_file: Path to state file (default: from env or DEFAULT_STATE_FILE)
+        """
+        self._state_file = Path(
+            state_file
+            or os.environ.get("CIRCUIT_BREAKER_STATE_FILE", self.DEFAULT_STATE_FILE)
+        )
+        self._lock = threading.Lock()
+
+        # Ensure parent directory exists
+        self._state_file.parent.mkdir(parents=True, exist_ok=True)
+
+    def save_state(self, states: dict[str, "CircuitBreakerState"]) -> bool:
+        """
+        Save circuit breaker states to file.
+
+        Args:
+            states: Dictionary of qualified_id -> CircuitBreakerState
+
+        Returns:
+            True if save succeeded
+        """
+        with self._lock:
+            try:
+                serialized = {}
+                for qid, state in states.items():
+                    serialized[qid] = {
+                        "model_id": state.model_id,
+                        "version": state.version,
+                        "state": state.state.value,
+                        "unhealthy_transitions": state.unhealthy_transitions,
+                        "consecutive_timeouts": state.consecutive_timeouts,
+                        "recovery_attempts": state.recovery_attempts,
+                        "disabled_at": state.disabled_at,
+                        "disabled_reason": state.disabled_reason.value if state.disabled_reason else None,
+                        "saved_at": datetime.now(timezone.utc).isoformat(),
+                    }
+
+                # Write atomically using temp file
+                temp_file = self._state_file.with_suffix(".tmp")
+                with open(temp_file, "w") as f:
+                    json.dump(serialized, f, indent=2)
+
+                # Atomic rename
+                temp_file.replace(self._state_file)
+
+                logger.debug(
+                    f"Circuit breaker state saved to {self._state_file}",
+                    extra={"state_count": len(states)},
+                )
+                return True
+
+            except Exception as e:
+                logger.warning(
+                    f"Failed to save circuit breaker state: {e}",
+                    extra={"state_file": str(self._state_file)},
+                )
+                return False
+
+    def load_state(self) -> dict[str, dict[str, Any]]:
+        """
+        Load circuit breaker states from file.
+
+        Returns:
+            Dictionary of qualified_id -> serialized state dict
+        """
+        with self._lock:
+            try:
+                if not self._state_file.exists():
+                    logger.debug("No circuit breaker state file found, starting fresh")
+                    return {}
+
+                with open(self._state_file, "r") as f:
+                    data = json.load(f)
+
+                logger.info(
+                    f"Loaded circuit breaker state from {self._state_file}",
+                    extra={"state_count": len(data)},
+                )
+                return data
+
+            except Exception as e:
+                logger.warning(
+                    f"Failed to load circuit breaker state: {e}",
+                    extra={"state_file": str(self._state_file)},
+                )
+                return {}
+
+    def clear_state(self) -> bool:
+        """
+        Clear persisted state (delete file).
+
+        Returns:
+            True if cleared successfully
+        """
+        with self._lock:
+            try:
+                if self._state_file.exists():
+                    self._state_file.unlink()
+                    logger.info(f"Circuit breaker state file cleared: {self._state_file}")
+                return True
+            except Exception as e:
+                logger.warning(f"Failed to clear circuit breaker state file: {e}")
+                return False
 
 
 # =============================================================================
@@ -293,6 +426,8 @@ class CircuitBreaker:
         self,
         policy: Optional[FailurePolicy] = None,
         on_should_disable: Optional[DisableCallback] = None,
+        persistence: Optional[CircuitBreakerPersistence] = None,
+        enable_persistence: bool = True,
     ):
         """
         Initialize the circuit breaker.
@@ -300,15 +435,76 @@ class CircuitBreaker:
         Args:
             policy: Failure policy configuration
             on_should_disable: Callback when a model should be disabled
+            persistence: Optional persistence manager (auto-created if enable_persistence=True)
+            enable_persistence: Whether to enable file-based persistence
         """
         self.policy = policy or FailurePolicy()
         self._states: dict[str, CircuitBreakerState] = {}
         self._lock = threading.Lock()
         self._on_should_disable = on_should_disable
 
+        # Setup persistence
+        self._persistence = persistence
+        if enable_persistence and persistence is None:
+            self._persistence = CircuitBreakerPersistence()
+
+        # Load persisted state on startup
+        if self._persistence:
+            self._load_persisted_state()
+
     def set_disable_callback(self, callback: Optional[DisableCallback]) -> None:
         """Set or update the disable callback."""
         self._on_should_disable = callback
+
+    def _load_persisted_state(self) -> None:
+        """Load persisted state from file on startup."""
+        if not self._persistence:
+            return
+
+        saved_states = self._persistence.load_state()
+
+        with self._lock:
+            for qid, saved in saved_states.items():
+                try:
+                    state = CircuitBreakerState(
+                        model_id=saved["model_id"],
+                        version=saved["version"],
+                    )
+                    state.state = CircuitState(saved["state"])
+                    state.unhealthy_transitions = saved.get("unhealthy_transitions", 0)
+                    state.consecutive_timeouts = saved.get("consecutive_timeouts", 0)
+                    state.recovery_attempts = saved.get("recovery_attempts", 0)
+                    state.disabled_at = saved.get("disabled_at")
+                    if saved.get("disabled_reason"):
+                        state.disabled_reason = DisablementReason(saved["disabled_reason"])
+
+                    self._states[qid] = state
+
+                    logger.info(
+                        "Restored circuit breaker state",
+                        extra={
+                            "model_id": state.model_id,
+                            "version": state.version,
+                            "state": state.state.value,
+                            "recovery_attempts": state.recovery_attempts,
+                        },
+                    )
+                except Exception as e:
+                    logger.warning(
+                        f"Failed to restore circuit breaker state for {qid}: {e}"
+                    )
+
+    def _persist_state(self) -> None:
+        """Persist current state to file (called on significant changes)."""
+        if not self._persistence:
+            return
+
+        # Get states under lock
+        with self._lock:
+            states_copy = dict(self._states)
+
+        # Save outside lock to avoid blocking
+        self._persistence.save_state(states_copy)
 
     def _get_or_create_state(
         self,
@@ -377,6 +573,8 @@ class CircuitBreaker:
 
             if should_disable:
                 state.open_circuit(disable_reason)
+                # Persist state change
+                self._persist_state()
 
         # Log the failure
         logger.debug(
@@ -441,6 +639,8 @@ class CircuitBreaker:
                 if state.half_open_successes >= self.policy.half_open_success_threshold:
                     state.close_circuit()
                     should_close = True
+                    # Persist state change
+                    self._persist_state()
 
         if should_close:
             logger.info(
@@ -620,6 +820,9 @@ class CircuitBreaker:
             state.close_circuit()
             state.recovery_attempts = 0  # Full reset
 
+        # Persist state change
+        self._persist_state()
+
         logger.info(
             "Circuit breaker force closed",
             extra={
@@ -640,11 +843,16 @@ class CircuitBreaker:
             True if state was removed
         """
         qualified_id = f"{model_id}:{version}"
+        removed = False
 
         with self._lock:
             if qualified_id in self._states:
                 del self._states[qualified_id]
-                return True
+                removed = True
+
+        if removed:
+            self._persist_state()
+            return True
 
         return False
 

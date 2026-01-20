@@ -651,15 +651,25 @@ class ModelRegistry:
 
 class _RWLock:
     """
-    Simple read-write lock for thread safety.
+    Fair read-write lock for thread safety.
 
     Allows multiple concurrent readers but exclusive writers.
-    This is a fallback if threading.RWLock is not available.
+    Uses writer-preference to prevent writer starvation:
+    - When a writer is waiting, new readers block
+    - Existing readers complete, then writer runs
+    - After writer, readers can proceed again
+
+    This prevents the case where a continuous stream of readers
+    could indefinitely block a waiting writer.
     """
 
     def __init__(self):
-        self._read_ready = threading.Condition(threading.Lock())
+        self._lock = threading.Lock()
+        self._readers_ok = threading.Condition(self._lock)
+        self._writers_ok = threading.Condition(self._lock)
         self._readers = 0
+        self._writers_waiting = 0
+        self._writer_active = False
 
     def read(self) -> "_RWLockReadContext":
         """Acquire read lock."""
@@ -670,28 +680,40 @@ class _RWLock:
         return _RWLockWriteContext(self)
 
     def _acquire_read(self) -> None:
-        self._read_ready.acquire()
-        try:
+        with self._lock:
+            # Wait if a writer is active OR if writers are waiting
+            # (writer-preference to prevent starvation)
+            while self._writer_active or self._writers_waiting > 0:
+                self._readers_ok.wait()
             self._readers += 1
-        finally:
-            self._read_ready.release()
 
     def _release_read(self) -> None:
-        self._read_ready.acquire()
-        try:
+        with self._lock:
             self._readers -= 1
             if self._readers == 0:
-                self._read_ready.notify_all()
-        finally:
-            self._read_ready.release()
+                # Wake up any waiting writer
+                self._writers_ok.notify()
 
     def _acquire_write(self) -> None:
-        self._read_ready.acquire()
-        while self._readers > 0:
-            self._read_ready.wait()
+        with self._lock:
+            self._writers_waiting += 1
+            try:
+                # Wait for all readers to finish and no other writer active
+                while self._readers > 0 or self._writer_active:
+                    self._writers_ok.wait()
+                self._writer_active = True
+            finally:
+                self._writers_waiting -= 1
 
     def _release_write(self) -> None:
-        self._read_ready.release()
+        with self._lock:
+            self._writer_active = False
+            # If there are waiting writers, wake one up
+            # Otherwise, wake up all waiting readers
+            if self._writers_waiting > 0:
+                self._writers_ok.notify()
+            else:
+                self._readers_ok.notify_all()
 
 
 class _RWLockReadContext:
