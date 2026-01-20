@@ -106,7 +106,7 @@ FROM system-deps AS runtime
 ARG VARIANT=cpu
 
 # Copy installed packages from dependencies stage
-COPY --from=dependencies /usr/local/lib/python3*/dist-packages /usr/local/lib/python3.11/dist-packages
+COPY --from=dependencies /usr/local/lib/python3.11/site-packages /usr/local/lib/python3.11/site-packages
 COPY --from=dependencies /usr/local/bin /usr/local/bin
 
 # For Jetson, packages are in different location

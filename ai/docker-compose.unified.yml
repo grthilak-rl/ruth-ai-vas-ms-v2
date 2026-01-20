@@ -42,6 +42,10 @@ services:
       - MAX_CONCURRENT_INFERENCES=10
       - SERVER_HOST=0.0.0.0
       - SERVER_PORT=8000
+      # Backend Integration
+      - BACKEND_URL=http://ruth-ai-vas-backend:8080
+      - BACKEND_INTEGRATION_ENABLED=true
+      - BACKEND_HEALTH_PUSH_INTERVAL_SECONDS=30
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
       interval: 30s

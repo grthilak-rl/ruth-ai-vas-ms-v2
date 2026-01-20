@@ -32,7 +32,7 @@ sys.path.insert(0, str(Path(__file__).parent.parent))
 from ai.runtime.discovery import DiscoveryScanner
 from ai.runtime.registry import ModelRegistry
 from ai.runtime.loader import ModelLoader
-from ai.runtime.models import LoadState
+from ai.runtime.models import LoadState, HealthStatus
 from ai.runtime.validator import ContractValidator
 from ai.runtime.sandbox import SandboxManager
 from ai.runtime.pipeline import InferencePipeline
@@ -169,6 +169,7 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
         # Store in dependencies
         dependencies.set_backend_client(backend_client)
         dependencies.set_capability_publisher(capability_publisher)
+        dependencies.set_reporter(health_reporter)
 
         logger.info("Backend integration initialized")
     else:
@@ -234,6 +235,13 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
                             model_id,
                             version,
                             LoadState.READY
+                        )
+
+                        # Update registry health to HEALTHY
+                        registry.update_health(
+                            model_id,
+                            version,
+                            HealthStatus.HEALTHY
                         )
 
                         # Update metrics

@@ -18,7 +18,8 @@ from fastapi import APIRouter, Query, HTTPException, Request, status
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel, Field
 
-from ai.server.dependencies import get_registry, get_reporter, get_sandbox_manager
+from ai.server.dependencies import get_registry, get_capability_publisher, get_sandbox_manager
+from ai.server.config import get_config
 from ai.runtime.models import HealthStatus, LoadState
 
 router = APIRouter()
@@ -99,9 +100,10 @@ async def health_check(
         503: Runtime not ready or unhealthy
     """
     registry = get_registry()
-    reporter = get_reporter()
+    publisher = get_capability_publisher()
+    config = get_config()
 
-    if not registry or not reporter:
+    if not registry:
         raise HTTPException(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
             detail="Runtime not initialized"
@@ -126,10 +128,13 @@ async def health_check(
     else:
         overall_status = "healthy"
 
+    # Get runtime_id from publisher or config
+    runtime_id = publisher.runtime_id if publisher else config.runtime_id
+
     # Base response
     response = HealthResponse(
         status=overall_status,
-        runtime_id=reporter.runtime_id,
+        runtime_id=runtime_id,
         models_loaded=models_loaded,
         models_healthy=models_healthy,
         models_degraded=models_degraded,
