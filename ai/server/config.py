@@ -2,10 +2,15 @@
 Ruth AI Unified Runtime - Configuration
 
 Centralized configuration management using pydantic-settings.
+Follows 12-Factor App principles for container deployments.
 
 All configuration is loaded from environment variables with sensible defaults.
 
 Environment Variables:
+    # Deployment Profile
+    RUTH_AI_ENV: Environment (development, test, production) - default: production
+    RUTH_AI_PROFILE: Deployment profile (dev, test, prod-cpu, prod-gpu, edge-jetson)
+
     # Server
     SERVER_HOST: Server bind host (default: 0.0.0.0)
     SERVER_PORT: Server port (default: 8000)
@@ -16,6 +21,7 @@ Environment Variables:
     RUNTIME_ID: Unique runtime instance ID (auto-generated if not set)
     MODELS_ROOT: Path to models directory (default: ./models)
     MAX_CONCURRENT_INFERENCES: Max concurrent inferences (default: 10)
+    AI_RUNTIME_HARDWARE: Hardware mode (auto, cpu, gpu, jetson) - default: auto
 
     # GPU
     ENABLE_GPU: Enable GPU usage (default: true)
@@ -27,6 +33,9 @@ Environment Variables:
 
     # Observability
     REQUEST_ID_HEADER: Header name for request ID (default: X-Request-ID)
+
+    # Shutdown
+    GRACEFUL_SHUTDOWN_TIMEOUT_SECONDS: Timeout for graceful shutdown (default: 30)
 
 Usage:
     from ai.server.config import get_config
@@ -46,6 +55,25 @@ from pydantic_settings import BaseSettings
 
 class RuntimeConfig(BaseSettings):
     """Runtime configuration loaded from environment variables."""
+
+    # =========================================================================
+    # Deployment Profile (12-Factor: III. Config)
+    # =========================================================================
+
+    ruth_ai_env: str = Field(
+        default="production",
+        description="Environment name (development, test, production)"
+    )
+
+    ruth_ai_profile: str = Field(
+        default="prod-cpu",
+        description="Deployment profile (dev, test, prod-cpu, prod-gpu, edge-jetson)"
+    )
+
+    ai_runtime_hardware: str = Field(
+        default="auto",
+        description="Hardware mode: auto (detect), cpu, gpu, jetson"
+    )
 
     # =========================================================================
     # Server Configuration
@@ -156,6 +184,17 @@ class RuntimeConfig(BaseSettings):
         default=60000,
         ge=1000,
         description="Model loading timeout (milliseconds)"
+    )
+
+    # =========================================================================
+    # Shutdown Configuration
+    # =========================================================================
+
+    graceful_shutdown_timeout_seconds: int = Field(
+        default=30,
+        ge=5,
+        le=300,
+        description="Timeout for graceful shutdown (seconds)"
     )
 
     # =========================================================================

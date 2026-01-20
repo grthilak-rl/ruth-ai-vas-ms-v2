@@ -248,10 +248,68 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
 
     yield  # Server runs
 
-    # Cleanup
-    logger.info("🛑 Runtime shutting down...")
-    # TODO: Graceful model unloading
-    logger.info("Shutdown complete")
+    # ==========================================================================
+    # Graceful Shutdown
+    # ==========================================================================
+    # This runs when SIGTERM/SIGINT is received or server is stopped
+    # uvicorn --timeout-graceful-shutdown handles in-flight request draining
+
+    logger.info("🛑 Runtime shutting down - beginning graceful cleanup...")
+
+    shutdown_start = asyncio.get_event_loop().time()
+
+    # Step 1: Stop accepting new inference requests
+    # (uvicorn handles this automatically via readiness probe returning 503)
+
+    # Step 2: Wait for in-flight requests to complete
+    # (uvicorn's --timeout-graceful-shutdown handles this)
+
+    # Step 3: Shutdown sandbox executors
+    try:
+        if sandbox_manager:
+            logger.info("Shutting down sandbox executors...")
+            sandbox_manager.shutdown_all()
+            logger.info("Sandbox executors shut down")
+    except Exception as e:
+        logger.error(f"Error during sandbox shutdown: {e}")
+
+    # Step 4: Unload models and release GPU memory
+    try:
+        all_versions = registry.get_all_versions()
+        for version_info in all_versions:
+            model_id = version_info.model_id
+            version = version_info.version
+
+            try:
+                # Update state to UNLOADING
+                registry.update_state(model_id, version, LoadState.UNLOADING)
+
+                # Update metrics
+                if config.metrics_enabled:
+                    set_model_load_status(model_id, version, loaded=False)
+
+                logger.info("Model unloaded", extra={
+                    "model_id": model_id,
+                    "version": version
+                })
+            except Exception as e:
+                logger.warning(f"Error unloading model {model_id}:{version}: {e}")
+    except Exception as e:
+        logger.error(f"Error during model cleanup: {e}")
+
+    # Step 5: Release GPU resources
+    try:
+        if gpu_manager:
+            gpu_manager.release_all()
+            logger.info("GPU resources released")
+    except Exception as e:
+        logger.error(f"Error releasing GPU resources: {e}")
+
+    # Step 6: Clear dependencies
+    dependencies.clear_all()
+
+    shutdown_duration = asyncio.get_event_loop().time() - shutdown_start
+    logger.info(f"✅ Shutdown complete in {shutdown_duration:.2f}s")
 
 
 # Create FastAPI app

@@ -60,3 +60,12 @@ def set_sandbox_manager(sandbox_manager: SandboxManager) -> None:
 def get_sandbox_manager() -> Optional[SandboxManager]:
     """Get the global sandbox manager instance."""
     return _sandbox_manager
+
+
+def clear_all() -> None:
+    """Clear all global instances during shutdown."""
+    global _registry, _pipeline, _reporter, _sandbox_manager
+    _registry = None
+    _pipeline = None
+    _reporter = None
+    _sandbox_manager = None
