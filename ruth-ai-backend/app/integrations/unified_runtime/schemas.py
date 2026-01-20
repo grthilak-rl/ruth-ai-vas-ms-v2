@@ -28,6 +28,7 @@ class UnifiedInferenceRequest(BaseModel):
     timestamp: datetime = Field(description="Frame capture timestamp")
     priority: int = Field(default=0, ge=0, le=10, description="Request priority")
     metadata: Dict[str, Any] = Field(default_factory=dict, description="Additional metadata")
+    config: Optional[Dict[str, Any]] = Field(None, description="Model-specific configuration (e.g., ROI, tank corners)")
 
     class Config:
         json_schema_extra = {

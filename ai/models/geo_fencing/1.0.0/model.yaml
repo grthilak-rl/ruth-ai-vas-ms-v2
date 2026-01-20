@@ -1,0 +1,152 @@
+# Geo-Fencing Model Contract
+# Version: 1.0.0
+# This contract describes the model's capabilities and requirements
+# Person detection with zone intrusion monitoring
+
+# Contract schema version (required)
+contract_schema_version: "1.0.0"
+
+# Model identity (required)
+model_id: "geo_fencing"
+version: "1.0.0"
+display_name: "Geo-Fencing"
+description: "Monitors restricted zones for unauthorized person entry using YOLO-based person detection and polygon-based zone intrusion analysis"
+author: "Ruth AI Team"
+
+# Input specification (required)
+input:
+  type: "frame"
+  format: "raw_bgr"
+  min_width: 320
+  min_height: 240
+  max_width: 4096
+  max_height: 4096
+  channels: 3
+
+# Output specification (required)
+output:
+  schema_version: "1.0"
+  schema:
+    violation_detected:
+      type: "boolean"
+      description: "True if person detected inside restricted zone"
+    violation_type:
+      type: "string"
+      enum:
+        - "zone_intrusion"
+        - "zone_exit"
+        - null
+      description: "Type of zone violation detected"
+    severity:
+      type: "string"
+      enum:
+        - "critical"
+        - "high"
+        - "medium"
+        - "low"
+      description: "Violation severity level"
+    confidence:
+      type: "number"
+      min: 0.0
+      max: 1.0
+      description: "Highest detection confidence of persons in zone"
+    detections:
+      type: "array"
+      description: "Array of detected persons"
+      items:
+        type: "object"
+        properties:
+          bbox:
+            type: "array"
+            items: "number"
+            description: "Bounding box [x1, y1, x2, y2]"
+          confidence:
+            type: "number"
+            description: "Detection confidence"
+          in_zone:
+            type: "boolean"
+            description: "Whether this person is inside a restricted zone"
+          zone_id:
+            type: "string"
+            description: "ID of the zone the person is in (null if not in any zone)"
+    metadata:
+      type: "object"
+      description: "Additional monitoring metadata"
+      properties:
+        model_name:
+          type: "string"
+        model_version:
+          type: "string"
+        inference_time_ms:
+          type: "number"
+        persons_detected:
+          type: "integer"
+          description: "Total number of persons detected in frame"
+        persons_in_zone:
+          type: "integer"
+          description: "Number of persons inside restricted zones"
+
+# Configuration schema (for frontend)
+config_schema:
+  zones:
+    type: "array"
+    description: "List of zones to monitor"
+    items:
+      type: "object"
+      properties:
+        id:
+          type: "string"
+          description: "Unique zone identifier"
+        name:
+          type: "string"
+          description: "Human-readable zone name"
+        points:
+          type: "array"
+          items:
+            type: "array"
+            items: "number"
+          description: "Polygon points [[x1,y1], [x2,y2], ...]"
+        type:
+          type: "string"
+          enum:
+            - "restricted"
+            - "allowed"
+          description: "Zone type - restricted alerts when entered, allowed alerts when exited"
+
+# Hardware compatibility (required)
+hardware:
+  supports_cpu: true
+  supports_gpu: true
+  supports_jetson: true
+  min_ram_mb: 2048
+  min_gpu_memory_mb: 512
+
+# Performance hints (required)
+performance:
+  inference_time_hint_ms: 100
+  recommended_fps: 5
+  max_fps: 15
+  recommended_batch_size: 1
+  warmup_iterations: 2
+
+# Resource limits (optional but recommended)
+limits:
+  max_memory_mb: 4096
+  inference_timeout_ms: 3000
+  preprocessing_timeout_ms: 500
+  postprocessing_timeout_ms: 500
+  max_concurrent_inferences: 2
+
+# Model capabilities (optional)
+capabilities:
+  supports_batching: false
+  supports_async: false
+  provides_tracking: false
+  confidence_calibrated: true
+  provides_bounding_boxes: true
+  provides_keypoints: false
+  requires_geofencing: true
+
+# Entry points (optional, defaults shown)
+entry_points:
+  inference: "inference.py"

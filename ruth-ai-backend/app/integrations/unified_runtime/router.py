@@ -103,6 +103,7 @@ class RuntimeRouter:
         timestamp: Optional[datetime] = None,
         priority: int = 0,
         metadata: Optional[Dict[str, Any]] = None,
+        config: Optional[Dict[str, Any]] = None,
     ) -> Dict[str, Any]:
         """
         Submit inference request to appropriate runtime.
@@ -115,6 +116,7 @@ class RuntimeRouter:
             timestamp: Frame capture timestamp
             priority: Request priority
             metadata: Additional metadata
+            config: Model-specific configuration
 
         Returns:
             Inference results dictionary
@@ -142,6 +144,7 @@ class RuntimeRouter:
                 timestamp=timestamp,
                 priority=priority,
                 metadata=metadata,
+                config=config,
             )
         elif decision.target == RoutingTarget.CONTAINER:
             # For container-based models, delegate to existing integration
@@ -162,6 +165,7 @@ class RuntimeRouter:
         timestamp: Optional[datetime] = None,
         priority: int = 0,
         metadata: Optional[Dict[str, Any]] = None,
+        config: Optional[Dict[str, Any]] = None,
     ) -> Dict[str, Any]:
         """
         Submit inference to unified runtime.
@@ -213,6 +217,7 @@ class RuntimeRouter:
             timestamp=timestamp or datetime.utcnow(),
             priority=priority,
             metadata=metadata,
+            config=config,
         )
 
         # Step 3: Convert response to dict and return

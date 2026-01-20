@@ -1,11 +1,13 @@
 /**
  * Devices API
  *
- * READ-ONLY API for devices/cameras (F6 §4.4).
+ * Device/camera management API (F6 §4.4).
  *
  * Source Endpoints:
- * - GET /api/v1/devices
- * - GET /api/v1/devices/{id}
+ * - GET  /api/v1/devices
+ * - GET  /api/v1/devices/{id}
+ * - POST /api/v1/devices/{id}/start-inference
+ * - POST /api/v1/devices/{id}/stop-inference
  *
  * HARD RULES:
  * - F6 §8.1: MUST NOT infer camera online status from recent violations
@@ -13,9 +15,10 @@
  * - Handle stream state in both uppercase and lowercase
  */
 
-import { apiGet } from './client';
+import { apiGet, apiPost, apiPatch } from './client';
 import type { Device, DevicesListResponse, StreamState } from './types';
 import { isDevice, isDevicesListResponse, assertResponse } from './validators';
+import type { ModelConfig } from '../../types/geofencing';
 
 /** API path for devices */
 const DEVICES_PATH = '/api/v1/devices';
@@ -36,6 +39,95 @@ export async function fetchDevices(): Promise<DevicesListResponse> {
 export async function fetchDevice(id: string): Promise<Device> {
   const response = await apiGet<unknown>(`${DEVICES_PATH}/${id}`);
   return assertResponse(response, isDevice, 'Device');
+}
+
+// ============================================================================
+// Inference Control
+// ============================================================================
+
+/**
+ * Request payload for starting inference
+ */
+export interface StartInferenceRequest {
+  /** Model identifier */
+  model_id: string;
+  /** Optional model version */
+  model_version?: string;
+  /** Inference FPS (frames per second) */
+  inference_fps?: number;
+  /** Confidence threshold (0.0 - 1.0) */
+  confidence_threshold?: number;
+  /** Model-specific configuration (e.g., ROI, tank corners, alert thresholds) */
+  model_config?: ModelConfig;
+}
+
+/**
+ * Response from starting inference
+ */
+export interface StartInferenceResponse {
+  /** Stream session ID */
+  session_id: string;
+  /** Device ID */
+  device_id: string;
+  /** Model ID */
+  model_id: string;
+  /** Session state */
+  state: string;
+  /** When the session started */
+  started_at: string;
+}
+
+/**
+ * Start AI inference for a device
+ *
+ * POST /api/v1/devices/{id}/start-inference
+ */
+export async function startInference(
+  deviceId: string,
+  request: StartInferenceRequest
+): Promise<StartInferenceResponse> {
+  return apiPost<StartInferenceResponse>(
+    `${DEVICES_PATH}/${deviceId}/start-inference`,
+    request
+  );
+}
+
+/**
+ * Stop AI inference for a device
+ *
+ * POST /api/v1/devices/{id}/stop-inference
+ */
+export async function stopInference(deviceId: string): Promise<void> {
+  await apiPost<void>(`${DEVICES_PATH}/${deviceId}/stop-inference`, {});
+}
+
+/**
+ * Response from updating model config
+ */
+export interface UpdateModelConfigResponse {
+  /** Stream session ID */
+  session_id: string;
+  /** Device ID */
+  device_id: string;
+  /** Model ID */
+  model_id: string;
+  /** Whether config was updated */
+  config_updated: boolean;
+}
+
+/**
+ * Update model config for an active inference session
+ *
+ * PATCH /api/v1/devices/{id}/model-config
+ */
+export async function updateModelConfig(
+  deviceId: string,
+  config: ModelConfig
+): Promise<UpdateModelConfigResponse> {
+  return apiPatch<UpdateModelConfigResponse>(
+    `${DEVICES_PATH}/${deviceId}/model-config`,
+    { model_config: config }
+  );
 }
 
 // ============================================================================

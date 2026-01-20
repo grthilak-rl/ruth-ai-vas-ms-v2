@@ -202,9 +202,9 @@ services:
       NLP_CHAT_SERVICE_URL: http://ruth-ai-nlp-chat:8081
       NLP_CHAT_TIMEOUT_SECONDS: ${NLP_CHAT_TIMEOUT_SECONDS:-120}
       # Unified AI Runtime (note: env_prefix + field name = full env var)
-      UNIFIED_RUNTIME_UNIFIED_RUNTIME_URL: ${UNIFIED_RUNTIME_UNIFIED_RUNTIME_URL:-http://host.docker.internal:8012}
-      UNIFIED_RUNTIME_ENABLE_UNIFIED_RUNTIME: ${UNIFIED_RUNTIME_ENABLE_UNIFIED_RUNTIME:-true}
-      UNIFIED_RUNTIME_UNIFIED_RUNTIME_TIMEOUT: ${UNIFIED_RUNTIME_UNIFIED_RUNTIME_TIMEOUT:-30.0}
+      UNIFIED_RUNTIME_URL: ${UNIFIED_RUNTIME_URL:-http://host.docker.internal:8012}
+      UNIFIED_RUNTIME_ENABLE: ${UNIFIED_RUNTIME_ENABLE:-true}
+      UNIFIED_RUNTIME_TIMEOUT: ${UNIFIED_RUNTIME_TIMEOUT:-30.0}
     extra_hosts:
       - "host.docker.internal:host-gateway"
     depends_on:

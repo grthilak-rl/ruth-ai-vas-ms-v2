@@ -326,6 +326,9 @@ export interface DeviceStreaming {
 
   /** Which model is processing - MAY be null */
   model_id: string | null;
+
+  /** Model configuration - MAY be null */
+  model_config: Record<string, unknown> | null;
 }
 
 /**

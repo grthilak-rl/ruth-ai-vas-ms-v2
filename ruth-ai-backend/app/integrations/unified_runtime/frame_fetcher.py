@@ -109,17 +109,18 @@ class FrameFetcher:
         )
 
         try:
-            # Create snapshot
-            if device_id:
-                snapshot = await self.vas_client.create_snapshot_from_device(
-                    device_id=str(device_id),
-                    request=snapshot_request,
+            # Create snapshot - VAS API only supports stream_id
+            # If device_id is provided, we need a stream_id from the device
+            if not stream_id and device_id:
+                raise ValueError(
+                    "stream_id is required. Cannot create snapshot from device_id alone. "
+                    "The stream must be started via VAS before capturing snapshots."
                 )
-            else:
-                snapshot = await self.vas_client.create_snapshot(
-                    stream_id=str(stream_id),
-                    request=snapshot_request,
-                )
+
+            snapshot = await self.vas_client.create_snapshot(
+                stream_id=str(stream_id),
+                request=snapshot_request,
+            )
 
             logger.debug("Snapshot created", snapshot_id=snapshot.id)
 

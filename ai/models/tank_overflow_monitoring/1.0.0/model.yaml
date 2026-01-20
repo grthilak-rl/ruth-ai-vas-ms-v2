@@ -1,0 +1,121 @@
+# Tank Overflow Monitoring Model Contract
+# Version: 1.0.0
+# This contract describes the model's capabilities and requirements
+# Computer vision-based tank level monitoring using edge detection
+
+# Contract schema version (required)
+contract_schema_version: "1.0.0"
+
+# Model identity (required)
+model_id: "tank_overflow_monitoring"
+version: "1.0.0"
+display_name: "Tank Overflow Monitoring"
+description: "Monitors petroleum tank levels using computer vision and edge detection to prevent overflow"
+author: "Ruth AI Team"
+
+# Input specification (required)
+input:
+  type: "frame"
+  format: "raw_bgr"
+  min_width: 320
+  min_height: 240
+  max_width: 4096
+  max_height: 4096
+  channels: 3
+
+# Output specification (required)
+output:
+  schema_version: "1.0"
+  schema:
+    violation_detected:
+      type: "boolean"
+      description: "True if tank level exceeds threshold (>=90%)"
+    violation_type:
+      type: "string"
+      enum:
+        - "tank_overflow_warning"
+        - "tank_critical_high"
+        - "tank_critical_low"
+        - null
+      description: "Type of tank level violation"
+    severity:
+      type: "string"
+      enum:
+        - "critical"
+        - "high"
+        - "medium"
+        - "low"
+      description: "Violation severity level"
+    confidence:
+      type: "number"
+      min: 0.0
+      max: 1.0
+      description: "Detection confidence (level detection reliability)"
+    level_percent:
+      type: "number"
+      min: 0.0
+      max: 100.0
+      description: "Current tank level percentage"
+    level_liters:
+      type: "number"
+      min: 0.0
+      description: "Current tank volume in liters"
+    capacity_liters:
+      type: "number"
+      description: "Total tank capacity in liters"
+    detections:
+      type: "array"
+      description: "Detected liquid surface information"
+      items:
+        type: "object"
+        properties:
+          surface_y:
+            type: "number"
+            description: "Y-coordinate of detected liquid surface"
+          bbox:
+            type: "array"
+            items: "number"
+            description: "Tank region bounding box [x1, y1, x2, y2]"
+          confidence:
+            type: "number"
+            description: "Surface detection confidence"
+    metadata:
+      type: "object"
+      description: "Additional monitoring metadata"
+
+# Hardware compatibility (required)
+hardware:
+  supports_cpu: true
+  supports_gpu: false
+  supports_jetson: true
+  min_ram_mb: 512
+  min_gpu_memory_mb: 0
+
+# Performance hints (required)
+performance:
+  inference_time_hint_ms: 50
+  recommended_fps: 1
+  max_fps: 5
+  recommended_batch_size: 1
+  warmup_iterations: 1
+
+# Resource limits (optional but recommended)
+limits:
+  max_memory_mb: 1024
+  inference_timeout_ms: 2000
+  preprocessing_timeout_ms: 500
+  postprocessing_timeout_ms: 500
+  max_concurrent_inferences: 1
+
+# Model capabilities (optional)
+capabilities:
+  supports_batching: false
+  supports_async: false
+  provides_tracking: false
+  confidence_calibrated: true
+  provides_bounding_boxes: true
+  provides_keypoints: false
+
+# Entry points (optional, defaults shown)
+entry_points:
+  inference: "inference.py"

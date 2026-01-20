@@ -8,6 +8,23 @@ import { SnapshotThumbnail } from './SnapshotThumbnail';
 import './ViolationCard.css';
 
 /**
+ * Format violation type for display
+ * Converts API values like "zone_intrusion" to "Zone Intrusion"
+ */
+function formatViolationType(type: string): string {
+  const typeMap: Record<string, string> = {
+    'fall_detected': 'Fall Detection',
+    'ppe_violation': 'PPE Violation',
+    'zone_intrusion': 'Zone Intrusion',
+    'zone_exit': 'Zone Exit',
+  };
+
+  return typeMap[type] || type.split('_').map(word =>
+    word.charAt(0).toUpperCase() + word.slice(1)
+  ).join(' ');
+}
+
+/**
  * Format relative time (F6 §12.1)
  *
  * | Source Format | Display Format |
@@ -137,7 +154,7 @@ export function ViolationCard({
 
         <div className="violation-card__meta">
           <span className="violation-card__time">{formatRelativeTime(violation.timestamp)}</span>
-          <span className="violation-card__type">Fall Detection</span>
+          <span className="violation-card__type">{formatViolationType(violation.type)}</span>
         </div>
 
         {/* Error display (inline, per F5 §B3) */}

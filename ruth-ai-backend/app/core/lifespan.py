@@ -14,18 +14,22 @@ from contextlib import asynccontextmanager
 from fastapi import FastAPI
 
 from app.core.config import get_settings
-from app.core.database import close_database, init_database
+from app.core.database import close_database, init_database, get_db_session
 from app.core.logging import configure_logging, get_logger
 from app.core.redis import close_redis, init_redis
 from app.deps.services import set_nlp_chat_client, set_redis_client, set_vas_client
 from app.integrations.nlp_chat import NLPChatClient
 from app.integrations.vas import VASClient
+from app.integrations.unified_runtime.router import RuntimeRouter
+from app.integrations.unified_runtime.client import UnifiedRuntimeClient
+from app.services.inference_loop import InferenceLoopService, set_inference_loop
 
 logger = get_logger(__name__)
 
 # Global clients for cleanup
 _vas_client: VASClient | None = None
 _nlp_chat_client: NLPChatClient | None = None
+_inference_loop: InferenceLoopService | None = None
 
 # Startup timestamp for uptime calculation
 _startup_time: float | None = None
@@ -64,17 +68,19 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
         4. Initialize Redis connection pool
         5. Initialize VAS client
         6. Initialize NLP Chat client (connects to separate microservice)
+        7. Initialize Inference Loop (continuous AI inference)
 
     Shutdown:
-        1. Close NLP Chat client
-        2. Close VAS client
-        3. Close Redis connections
-        4. Close database connections
+        1. Stop Inference Loop
+        2. Close NLP Chat client
+        3. Close VAS client
+        4. Close Redis connections
+        5. Close database connections
 
     Args:
         app: FastAPI application instance
     """
-    global _vas_client, _nlp_chat_client, _startup_time
+    global _vas_client, _nlp_chat_client, _inference_loop, _startup_time
 
     # Record startup time
     _startup_time = time.time()
@@ -158,12 +164,51 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
         )
         # NLP Chat is optional - chat endpoint will return 502 if unavailable
 
+    # Initialize Inference Loop (continuous AI inference)
+    if _vas_client:
+        try:
+            # Create unified runtime client
+            unified_client = UnifiedRuntimeClient()
+            await unified_client.connect()
+
+            # Create runtime router
+            runtime_router = RuntimeRouter(
+                vas_client=_vas_client,
+                unified_runtime_client=unified_client,
+            )
+
+            # Create and start inference loop
+            _inference_loop = InferenceLoopService(
+                runtime_router=runtime_router,
+                vas_client=_vas_client,
+                db_session_factory=get_db_session,
+                loop_interval=1.0,  # Check every 1 second
+            )
+            await _inference_loop.start()
+            set_inference_loop(_inference_loop)
+
+            logger.info("Inference loop started")
+        except Exception as e:
+            logger.error(
+                "Failed to initialize inference loop",
+                error=str(e),
+            )
+            # Inference loop is optional - AI detection will not work
+
     logger.info("Ruth AI Backend startup complete")
 
     yield  # Application runs here
 
     # ===== SHUTDOWN =====
     logger.info("Shutting down Ruth AI Backend")
+
+    # Stop Inference Loop
+    if _inference_loop:
+        try:
+            await _inference_loop.stop()
+            logger.info("Inference loop stopped")
+        except Exception as e:
+            logger.error("Error stopping inference loop", error=str(e))
 
     # Close NLP Chat client
     if _nlp_chat_client:

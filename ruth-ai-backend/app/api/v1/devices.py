@@ -13,12 +13,14 @@ No business logic is implemented here.
 from uuid import UUID
 
 from fastapi import APIRouter, HTTPException, status
+from fastapi.responses import Response
 
 from pydantic import BaseModel, Field
 
 from app.core.logging import get_logger
 from app.deps import DeviceServiceDep, StreamServiceDep, VASClientDep
 from app.integrations.vas import VASError, VASNotFoundError
+from app.integrations.vas.models import SnapshotCreateRequest, SnapshotSource
 from app.schemas import (
     Device,
     DeviceDetailResponse,
@@ -28,6 +30,8 @@ from app.schemas import (
     InferenceStartRequest,
     InferenceStartResponse,
     InferenceStopResponse,
+    ModelConfigUpdateRequest,
+    ModelConfigUpdateResponse,
 )
 from app.services import (
     DeviceInactiveError,
@@ -36,6 +40,7 @@ from app.services import (
     StreamNotActiveError,
     StreamStartError,
     StreamStopError,
+    StreamSessionNotFoundError,
 )
 
 router = APIRouter(tags=["Devices"])
@@ -98,6 +103,7 @@ async def list_devices(
                     state=stream_status.get("state"),
                     ai_enabled=stream_status["active"] and stream_status.get("model_id") is not None,
                     model_id=stream_status.get("model_id"),
+                    ai_model_config=stream_status.get("model_config"),
                 ),
             )
         )
@@ -164,6 +170,7 @@ async def get_device(
             state=stream_status_dict.get("state"),
             ai_enabled=stream_status_dict["active"] and stream_status_dict.get("model_id") is not None,
             model_id=stream_status_dict.get("model_id"),
+            ai_model_config=stream_status_dict.get("model_config"),
         ),
         last_synced_at=device.last_synced_at,
         created_at=device.created_at,
@@ -232,6 +239,7 @@ async def start_inference(
             model_version=request.model_version,
             inference_fps=request.inference_fps,
             confidence_threshold=request.confidence_threshold,
+            model_config=request.config,
         )
     except DeviceNotFoundError as e:
         raise HTTPException(
@@ -358,6 +366,67 @@ async def stop_inference(
         device_id=session.device_id,
         state=session.state.value,
         stopped_at=session.stopped_at,
+    )
+
+
+@router.patch(
+    "/devices/{device_id}/model-config",
+    response_model=ModelConfigUpdateResponse,
+    status_code=status.HTTP_200_OK,
+    summary="Update model config",
+    description="Update model_config for an active inference session. Use this to update zone definitions for geo-fencing.",
+    responses={
+        404: {"model": ErrorResponse, "description": "Device or active session not found"},
+        500: {"model": ErrorResponse, "description": "Internal server error"},
+    },
+)
+async def update_model_config(
+    device_id: UUID,
+    stream_service: StreamServiceDep,
+    request: ModelConfigUpdateRequest,
+) -> ModelConfigUpdateResponse:
+    """Update model_config for an active inference session.
+
+    This endpoint updates the model_config for an already-running inference session.
+    Use this when the user configures zones for geo-fencing after the model is already active.
+
+    Args:
+        device_id: Device UUID
+        stream_service: Injected StreamService
+        request: Model configuration update request
+
+    Returns:
+        Update confirmation
+
+    Raises:
+        HTTPException: 404 if device not found or no active session
+    """
+    try:
+        session = await stream_service.update_model_config(
+            device_id,
+            model_config=request.config,
+        )
+    except StreamNotActiveError:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail={
+                "error": "no_active_session",
+                "message": "No active inference session for this device",
+            },
+        )
+
+    logger.info(
+        "Updated model config",
+        device_id=str(device_id),
+        session_id=str(session.id),
+        model_id=session.model_id,
+    )
+
+    return ModelConfigUpdateResponse(
+        session_id=session.id,
+        device_id=session.device_id,
+        model_id=session.model_id,
+        config_updated=True,
     )
 
 
@@ -545,3 +614,147 @@ async def stop_stream(
         status=vas_response.status,
         message=vas_response.message,
     )
+
+
+@router.get(
+    "/devices/{device_id}/snapshot",
+    status_code=status.HTTP_200_OK,
+    summary="Get device snapshot",
+    description="Get a live snapshot image from the device for geo-fencing/ROI selection. Automatically starts a VAS stream if needed.",
+    responses={
+        404: {"model": ErrorResponse, "description": "Device not found"},
+        500: {"model": ErrorResponse, "description": "Failed to capture snapshot"},
+        502: {"model": ErrorResponse, "description": "VAS error"},
+    },
+)
+async def get_device_snapshot(
+    device_id: UUID,
+    device_service: DeviceServiceDep,
+    stream_service: StreamServiceDep,
+    vas_client: VASClientDep,
+) -> Response:
+    """Get a live snapshot from the device.
+
+    This endpoint creates a snapshot via VAS and returns the image directly.
+    Used for ROI/geo-fence selection in the frontend.
+
+    If no stream is active for the device, this endpoint will automatically
+    start a temporary VAS stream to capture the snapshot.
+
+    Args:
+        device_id: Device UUID
+        device_service: Injected DeviceService
+        stream_service: Injected StreamService
+        vas_client: Injected VAS client
+
+    Returns:
+        Binary JPEG image
+
+    Raises:
+        HTTPException: 404 if device not found, 502 on VAS error
+    """
+    # Get device
+    try:
+        device = await device_service.get_device_by_id(device_id)
+    except DeviceNotFoundError as e:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail={
+                "error": "device_not_found",
+                "message": str(e),
+                "details": e.details,
+            },
+        ) from e
+
+    # Get stream status to get VAS stream_id
+    stream_status = await stream_service.get_stream_status(device_id)
+    vas_stream_id = stream_status.get("vas_stream_id")
+
+    # Track whether we started a temporary stream
+    started_temp_stream = False
+
+    # If no active stream, start a temporary VAS stream for snapshot capture
+    if not vas_stream_id:
+        logger.info(
+            "No active stream, starting temporary VAS stream for snapshot",
+            device_id=str(device_id),
+            vas_device_id=device.vas_device_id,
+        )
+        try:
+            vas_response = await vas_client.start_stream(device.vas_device_id)
+            vas_stream_id = vas_response.v2_stream_id
+            started_temp_stream = True
+            logger.info(
+                "Started temporary VAS stream",
+                device_id=str(device_id),
+                vas_stream_id=vas_stream_id,
+            )
+        except VASNotFoundError as e:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail={
+                    "error": "vas_device_not_found",
+                    "message": f"VAS device not found: {device.vas_device_id}",
+                },
+            ) from e
+        except VASError as e:
+            raise HTTPException(
+                status_code=status.HTTP_502_BAD_GATEWAY,
+                detail={
+                    "error": "vas_stream_start_failed",
+                    "message": f"Failed to start VAS stream: {e}",
+                },
+            ) from e
+
+    # Create snapshot via VAS
+    try:
+        snapshot_request = SnapshotCreateRequest(
+            source=SnapshotSource.LIVE,
+            created_by="ruth-ai-frontend",
+        )
+        snapshot_response = await vas_client.create_snapshot(
+            stream_id=vas_stream_id,
+            request=snapshot_request,
+        )
+        snapshot_id = snapshot_response.id
+
+        # Wait for snapshot to be ready (processing can take a few seconds)
+        await vas_client.wait_for_snapshot_ready(snapshot_id, timeout=10.0)
+
+        # Get snapshot image
+        image_data = await vas_client.get_snapshot_image(snapshot_id)
+
+        logger.info(
+            "Fetched snapshot for device",
+            device_id=str(device_id),
+            snapshot_id=snapshot_id,
+        )
+
+        return Response(content=image_data, media_type="image/jpeg")
+
+    except VASNotFoundError as e:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail={
+                "error": "stream_not_found",
+                "message": str(e),
+            },
+        ) from e
+    except VASError as e:
+        raise HTTPException(
+            status_code=status.HTTP_502_BAD_GATEWAY,
+            detail={
+                "error": "vas_error",
+                "message": str(e),
+            },
+        ) from e
+    finally:
+        # Clean up temporary stream if we started one
+        # Note: We intentionally leave the stream running for subsequent snapshot requests
+        # The stream will be stopped when the frontend explicitly stops it or starts inference
+        if started_temp_stream:
+            logger.info(
+                "Temporary VAS stream started for snapshots, leaving active for subsequent requests",
+                device_id=str(device_id),
+                vas_stream_id=vas_stream_id,
+            )

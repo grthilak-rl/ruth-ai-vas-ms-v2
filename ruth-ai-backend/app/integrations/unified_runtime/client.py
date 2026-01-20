@@ -161,6 +161,7 @@ class UnifiedRuntimeClient:
         timestamp: Optional[datetime] = None,
         priority: int = 0,
         metadata: Optional[Dict[str, Any]] = None,
+        config: Optional[Dict[str, Any]] = None,
     ) -> UnifiedInferenceResponse:
         """
         Submit inference request to unified runtime.
@@ -177,6 +178,7 @@ class UnifiedRuntimeClient:
             timestamp: Frame capture timestamp
             priority: Request priority (0-10)
             metadata: Additional metadata
+            config: Model-specific configuration (e.g., tank corners, ROI)
 
         Returns:
             Inference response
@@ -201,6 +203,7 @@ class UnifiedRuntimeClient:
             timestamp=timestamp or datetime.utcnow(),
             priority=priority,
             metadata=metadata or {},
+            config=config,
         )
 
         logger.debug(

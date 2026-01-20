@@ -4,6 +4,7 @@ import { CameraSelectorDropdown } from './CameraSelectorDropdown';
 import { CameraGridCell } from './CameraGridCell';
 import type { AIModel } from './AIModelSelector';
 import type { Device } from '../../state';
+import type { ModelConfig } from '../../types/geofencing';
 import {
   type GridSize,
   getGridSize,
@@ -14,6 +15,7 @@ import {
   getMaxCameras,
 } from '../../utils/cameraGridPreferences';
 import { fetchModelsStatus, type ModelStatusInfo } from '../../state/api/models.api';
+import { startInference, stopInference, updateModelConfig, type StartInferenceRequest } from '../../state/api/devices.api';
 import './CameraMonitoringDashboard.css';
 
 /**
@@ -59,6 +61,10 @@ export function CameraMonitoringDashboard({
   // Map of cameraId -> modelId -> enabled
   const [aiModelToggles, setAiModelToggles] = useState<Record<string, Record<string, boolean>>>({});
 
+  // Model configurations (session-scoped)
+  // Map of cameraId -> modelId -> ModelConfig
+  const [modelConfigs, setModelConfigs] = useState<Record<string, Record<string, ModelConfig>>>({});
+
   // Available AI models from backend
   const [availableModels, setAvailableModels] = useState<ModelStatusInfo[]>([]);
   const [modelsLoading, setModelsLoading] = useState(true);
@@ -79,6 +85,38 @@ export function CameraMonitoringDashboard({
     }
     loadModels();
   }, []);
+
+  // Load model configs and toggles from cameras data
+  useEffect(() => {
+    const newToggles: Record<string, Record<string, boolean>> = {};
+    const newConfigs: Record<string, Record<string, ModelConfig>> = {};
+
+    for (const camera of cameras) {
+      // If camera has AI enabled and a model_id, set it as active
+      if (camera.streaming.ai_enabled && camera.streaming.model_id) {
+        newToggles[camera.id] = {
+          ...(newToggles[camera.id] || {}),
+          [camera.streaming.model_id]: true,
+        };
+
+        // If camera has model_config, store it
+        if (camera.streaming.model_config) {
+          newConfigs[camera.id] = {
+            ...(newConfigs[camera.id] || {}),
+            [camera.streaming.model_id]: camera.streaming.model_config as ModelConfig,
+          };
+        }
+      }
+    }
+
+    // Only update if there are changes
+    if (Object.keys(newToggles).length > 0) {
+      setAiModelToggles(prev => ({ ...prev, ...newToggles }));
+    }
+    if (Object.keys(newConfigs).length > 0) {
+      setModelConfigs(prev => ({ ...prev, ...newConfigs }));
+    }
+  }, [cameras]);
 
   // Auto-select cameras when cameras list or grid size changes
   useEffect(() => {
@@ -113,15 +151,65 @@ export function CameraMonitoringDashboard({
   };
 
   // Handle AI model toggle
-  const handleModelToggle = useCallback((cameraId: string, modelId: string, enabled: boolean) => {
-    setAiModelToggles((prev) => ({
-      ...prev,
-      [cameraId]: {
-        ...(prev[cameraId] || {}),
-        [modelId]: enabled,
-      },
-    }));
-  }, []);
+  const handleModelToggle = useCallback(async (cameraId: string, modelId: string, enabled: boolean, config?: ModelConfig) => {
+    try {
+      if (enabled) {
+        // Check if model is already active for this camera
+        const isAlreadyActive = aiModelToggles[cameraId]?.[modelId] === true;
+
+        if (isAlreadyActive && config) {
+          // Model already active - just update the config
+          console.log(`[CameraMonitoring] Updating config for active model ${modelId}`);
+          await updateModelConfig(cameraId, config);
+        } else {
+          // Start inference with optional config
+          const request: StartInferenceRequest = {
+            model_id: modelId,
+            inference_fps: 10,
+            confidence_threshold: 0.7,
+            model_config: config,
+          };
+
+          await startInference(cameraId, request);
+        }
+
+        // Update local state on success
+        setAiModelToggles((prev: Record<string, Record<string, boolean>>) => ({
+          ...prev,
+          [cameraId]: {
+            ...(prev[cameraId] || {}),
+            [modelId]: true,
+          },
+        }));
+
+        // Store model config if provided
+        if (config) {
+          setModelConfigs((prev: Record<string, Record<string, ModelConfig>>) => ({
+            ...prev,
+            [cameraId]: {
+              ...(prev[cameraId] || {}),
+              [modelId]: config,
+            },
+          }));
+        }
+      } else {
+        // Stop inference
+        await stopInference(cameraId);
+
+        // Update local state on success
+        setAiModelToggles((prev: Record<string, Record<string, boolean>>) => ({
+          ...prev,
+          [cameraId]: {
+            ...(prev[cameraId] || {}),
+            [modelId]: false,
+          },
+        }));
+      }
+    } catch (error) {
+      console.error(`[CameraMonitoring] Failed to ${enabled ? 'start' : 'stop'} inference:`, error);
+      // TODO: Show error toast to user
+    }
+  }, [aiModelToggles]);
 
   // Handle fullscreen
   const handleFullscreen = useCallback(
@@ -164,10 +252,15 @@ export function CameraMonitoringDashboard({
         displayName = displayName.replace(' Container', ' (Legacy)');
       }
 
+      // Check if model requires geo-fencing
+      // Tank overflow monitoring and geo-fencing require geo-fencing configuration
+      const requiresGeofencing = model.model_id === 'tank_overflow_monitoring' || model.model_id === 'geo_fencing';
+
       return {
         id: model.model_id,
         name: displayName,
         state,
+        requiresGeofencing,
       };
     },
     [aiModelToggles]
@@ -322,6 +415,7 @@ export function CameraMonitoringDashboard({
               aiModels={getAIModelsForCamera(cell.camera.id)}
               violationCount={0} // TODO: Wire up actual violation count
               onModelToggle={handleModelToggle}
+              modelConfigs={modelConfigs[cell.camera.id]}
               onFullscreen={handleFullscreen}
             />
           ) : (

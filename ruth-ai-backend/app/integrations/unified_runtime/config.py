@@ -15,19 +15,22 @@ class UnifiedRuntimeConfig(BaseSettings):
     # Unified runtime URL
     unified_runtime_url: str = Field(
         default="http://unified-ai-runtime:8000",
-        description="Unified AI Runtime base URL"
+        description="Unified AI Runtime base URL",
+        validation_alias="UNIFIED_RUNTIME_URL"
     )
 
     # Enable unified runtime (feature flag)
     enable_unified_runtime: bool = Field(
         default=True,
-        description="Enable routing to unified runtime"
+        description="Enable routing to unified runtime",
+        validation_alias="UNIFIED_RUNTIME_ENABLE"
     )
 
     # Timeout for unified runtime requests
     unified_runtime_timeout: float = Field(
         default=30.0,
-        description="Timeout for unified runtime inference requests (seconds)"
+        description="Timeout for unified runtime inference requests (seconds)",
+        validation_alias="UNIFIED_RUNTIME_TIMEOUT"
     )
 
     # Model routing configuration

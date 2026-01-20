@@ -50,6 +50,8 @@ class ViolationType(str, enum.Enum):
 
     FALL_DETECTED = "fall_detected"
     PPE_VIOLATION = "ppe_violation"
+    ZONE_INTRUSION = "zone_intrusion"  # Geo-fencing: person entered restricted zone
+    ZONE_EXIT = "zone_exit"  # Geo-fencing: person left allowed zone
 
 
 class ViolationStatus(str, enum.Enum):

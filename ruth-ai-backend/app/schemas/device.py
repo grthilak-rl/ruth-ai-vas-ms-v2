@@ -22,6 +22,13 @@ class DeviceStreaming(BaseModel):
     state: str | None = Field(None, description="Stream state (live, stopped, etc.)")
     ai_enabled: bool = Field(False, description="Whether AI detection is enabled")
     model_id: str | None = Field(None, description="AI model being used")
+    # Note: Named ai_model_config to avoid conflict with Pydantic's reserved 'model_config'
+    # but serialized as 'model_config' in JSON for API compatibility
+    ai_model_config: dict | None = Field(
+        None,
+        description="Model-specific configuration (e.g., zones for geo_fencing)",
+        serialization_alias="model_config",
+    )
 
 
 class Device(BaseModel):
@@ -92,6 +99,18 @@ class InferenceStartRequest(BaseModel):
         le=1.0,
         description="Minimum confidence threshold",
     )
+    config: dict | None = Field(
+        None,
+        description="Model-specific configuration (e.g., tank_corners for tank monitoring, ROI zones for PPE detection)",
+        examples=[
+            {
+                "tank_corners": [[316, 382], [291, 531], [384, 591], [465, 464]],
+                "capacity_liters": 1000,
+                "alert_threshold": 90
+            }
+        ],
+        alias="model_config",
+    )
 
 
 class InferenceStartResponse(BaseModel):
@@ -115,3 +134,34 @@ class InferenceStopResponse(BaseModel):
     device_id: uuid.UUID = Field(..., description="Device UUID")
     state: str = Field(..., description="Stream state (stopped)")
     stopped_at: datetime | None = Field(None, description="Session stop timestamp")
+
+
+class ModelConfigUpdateRequest(BaseModel):
+    """Request schema for PATCH /api/v1/devices/{id}/model-config."""
+
+    config: dict = Field(
+        ...,
+        description="Model-specific configuration (e.g., zones for geo_fencing, tank_corners for tank monitoring)",
+        examples=[
+            {
+                "zones": [
+                    {
+                        "id": "zone_1",
+                        "name": "Restricted Zone",
+                        "points": [[100, 100], [500, 100], [500, 400], [100, 400]],
+                        "type": "restricted"
+                    }
+                ]
+            }
+        ],
+        alias="model_config",
+    )
+
+
+class ModelConfigUpdateResponse(BaseModel):
+    """Response schema for PATCH /api/v1/devices/{id}/model-config."""
+
+    session_id: uuid.UUID = Field(..., description="Stream session UUID")
+    device_id: uuid.UUID = Field(..., description="Device UUID")
+    model_id: str = Field(..., description="AI model ID")
+    config_updated: bool = Field(..., description="Whether config was updated")

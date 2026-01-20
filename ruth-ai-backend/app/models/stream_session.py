@@ -13,7 +13,7 @@ from datetime import datetime
 from typing import TYPE_CHECKING
 
 from sqlalchemy import DateTime, Float, ForeignKey, Integer, String
-from sqlalchemy.dialects.postgresql import ENUM, UUID
+from sqlalchemy.dialects.postgresql import ENUM, JSONB, UUID
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.models.base import Base, TimestampMixin, generate_uuid
@@ -94,6 +94,13 @@ class StreamSession(Base, TimestampMixin):
         Float,
         default=0.7,
         nullable=False,
+    )
+
+    # Model-specific configuration (e.g., tank corners, ROI, zones)
+    model_config: Mapped[dict | None] = mapped_column(
+        JSONB,
+        nullable=True,
+        comment="Model-specific configuration (ROI, thresholds, etc.)",
     )
 
     # Stream state

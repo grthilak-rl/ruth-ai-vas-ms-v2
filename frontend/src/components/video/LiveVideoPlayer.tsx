@@ -3,6 +3,7 @@ import { VideoErrorBoundary } from './VideoErrorBoundary';
 import { connectToStream, disconnectStream, type WebRTCConnection } from '../../services/webrtc';
 import { FallDetectionManager, type FallDetectionResult, type Detection, SKELETON_CONNECTIONS } from '../../services/fallDetection';
 import { PPEDetectionManager, type PPEDetectionResult, type PPEPersonDetection, drawPPEDetections } from '../../services/ppeDetection';
+import { TankDetectionManager, type TankDetectionResult, drawTankDetections } from '../../services/tankDetection';
 import { reportFallEvent, reportPPEEvent, type BoundingBox, type PPEViolationDetail } from '../../services/api';
 import './LiveVideoPlayer.css';
 
@@ -18,6 +19,13 @@ type PlayerState =
   | 'error'
   | 'offline';
 
+interface GeofenceZone {
+  id: string;
+  name: string;
+  points: number[][];
+  type: 'restricted' | 'allowed';
+}
+
 interface LiveVideoPlayerProps {
   deviceId: string;
   deviceName: string;
@@ -27,6 +35,10 @@ interface LiveVideoPlayerProps {
   showOverlays?: boolean;
   isFallDetectionEnabled?: boolean;
   isPPEDetectionEnabled?: boolean;
+  isTankOverflowEnabled?: boolean;
+  isGeofencingEnabled?: boolean;
+  tankCorners?: number[][];
+  geofenceZones?: GeofenceZone[];
 }
 
 /**
@@ -170,6 +182,10 @@ export function LiveVideoPlayer({
   showOverlays = true,
   isFallDetectionEnabled = true,
   isPPEDetectionEnabled = false,
+  isTankOverflowEnabled = false,
+  isGeofencingEnabled = false,
+  tankCorners,
+  geofenceZones,
 }: LiveVideoPlayerProps) {
   const [playerState, setPlayerState] = useState<PlayerState>(
     isAvailable ? 'idle' : 'offline'
@@ -177,6 +193,7 @@ export function LiveVideoPlayer({
   const [connectionStatus, setConnectionStatus] = useState<string>('');
   const [fallDetection, setFallDetection] = useState<FallDetectionResult | null>(null);
   const [ppeDetection, setPPEDetection] = useState<PPEDetectionResult | null>(null);
+  const [tankDetection, setTankDetection] = useState<TankDetectionResult | null>(null);
 
   const videoRef = useRef<HTMLVideoElement>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
@@ -184,6 +201,7 @@ export function LiveVideoPlayer({
   const reconnectTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const fallDetectionRef = useRef<FallDetectionManager | null>(null);
   const ppeDetectionRef = useRef<PPEDetectionManager | null>(null);
+  const tankDetectionRef = useRef<TankDetectionManager | null>(null);
   const lastFallReportTimeRef = useRef<number>(0);
   const lastPPEReportTimeRef = useRef<number>(0);
   const streamIdRef = useRef<string | null>(null);  // Use ref for immediate access in callbacks
@@ -300,28 +318,30 @@ export function LiveVideoPlayer({
     }
   }, [deviceId]);
 
-  // Draw detections on canvas whenever fallDetection or ppeDetection updates
+  // Draw detections on canvas whenever fallDetection, ppeDetection, or tankDetection updates
   useEffect(() => {
     const canvas = canvasRef.current;
     const video = videoRef.current;
 
     const hasFallDetection = fallDetection && isFallDetectionEnabled;
     const hasPPEDetection = ppeDetection && isPPEDetectionEnabled;
+    const hasTankDetection = tankDetection && isTankOverflowEnabled && tankDetection.level_percent !== undefined;
+    const hasGeofenceZones = isGeofencingEnabled && geofenceZones && geofenceZones.length > 0;
 
     // Debug logging
-    if (ppeDetection) {
-      console.log('[LiveVideoPlayer] PPE Draw check:', {
-        hasPPEDetection,
-        isPPEDetectionEnabled,
+    if (tankDetection) {
+      console.log('[LiveVideoPlayer] Tank Draw check:', {
+        hasTankDetection,
+        isTankOverflowEnabled,
         showOverlays,
         isDetectionActive,
-        detectionsCount: ppeDetection.detections?.length || 0,
+        level_percent: tankDetection.level_percent,
         canvasExists: !!canvas,
         videoExists: !!video,
       });
     }
 
-    if (!canvas || !video || (!hasFallDetection && !hasPPEDetection) || !showOverlays || !isDetectionActive) {
+    if (!canvas || !video || (!hasFallDetection && !hasPPEDetection && !hasTankDetection && !hasGeofenceZones) || !showOverlays || !isDetectionActive) {
       // Clear canvas if detection is disabled
       if (canvas) {
         const ctx = canvas.getContext('2d');
@@ -367,7 +387,87 @@ export function LiveVideoPlayer({
         ppeDetection.videoHeight
       );
     }
-  }, [fallDetection, ppeDetection, showOverlays, isDetectionActive, isFallDetectionEnabled, isPPEDetectionEnabled]);
+
+    // Draw tank overflow detection if enabled and available
+    // Note: Tank detection may have empty detections array but still have level data
+    if (hasTankDetection) {
+      console.log('[LiveVideoPlayer] Drawing tank detection overlay:', {
+        level_percent: tankDetection!.level_percent,
+        severity: tankDetection!.severity,
+        canvasSize: `${canvas.width}x${canvas.height}`,
+      });
+      drawTankDetections(
+        ctx,
+        tankDetection!,
+        canvas.width,
+        canvas.height,
+        tankCorners
+      );
+    }
+
+    // Draw geofence zones if enabled and available
+    if (hasGeofenceZones) {
+      // Draw each zone as a semi-transparent polygon
+      for (const zone of geofenceZones!) {
+        if (!zone.points || zone.points.length < 3) continue;
+
+        // Zone points are stored as [x, y] in pixel coordinates (1920x1080 video space)
+        // Scale to canvas size
+        const videoWidth = video.videoWidth || 1920;
+        const videoHeight = video.videoHeight || 1080;
+        const scaledPoints = zone.points.map((point) => ({
+          x: (point[0] / videoWidth) * canvas.width,
+          y: (point[1] / videoHeight) * canvas.height,
+        }));
+
+        ctx.save();
+
+        // Draw filled zone
+        ctx.beginPath();
+        ctx.moveTo(scaledPoints[0].x, scaledPoints[0].y);
+        for (let i = 1; i < scaledPoints.length; i++) {
+          ctx.lineTo(scaledPoints[i].x, scaledPoints[i].y);
+        }
+        ctx.closePath();
+
+        // Color based on zone type
+        if (zone.type === 'restricted') {
+          ctx.fillStyle = 'rgba(255, 0, 0, 0.15)'; // Semi-transparent red for restricted
+          ctx.strokeStyle = 'rgba(255, 0, 0, 0.8)';
+        } else {
+          ctx.fillStyle = 'rgba(0, 255, 0, 0.15)'; // Semi-transparent green for allowed
+          ctx.strokeStyle = 'rgba(0, 255, 0, 0.8)';
+        }
+        ctx.fill();
+
+        // Draw border
+        ctx.lineWidth = 2;
+        ctx.setLineDash([5, 5]); // Dashed line
+        ctx.stroke();
+
+        // Draw zone label
+        ctx.setLineDash([]); // Reset line dash
+        ctx.font = 'bold 14px Arial';
+        ctx.fillStyle = zone.type === 'restricted' ? 'rgba(255, 0, 0, 0.9)' : 'rgba(0, 255, 0, 0.9)';
+
+        // Position label at top-left of zone
+        const labelX = Math.min(...scaledPoints.map(p => p.x)) + 5;
+        const labelY = Math.min(...scaledPoints.map(p => p.y)) + 18;
+
+        // Draw label background
+        const labelText = zone.name || (zone.type === 'restricted' ? 'Restricted Zone' : 'Allowed Zone');
+        const textMetrics = ctx.measureText(labelText);
+        ctx.fillStyle = 'rgba(0, 0, 0, 0.6)';
+        ctx.fillRect(labelX - 3, labelY - 14, textMetrics.width + 6, 18);
+
+        // Draw label text
+        ctx.fillStyle = zone.type === 'restricted' ? '#ff6666' : '#66ff66';
+        ctx.fillText(labelText, labelX, labelY);
+
+        ctx.restore();
+      }
+    }
+  }, [fallDetection, ppeDetection, tankDetection, showOverlays, isDetectionActive, isFallDetectionEnabled, isPPEDetectionEnabled, isTankOverflowEnabled, isGeofencingEnabled, tankCorners, geofenceZones]);
 
   // Cleanup function
   const cleanup = useCallback(async () => {
@@ -384,6 +484,11 @@ export function LiveVideoPlayer({
     if (ppeDetectionRef.current) {
       ppeDetectionRef.current.stop();
       ppeDetectionRef.current = null;
+    }
+
+    if (tankDetectionRef.current) {
+      tankDetectionRef.current.stop();
+      tankDetectionRef.current = null;
     }
 
     if (connectionRef.current) {
@@ -457,6 +562,21 @@ export function LiveVideoPlayer({
             });
             console.log('[LiveVideoPlayer] PPE detection started');
           }
+
+          // Start tank overflow detection if enabled
+          if (isTankOverflowEnabled) {
+            tankDetectionRef.current = new TankDetectionManager({
+              fps: 1,
+              tankCorners: tankCorners,
+              capacityLiters: 0.3, // Default 300ml for coffee mug testing
+              alertThreshold: 90,
+            });
+            tankDetectionRef.current.start(video, (result) => {
+              console.log('[LiveVideoPlayer] Got tank detection result:', result.level_percent.toFixed(1) + '%');
+              setTankDetection(result);
+            });
+            console.log('[LiveVideoPlayer] Tank overflow detection started');
+          }
         }
       } else {
         console.error('[LiveVideoPlayer] Video element not found');
@@ -468,7 +588,7 @@ export function LiveVideoPlayer({
       setPlayerState('error');
       setConnectionStatus('Connection failed');
     }
-  }, [deviceId, isDetectionActive, isFallDetectionEnabled, isPPEDetectionEnabled, reportFallToBackend, reportPPEToBackend]);
+  }, [deviceId, isDetectionActive, isFallDetectionEnabled, isPPEDetectionEnabled, isTankOverflowEnabled, tankCorners, reportFallToBackend, reportPPEToBackend]);
 
   // Handle retry
   const handleRetry = useCallback(async () => {
@@ -561,7 +681,26 @@ export function LiveVideoPlayer({
       ppeDetectionRef.current = null;
       setPPEDetection(null);
     }
-  }, [isDetectionActive, isFallDetectionEnabled, isPPEDetectionEnabled, playerState, reportFallToBackend, reportPPEToBackend]);
+
+    // Handle tank overflow detection toggle
+    if (isDetectionActive && isTankOverflowEnabled && !tankDetectionRef.current) {
+      console.log('[LiveVideoPlayer] Starting tank overflow detection (enabled while playing)');
+      tankDetectionRef.current = new TankDetectionManager({
+        fps: 1,
+        tankCorners: tankCorners,
+        capacityLiters: 0.3, // Default 300ml for coffee mug testing
+        alertThreshold: 90,
+      });
+      tankDetectionRef.current.start(video, (result) => {
+        setTankDetection(result);
+      });
+    } else if ((!isDetectionActive || !isTankOverflowEnabled) && tankDetectionRef.current) {
+      console.log('[LiveVideoPlayer] Stopping tank overflow detection');
+      tankDetectionRef.current.stop();
+      tankDetectionRef.current = null;
+      setTankDetection(null);
+    }
+  }, [isDetectionActive, isFallDetectionEnabled, isPPEDetectionEnabled, isTankOverflowEnabled, playerState, deviceId, tankCorners, reportFallToBackend, reportPPEToBackend]);
 
   // Cleanup on unmount
   useEffect(() => {

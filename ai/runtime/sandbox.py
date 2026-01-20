@@ -525,6 +525,7 @@ class ExecutionSandbox:
         frame: Any,
         request_id: Optional[str] = None,
         model_instance: Optional[Any] = None,
+        config: Optional[dict[str, Any]] = None,
     ) -> ExecutionResult:
         """
         Execute the full inference pipeline on a frame.
@@ -538,6 +539,7 @@ class ExecutionSandbox:
             frame: Input frame (numpy array, bytes, etc.)
             request_id: Optional request ID for tracing
             model_instance: Optional model instance override
+            config: Optional model-specific configuration (e.g., tank corners, ROI)
 
         Returns:
             ExecutionResult with output or error
@@ -582,10 +584,18 @@ class ExecutionSandbox:
 
             # Stage 2: Inference (required)
             model = model_instance or self.loaded_model.model_instance
+
+            # Build partial function with model and config if provided
+            infer_kwargs = {}
             if model is not None:
+                infer_kwargs["model"] = model
+            if config is not None:
+                infer_kwargs["config"] = config
+
+            if infer_kwargs:
                 infer_func = functools.partial(
                     self.loaded_model.infer,
-                    model=model,
+                    **infer_kwargs,
                 )
             else:
                 infer_func = self.loaded_model.infer
@@ -1117,6 +1127,7 @@ class SandboxManager:
         version: str,
         frame: Any,
         request_id: Optional[str] = None,
+        config: Optional[dict[str, Any]] = None,
     ) -> ExecutionResult:
         """
         Execute inference through the appropriate sandbox.
@@ -1126,6 +1137,7 @@ class SandboxManager:
             version: Model version
             frame: Input frame
             request_id: Optional request ID
+            config: Optional model-specific configuration (e.g., tank corners, ROI)
 
         Returns:
             ExecutionResult
@@ -1146,7 +1158,7 @@ class SandboxManager:
                 request_id=request_id or "",
             )
 
-        return sandbox.execute(frame, request_id)
+        return sandbox.execute(frame, request_id, config=config)
 
     def get_all_health(self) -> dict[str, HealthStatus]:
         """

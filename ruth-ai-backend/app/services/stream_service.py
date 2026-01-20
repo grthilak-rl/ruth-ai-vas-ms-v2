@@ -106,6 +106,7 @@ class StreamService:
         model_version: str | None = None,
         inference_fps: int = 10,
         confidence_threshold: float = 0.7,
+        model_config: dict | None = None,
     ) -> StreamSession:
         """Start a stream for a device.
 
@@ -123,6 +124,7 @@ class StreamService:
             model_version: Specific model version (optional)
             inference_fps: Frames per second for inference
             confidence_threshold: Minimum confidence for detections
+            model_config: Model-specific configuration (e.g., tank corners, ROI)
 
         Returns:
             Active StreamSession
@@ -153,6 +155,7 @@ class StreamService:
             model_version=model_version,
             inference_fps=inference_fps,
             confidence_threshold=confidence_threshold,
+            model_config=model_config,
             state=StreamState.STARTING,
             started_at=datetime.now(timezone.utc),
         )
@@ -439,11 +442,44 @@ class StreamService:
             "vas_stream_id": session.vas_stream_id,
             "started_at": session.started_at.isoformat() if session.started_at else None,
             "model_id": session.model_id,
+            "model_config": session.model_config,
         }
 
     # -------------------------------------------------------------------------
     # Error Recovery
     # -------------------------------------------------------------------------
+
+    async def update_model_config(
+        self,
+        device_id: UUID,
+        model_config: dict,
+    ) -> StreamSession:
+        """Update model_config for an active stream session.
+
+        Args:
+            device_id: Local device UUID
+            model_config: New model configuration
+
+        Returns:
+            Updated StreamSession
+
+        Raises:
+            StreamNotActiveError: No active stream for device
+        """
+        session = await self._get_active_session(device_id)
+        if not session:
+            raise StreamNotActiveError(device_id)
+
+        session.model_config = model_config
+
+        logger.info(
+            "Updated model_config",
+            session_id=str(session.id),
+            device_id=str(device_id),
+            model_id=session.model_id,
+        )
+
+        return session
 
     async def recover_stuck_sessions(self) -> list[StreamSession]:
         """Find and recover sessions stuck in transitional states.

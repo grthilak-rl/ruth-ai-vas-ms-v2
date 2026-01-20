@@ -48,6 +48,7 @@ class InferenceRequest(BaseModel):
     model_version: Optional[str] = Field(None, description="Specific model version (optional)")
     priority: int = Field(default=0, ge=0, le=10, description="Request priority (0-10)")
     metadata: Dict[str, Any] = Field(default_factory=dict, description="Additional metadata")
+    config: Optional[Dict[str, Any]] = Field(None, description="Model-specific configuration (e.g., tank corners, ROI)")
 
     class Config:
         json_schema_extra = {
@@ -170,13 +171,14 @@ async def submit_inference(request: InferenceRequest) -> InferenceResponse:
             model_id=request.model_id,
             version=model_version.version,
             frame=frame,
-            request_id=str(request_id)
+            request_id=str(request_id),
+            config=request.config,
         )
 
         if not execution_result.success:
             raise Exception(execution_result.error or "Inference failed")
 
-        result = execution_result.result
+        result = execution_result.output
 
         # Calculate inference time
         inference_time_ms = (time.time() - start_time) * 1000

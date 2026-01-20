@@ -2,6 +2,7 @@ import { useMemo } from 'react';
 import { LiveVideoPlayer } from '../video/LiveVideoPlayer';
 import { AIModelSelector, type AIModel } from './AIModelSelector';
 import type { Device } from '../../state';
+import type { ModelConfig } from '../../types/geofencing';
 import './CameraGridCell.css';
 
 /**
@@ -31,7 +32,8 @@ interface CameraGridCellProps {
   detectionStatus: DetectionStatus;
   aiModels: AIModel[];
   violationCount?: number;
-  onModelToggle: (cameraId: string, modelId: string, enabled: boolean) => void;
+  onModelToggle: (cameraId: string, modelId: string, enabled: boolean, config?: ModelConfig) => void;
+  modelConfigs?: Record<string, ModelConfig>;
   onFullscreen: (cameraId: string) => void;
 }
 
@@ -42,6 +44,7 @@ export function CameraGridCell({
   aiModels,
   violationCount,
   onModelToggle,
+  modelConfigs = {},
   onFullscreen,
 }: CameraGridCellProps) {
   const statusIndicator = useMemo(() => {
@@ -76,9 +79,19 @@ export function CameraGridCell({
   // Determine which detection types are active
   const isFallDetectionActive = aiModels.find(m => m.id === 'fall_detection')?.state === 'active';
   const isPPEDetectionActive = aiModels.find(m => m.id === 'ppe_detection')?.state === 'active';
+  const isTankOverflowActive = aiModels.find(m => m.id === 'tank_overflow_monitoring')?.state === 'active';
+  const isGeofencingActive = aiModels.find(m => m.id === 'geo_fencing')?.state === 'active';
 
-  const handleModelToggle = (modelId: string, enabled: boolean) => {
-    onModelToggle(camera.id, modelId, enabled);
+  // Get tank overflow configuration (corners)
+  const tankOverflowConfig = modelConfigs['tank_overflow_monitoring'];
+  const tankCorners = tankOverflowConfig?.tank_corners;
+
+  // Get geo_fencing configuration (zones)
+  const geofencingConfig = modelConfigs['geo_fencing'];
+  const geofenceZones = geofencingConfig?.zones;
+
+  const handleModelToggle = (modelId: string, enabled: boolean, config?: ModelConfig) => {
+    onModelToggle(camera.id, modelId, enabled, config);
   };
 
   const handleFullscreen = () => {
@@ -97,6 +110,10 @@ export function CameraGridCell({
           showOverlays={showOverlays}
           isFallDetectionEnabled={isFallDetectionActive}
           isPPEDetectionEnabled={isPPEDetectionActive}
+          isTankOverflowEnabled={isTankOverflowActive}
+          isGeofencingEnabled={isGeofencingActive}
+          tankCorners={tankCorners}
+          geofenceZones={geofenceZones}
         />
       </div>
 
@@ -115,8 +132,11 @@ export function CameraGridCell({
         <div className="camera-grid-cell__ai-controls">
           <AIModelSelector
             cameraId={camera.id}
+            cameraName={camera.name}
+            videoUrl={`/api/v1/devices/${camera.id}/snapshot`}
             models={aiModels}
             onModelToggle={handleModelToggle}
+            modelConfigs={modelConfigs}
           />
           <span className={`camera-grid-cell__detection ${detectionStatusInfo.className}`}>
             {detectionStatusInfo.icon} {detectionStatusInfo.label}

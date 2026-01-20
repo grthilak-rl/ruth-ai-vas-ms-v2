@@ -8,6 +8,7 @@ Defensive async client for VAS-MS-V2 integration with:
 """
 
 import asyncio
+import json
 import time
 from contextlib import asynccontextmanager
 from typing import Any, AsyncIterator
@@ -774,7 +775,23 @@ class VASClient:
             f"/v2/snapshots/{snapshot_id}/image",
             headers=self._get_auth_headers(token),
         ) as response:
-            self._raise_for_status(response)
+            # For streaming responses, we can't use _raise_for_status
+            # as it tries to read response.json() which doesn't work with streams
+            if not response.is_success:
+                # Read the error response
+                error_text = await response.aread()
+                try:
+                    error_data = json.loads(error_text)
+                    vas_error = VASErrorResponse.model_validate(error_data)
+                    error_message = vas_error.error_description
+                except (ValueError, ValidationError):
+                    error_message = error_text.decode() if isinstance(error_text, bytes) else str(error_text)
+
+                if response.status_code == 404:
+                    raise VASNotFoundError(error_message)
+                else:
+                    raise VASError(error_message)
+
             yield response
 
     # -------------------------------------------------------------------------
@@ -966,6 +983,18 @@ class VASClient:
         raise VASTimeoutError(
             f"Timeout waiting for snapshot {snapshot_id} to be ready"
         )
+
+    async def get_snapshot_image(self, snapshot_id: str) -> bytes:
+        """Get snapshot image as bytes.
+
+        Args:
+            snapshot_id: Snapshot UUID
+
+        Returns:
+            Image data as bytes
+        """
+        async with self.download_snapshot_image(snapshot_id) as response:
+            return await response.aread()
 
     async def wait_for_bookmark_ready(
         self,
