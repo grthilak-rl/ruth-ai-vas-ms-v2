@@ -25,9 +25,12 @@ services:
   # Multi-model inference platform
   # ============================================
   unified-ai-runtime:
+    image: ruth-ai-runtime:gpu
     build:
       context: .
       dockerfile: Dockerfile
+      args:
+        - VARIANT=gpu
     container_name: ruth-ai-unified-runtime
     restart: unless-stopped
     ports:
@@ -60,11 +63,10 @@ services:
           memory: 4G  # Adjust based on models
         reservations:
           memory: 2G
-          # GPU support will be added in Phase 3:
-          # devices:
-          #   - driver: nvidia
-          #     count: 1
-          #     capabilities: [gpu]
+          devices:
+            - driver: nvidia
+              count: 1
+              capabilities: [gpu]
 
   # ============================================
   # Development Helper (Optional)
