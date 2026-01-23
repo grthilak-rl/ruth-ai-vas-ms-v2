@@ -1,4 +1,4 @@
-import { useMemo } from 'react';
+import { useMemo, useState, useEffect } from 'react';
 import { Link } from 'react-router-dom';
 import {
   useDevicesQuery,
@@ -8,10 +8,8 @@ import {
   isAnyModelHealthy,
 } from '../../state';
 import type { Device } from '../../state';
+import { getGridSize, type GridSize } from '../../utils/cameraGridPreferences';
 import './CameraGrid.css';
-
-/** Maximum cameras to display in grid */
-const MAX_CAMERAS = 6;
 
 /**
  * Camera Grid Section (F4 §4.1)
@@ -19,7 +17,7 @@ const MAX_CAMERAS = 6;
  * Displays a grid of camera status tiles on the Overview dashboard.
  *
  * Per F4:
- * - 2x2 or 3x2 grid layout
+ * - Grid layout matches the Camera Monitoring page preference
  * - Each tile shows: Camera name, Live/Offline status, Detection Active/Paused
  * - Clicking navigates to Camera Detail
  * - No video playback (just status)
@@ -34,6 +32,32 @@ const MAX_CAMERAS = 6;
  * - Error: Error message with retry
  */
 export function CameraGrid() {
+  // Read grid size preference from localStorage (synced with Camera Monitoring page)
+  const [gridSize, setGridSizeState] = useState<GridSize>(getGridSize);
+
+  // Listen for storage changes to sync with Camera Monitoring page
+  useEffect(() => {
+    const handleStorageChange = () => {
+      setGridSizeState(getGridSize());
+    };
+
+    // Listen for storage events from other tabs
+    window.addEventListener('storage', handleStorageChange);
+
+    // Also check on focus (for same-tab changes)
+    const handleFocus = () => {
+      setGridSizeState(getGridSize());
+    };
+    window.addEventListener('focus', handleFocus);
+
+    return () => {
+      window.removeEventListener('storage', handleStorageChange);
+      window.removeEventListener('focus', handleFocus);
+    };
+  }, []);
+
+  const maxCameras = gridSize * gridSize;
+
   const {
     data: devicesData,
     isLoading: isDevicesLoading,
@@ -49,11 +73,16 @@ export function CameraGrid() {
     return isAnyModelHealthy(modelsData.models);
   }, [modelsData]);
 
-  // Get first N cameras
+  // Get cameras based on grid size
   const cameras = useMemo(() => {
     if (!devicesData?.items) return [];
-    return devicesData.items.slice(0, MAX_CAMERAS);
-  }, [devicesData]);
+    return devicesData.items.slice(0, maxCameras);
+  }, [devicesData, maxCameras]);
+
+  // Dynamic grid style based on preference
+  const gridStyle = {
+    gridTemplateColumns: `repeat(${gridSize}, 1fr)`,
+  };
 
   // Loading state
   if (isDevicesLoading) {
@@ -62,8 +91,8 @@ export function CameraGrid() {
         <div className="camera-grid__header">
           <h2 className="camera-grid__title">Camera Grid</h2>
         </div>
-        <div className="camera-grid__tiles">
-          {Array.from({ length: 4 }).map((_, i) => (
+        <div className="camera-grid__tiles" style={gridStyle}>
+          {Array.from({ length: maxCameras }).map((_, i) => (
             <div key={i} className="camera-grid__tile camera-grid__tile--skeleton">
               <div className="camera-grid__skeleton-content">
                 <span className="camera-grid__skeleton-bar camera-grid__skeleton-bar--name" />
@@ -123,7 +152,7 @@ export function CameraGrid() {
           View All &rarr;
         </Link>
       </div>
-      <div className="camera-grid__tiles">
+      <div className="camera-grid__tiles" style={gridStyle}>
         {cameras.map((device) => (
           <CameraTile
             key={device.id}

@@ -1,7 +1,7 @@
 /**
  * Top Status Bar Styles
  *
- * Layout: metrics cards | system health
+ * Layout: metrics cards | camera grid
  * Two-column grid with responsive stacking
  */
 
@@ -96,158 +96,208 @@
   text-decoration: underline;
 }
 
-/* System Health Panel - Right Half */
-.top-status-bar__health {
+/* Camera Grid Panel - Right Half */
+.top-status-bar__camera-grid {
   display: flex;
   flex-direction: column;
-  padding: 1rem 1.25rem;
   background: #fff;
   border: 1px solid #e0e0e0;
   border-radius: 8px;
+  overflow: hidden;
 }
 
-.top-status-bar__health--healthy {
-  border-left: 4px solid #34a853;
+.top-status-bar__camera-grid--error {
+  border-color: #f5c6cb;
 }
 
-.top-status-bar__health--degraded {
-  border-left: 4px solid #fbbc04;
-}
-
-.top-status-bar__health--unhealthy {
-  border-left: 4px solid #d93025;
-}
-
-.top-status-bar__health-header {
+.top-status-bar__camera-grid-header {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  margin-bottom: 0.75rem;
-  padding-bottom: 0.625rem;
-  border-bottom: 1px solid #eee;
+  padding: 0.625rem 1rem;
+  border-bottom: 1px solid #e0e0e0;
+  flex-shrink: 0;
 }
 
-.top-status-bar__health-title {
+.top-status-bar__camera-grid-title {
   font-size: 0.875rem;
   font-weight: 600;
   color: #1a1a1a;
 }
 
-.top-status-bar__health-badge {
-  font-size: 0.625rem;
-  font-weight: 600;
-  text-transform: uppercase;
-  letter-spacing: 0.03em;
-  padding: 0.1875rem 0.625rem;
-  border-radius: 10px;
-}
-
-.top-status-bar__health-badge--healthy {
-  background: #e6f4ea;
-  color: #137333;
-}
-
-.top-status-bar__health-badge--degraded {
-  background: #fef7e0;
-  color: #b06000;
-}
-
-.top-status-bar__health-badge--unhealthy {
-  background: #fce8e6;
-  color: #c5221f;
-}
-
-.top-status-bar__health-grid {
-  display: grid;
-  grid-template-columns: repeat(2, 1fr);
-  gap: 0.5rem 1.5rem;
-  flex: 1;
-  align-content: center;
-}
-
-.top-status-bar__health-item {
-  display: flex;
-  align-items: center;
-  gap: 0.5rem;
-  padding: 0.25rem 0;
-}
-
-.top-status-bar__health-dot {
-  font-size: 0.75rem;
-  line-height: 1;
-}
-
-.top-status-bar__health-item--healthy .top-status-bar__health-dot {
-  color: #34a853;
-}
-
-.top-status-bar__health-item--degraded .top-status-bar__health-dot {
-  color: #fbbc04;
-}
-
-.top-status-bar__health-item--unhealthy .top-status-bar__health-dot {
-  color: #d93025;
-}
-
-.top-status-bar__health-item--loading .top-status-bar__health-dot {
-  color: #999;
-  animation: dot-pulse 1.5s ease-in-out infinite;
-}
-
-.top-status-bar__health-name {
+.top-status-bar__camera-grid-link {
   font-size: 0.8125rem;
-  font-weight: 500;
-  color: #1a1a1a;
-  flex: 1;
-}
-
-.top-status-bar__health-latency {
-  font-size: 0.6875rem;
-  color: #999;
-  font-variant-numeric: tabular-nums;
-}
-
-.top-status-bar__health-footer {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  margin-top: 0.75rem;
-  padding-top: 0.625rem;
-  border-top: 1px solid #eee;
-}
-
-.top-status-bar__health-uptime {
-  font-size: 0.75rem;
-  color: #666;
-}
-
-.top-status-bar__health-uptime strong {
-  color: #333;
-}
-
-.top-status-bar__health-link {
-  font-size: 0.75rem;
   color: #1a73e8;
   text-decoration: none;
 }
 
-.top-status-bar__health-link:hover {
+.top-status-bar__camera-grid-link:hover {
   text-decoration: underline;
 }
 
-.top-status-bar__health-error {
-  font-size: 0.75rem;
-  color: #c5221f;
-  text-align: center;
-  padding: 0.5rem;
+.top-status-bar__camera-grid-tiles {
+  display: grid;
+  gap: 0.5rem;
+  padding: 0.75rem;
+  flex: 1;
+  min-height: 0;
 }
 
-@keyframes dot-pulse {
+.top-status-bar__camera-tile {
+  display: flex;
+  flex-direction: column;
+  padding: 0.5rem 0.625rem;
+  background: #f8f9fa;
+  border: 1px solid #e0e0e0;
+  border-radius: 6px;
+  text-decoration: none;
+  color: inherit;
+  transition: background-color 0.15s ease, border-color 0.15s ease;
+}
+
+.top-status-bar__camera-tile:hover {
+  background-color: #fff;
+  border-color: #1a73e8;
+}
+
+.top-status-bar__camera-tile--offline {
+  background: #fafafa;
+  opacity: 0.8;
+}
+
+.top-status-bar__camera-tile--skeleton {
+  pointer-events: none;
+  min-height: 3rem;
+  justify-content: center;
+  gap: 0.375rem;
+}
+
+.top-status-bar__skeleton-bar {
+  display: block;
+  height: 0.75rem;
+  background: #e0e0e0;
+  border-radius: 4px;
+  animation: skeleton-pulse 1.5s ease-in-out infinite;
+}
+
+.top-status-bar__skeleton-bar--short {
+  width: 60%;
+}
+
+.top-status-bar__camera-tile-header {
+  display: flex;
+  align-items: center;
+  gap: 0.375rem;
+  margin-bottom: 0.25rem;
+}
+
+.top-status-bar__camera-status {
+  font-size: 0.625rem;
+  line-height: 1;
+}
+
+.top-status-bar__camera-status--live {
+  color: #34a853;
+}
+
+.top-status-bar__camera-status--offline {
+  color: #999;
+}
+
+.top-status-bar__camera-name {
+  font-size: 0.75rem;
+  font-weight: 500;
+  color: #1a1a1a;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.top-status-bar__camera-tile-body {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.top-status-bar__camera-status-label {
+  font-size: 0.625rem;
+  color: #666;
+}
+
+.top-status-bar__camera-detection {
+  font-size: 0.5625rem;
+  font-weight: 500;
+  text-transform: uppercase;
+  letter-spacing: 0.02em;
+}
+
+.top-status-bar__camera-detection--active {
+  color: #34a853;
+}
+
+.top-status-bar__camera-detection--paused {
+  color: #f9a825;
+}
+
+.top-status-bar__camera-detection--disabled {
+  color: #999;
+}
+
+.top-status-bar__camera-detection--unavailable {
+  color: #c5221f;
+}
+
+/* Empty state */
+.top-status-bar__camera-grid-empty {
+  padding: 1.5rem 1rem;
+  text-align: center;
+}
+
+.top-status-bar__camera-grid-empty p {
+  margin: 0;
+  font-size: 0.8125rem;
+  color: #666;
+}
+
+.top-status-bar__camera-grid-empty-hint {
+  margin-top: 0.375rem !important;
+  font-size: 0.75rem !important;
+  color: #999 !important;
+}
+
+/* Error state */
+.top-status-bar__camera-grid-error {
+  padding: 1.5rem 1rem;
+  text-align: center;
+}
+
+.top-status-bar__camera-grid-error p {
+  margin: 0 0 0.75rem 0;
+  font-size: 0.8125rem;
+  color: #666;
+}
+
+.top-status-bar__camera-grid-retry {
+  padding: 0.375rem 0.75rem;
+  font-size: 0.8125rem;
+  color: #1a73e8;
+  background: transparent;
+  border: 1px solid #1a73e8;
+  border-radius: 4px;
+  cursor: pointer;
+  transition: background-color 0.15s ease;
+}
+
+.top-status-bar__camera-grid-retry:hover {
+  background-color: #e8f0fe;
+}
+
+@keyframes skeleton-pulse {
   0%, 100% {
     opacity: 1;
   }
   50% {
-    opacity: 0.4;
+    opacity: 0.5;
   }
 }
 
@@ -279,10 +329,6 @@
     min-width: calc(33.33% - 0.5rem);
     flex: 1 1 calc(33.33% - 0.5rem);
   }
-
-  .top-status-bar__health-grid {
-    grid-template-columns: repeat(3, 1fr);
-  }
 }
 
 @media (max-width: 768px) {
@@ -299,24 +345,11 @@
   .top-status-bar__card-value {
     font-size: 1.5rem;
   }
-
-  .top-status-bar__health {
-    padding: 0.875rem 1rem;
-  }
-
-  .top-status-bar__health-grid {
-    grid-template-columns: repeat(2, 1fr);
-    gap: 0.375rem 1rem;
-  }
 }
 
 @media (max-width: 480px) {
   .top-status-bar__card {
     min-width: 100%;
     flex: 1 1 100%;
-  }
-
-  .top-status-bar__health-grid {
-    grid-template-columns: 1fr;
   }
 }

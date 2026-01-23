@@ -216,9 +216,10 @@ export function isViolationsListResponse(value: unknown): value is ViolationsLis
 export function isDeviceStreaming(value: unknown): value is DeviceStreaming {
   if (!isObject(value)) return false;
 
-  const { active, stream_id, state, ai_enabled, model_id } = value;
+  const { video_live, active, stream_id, state, ai_enabled, model_id } = value;
 
   return (
+    isBoolean(video_live) &&
     isBoolean(active) &&
     isStringOrNull(stream_id) &&
     (state === null || isString(state)) &&

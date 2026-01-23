@@ -137,22 +137,27 @@ export async function updateModelConfig(
 /**
  * Camera status (F6 §4.4)
  *
- * | is_active | streaming.active | Display     |
- * |-----------|------------------|-------------|
- * | true      | true             | "Live"      |
- * | true      | false            | "Offline"   |
- * | false     | any              | "Disabled"  |
+ * Uses video_live field (VAS video stream status) for Online/Offline display.
+ *
+ * | is_active | streaming.video_live | Display     |
+ * |-----------|----------------------|-------------|
+ * | true      | true                 | "Live"      |
+ * | true      | false                | "Offline"   |
+ * | false     | any                  | "Disabled"  |
  */
 export type CameraStatus = 'live' | 'offline' | 'disabled';
 
 /**
  * Derive camera status from device
+ *
+ * Uses video_live (VAS video stream status), not active (AI inference status).
  */
 export function getCameraStatus(device: Device): CameraStatus {
   if (!device.is_active) {
     return 'disabled';
   }
-  if (device.streaming.active) {
+  // Use video_live for camera online/offline status
+  if (device.streaming.video_live) {
     return 'live';
   }
   return 'offline';

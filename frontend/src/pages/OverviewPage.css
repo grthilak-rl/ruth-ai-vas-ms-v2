@@ -6,14 +6,14 @@
  *
  * Layout:
  * ┌─────────────────────────────────────┬─────────────────────────────────────┐
- * │ [Metrics Cards]                     │    [System Health]                  │
- * │ Open Alerts | Cameras | Models      │    Detailed health panel            │
+ * │ [Metrics Cards]                     │    [Camera Grid]                    │
+ * │ Open Alerts | Cameras | Models      │    (2x2 tiles)                      │
  * ├─────────────────────────────────────┼─────────────────────────────────────┤
- * │   Recent Violations (compact)       │   Ask Ruth                          │
- * │   (4 entries max)                   │   (chat panel)                      │
+ * │   System Health                     │   Ask Ruth                          │
+ * │   (component statuses)              │   (chat panel)                      │
  * ├─────────────────────────────────────┼─────────────────────────────────────┤
- * │   Hardware Capacity                 │   Camera Grid                       │
- * │   (GPU/CPU/RAM/Models)              │   (2x3 tiles)                       │
+ * │   Hardware Capacity                 │   Recent Violations                 │
+ * │   (GPU/CPU/RAM/Models)              │   (4 entries max)                   │
  * └─────────────────────────────────────┴─────────────────────────────────────┘
  */
 
@@ -44,7 +44,7 @@
   min-height: 0; /* Allow content to shrink */
 }
 
-/* Left column: Recent Violations + Hardware Capacity stacked */
+/* Left column: System Health + Hardware Capacity stacked */
 .overview-page__left {
   display: flex;
   flex-direction: column;
@@ -52,8 +52,8 @@
   min-height: 0;
 }
 
-/* Recent Violations: compact height (auto-sized by content) */
-.overview-page__left > .recent-violations {
+/* System Health: compact height (auto-sized by content) */
+.overview-page__left > .system-health-card {
   flex-shrink: 0;
 }
 
@@ -63,7 +63,7 @@
   min-height: 0;
 }
 
-/* Right column: Ask Ruth + Camera Grid stacked */
+/* Right column: Ask Ruth + Recent Violations stacked */
 .overview-page__right {
   display: flex;
   flex-direction: column;
@@ -71,17 +71,22 @@
   min-height: 0;
 }
 
-/* Chat section: takes remaining space after Camera Grid */
+/* Chat section: flexible height, can shrink */
 .overview-page__chat {
   flex: 1;
-  min-height: 0;
+  min-height: 180px;
   display: flex;
   flex-direction: column;
 }
 
-/* Camera section: fixed height at bottom */
-.overview-page__cameras {
+/* Recent Violations section: takes more space at bottom */
+.overview-page__violations {
   flex-shrink: 0;
+}
+
+/* Make recent-violations component fill its container */
+.overview-page__violations > .recent-violations {
+  height: 100%;
 }
 
 /* Responsive: Stack on smaller screens */

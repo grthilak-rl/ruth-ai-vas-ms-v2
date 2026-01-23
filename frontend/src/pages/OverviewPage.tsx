@@ -1,7 +1,7 @@
 import {
   TopStatusBar,
+  SystemHealthCard,
   RecentViolations,
-  CameraGrid,
   HardwareCapacityCard,
 } from '../components/overview';
 import { ChatPanel } from '../components/chat';
@@ -15,16 +15,16 @@ import './OverviewPage.css';
  *
  * Layout (compact, no-scroll design):
  * ┌──────────────────────────────────────────────────────────────────────────┐
- * │ Row 1: [Open Alerts] [Cameras Live] [Models Active] | [System Health]   │
+ * │ Row 1: [Open Alerts] [Cameras Live] [Models Active] | [Camera Grid]      │
  * ├──────────────────────────────────────────────────────────────────────────┤
  * │ Row 2:                                                                   │
  * │   Left Column:              │  Right Column:                             │
  * │   ┌─────────────────────┐   │  ┌─────────────────────────────────────┐   │
- * │   │ Recent Violations   │   │  │ Ask Ruth                            │   │
- * │   │ (4 entries max)     │   │  │                                     │   │
+ * │   │ System Health       │   │  │ Ask Ruth                            │   │
+ * │   │                     │   │  │                                     │   │
  * │   └─────────────────────┘   │  │                                     │   │
  * │   ┌─────────────────────┐   │  ├─────────────────────────────────────┤   │
- * │   │ Hardware Capacity   │   │  │ Camera Grid                         │   │
+ * │   │ Hardware Capacity   │   │  │ Recent Violations                   │   │
  * │   │                     │   │  │                                     │   │
  * │   └─────────────────────┘   │  └─────────────────────────────────────┘   │
  * └──────────────────────────────────────────────────────────────────────────┘
@@ -38,24 +38,24 @@ import './OverviewPage.css';
 export function OverviewPage() {
   return (
     <div className="overview-page">
-      {/* Top Status Bar: Summary metrics + Health indicators */}
+      {/* Top Status Bar: Summary metrics + Camera Grid */}
       <TopStatusBar />
 
       {/* Main Content: Two-column layout */}
       <div className="overview-page__content">
-        {/* Left Column: Recent Violations + Hardware Capacity */}
+        {/* Left Column: System Health + Hardware Capacity */}
         <div className="overview-page__left">
-          <RecentViolations />
+          <SystemHealthCard />
           <HardwareCapacityCard />
         </div>
 
-        {/* Right Column: Ask Ruth + Camera Grid */}
+        {/* Right Column: Ask Ruth + Recent Violations */}
         <div className="overview-page__right">
           <div className="overview-page__chat">
             <ChatPanel showSql={false} />
           </div>
-          <div className="overview-page__cameras">
-            <CameraGrid />
+          <div className="overview-page__violations">
+            <RecentViolations />
           </div>
         </div>
       </div>

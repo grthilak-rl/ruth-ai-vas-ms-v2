@@ -9,7 +9,7 @@
   display: flex;
   align-items: center;
   justify-content: space-between;
-  padding: 0.75rem 1.5rem;
+  padding: 0 1.5rem;
   border-bottom: 1px solid #e0e0e0;
   background-color: #fff;
   min-height: 56px;
@@ -17,12 +17,14 @@
 
 .top-nav__brand {
   flex-shrink: 0;
+  display: flex;
+  align-items: center;
 }
 
 .top-nav__logo {
-  font-weight: 600;
-  font-size: 1.125rem;
-  color: #1a1a1a;
+  height: 48px;
+  width: auto;
+  object-fit: contain;
 }
 
 .top-nav__links {

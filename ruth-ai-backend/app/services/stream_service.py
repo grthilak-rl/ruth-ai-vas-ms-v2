@@ -420,7 +420,7 @@ class StreamService:
         return session is not None
 
     async def get_stream_status(self, device_id: UUID) -> dict:
-        """Get stream status for a device.
+        """Get stream status for a device (AI inference session only).
 
         Returns:
             Status dict with session info or None
@@ -441,6 +441,67 @@ class StreamService:
             "state": session.state.value,
             "vas_stream_id": session.vas_stream_id,
             "started_at": session.started_at.isoformat() if session.started_at else None,
+            "model_id": session.model_id,
+            "model_config": session.model_config,
+        }
+
+    async def get_combined_status(self, device_id: UUID, vas_device_id: str) -> dict:
+        """Get combined VAS video status and AI inference status for a device.
+
+        This method provides both:
+        - VAS video stream status (is video streaming?)
+        - AI inference session status (is detection running?)
+
+        Args:
+            device_id: Ruth AI device UUID
+            vas_device_id: VAS camera ID for this device
+
+        Returns:
+            Combined status dict with video_live, stream_id, and AI session info
+        """
+        # Get AI inference session status
+        session = await self._get_active_session(device_id)
+
+        # Get VAS video stream status
+        video_live = False
+        vas_stream_id = None
+
+        try:
+            vas_streams = await self._vas.get_streams(camera_id=vas_device_id, limit=1)
+            if vas_streams.streams:
+                vas_stream = vas_streams.streams[0]
+                video_live = vas_stream.state.value == "live"
+                vas_stream_id = str(vas_stream.id)
+        except VASError as e:
+            logger.warning(
+                "Failed to get VAS stream status",
+                device_id=str(device_id),
+                vas_device_id=vas_device_id,
+                error=str(e),
+            )
+            # On VAS error, we still return AI session status
+
+        if session is None:
+            return {
+                # VAS video status
+                "video_live": video_live,
+                "stream_id": vas_stream_id,
+                # AI inference status
+                "active": False,
+                "session_id": None,
+                "state": None,
+                "model_id": None,
+                "model_config": None,
+            }
+
+        return {
+            # VAS video status
+            "video_live": video_live,
+            "stream_id": vas_stream_id or session.vas_stream_id,
+            # AI inference status
+            "active": True,
+            "session_id": str(session.id),
+            "state": session.state.value,
             "model_id": session.model_id,
             "model_config": session.model_config,
         }
