@@ -11,5 +11,6 @@ export { LoadingState } from './LoadingState';
 export { StalenessIndicator } from './StalenessIndicator';
 export { OfflineBanner } from './OfflineBanner';
 export { RetryButton } from './RetryButton';
+export { Pagination } from './Pagination';
 export { useOnlineStatus } from './useOnlineStatus';
 export { useStaleness } from './useStaleness';

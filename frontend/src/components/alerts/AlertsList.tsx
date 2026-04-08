@@ -1,4 +1,4 @@
-import { useState, useCallback, useMemo } from 'react';
+import { useState, useCallback, useMemo, useEffect, useRef } from 'react';
 import {
   useViolationsQuery,
   useAcknowledgeViolation,
@@ -10,7 +10,11 @@ import { ViolationCard } from './ViolationCard';
 import { DismissConfirmationDialog } from './DismissConfirmationDialog';
 import { Toast, type ToastType } from './Toast';
 import { AlertsListSkeleton } from './AlertsListSkeleton';
+import { Pagination } from '../ui';
 import './AlertsList.css';
+
+/** Default page size for violations list */
+const DEFAULT_PAGE_SIZE = 10;
 
 /**
  * Sort violations explicitly (F6 §7.1)
@@ -31,7 +35,7 @@ function sortViolations(violations: Violation[]): Violation[] {
 /**
  * Convert AlertFilters to API query parameters
  */
-function filtersToQueryParams(filters: AlertFilters) {
+function filtersToQueryParams(filters: AlertFilters, page: number, pageSize: number) {
   // For status, we need to pick one or query multiple
   // Since the API only supports one status, we'll use the first selected
   // If multiple are selected, we fetch without status filter and filter client-side
@@ -59,6 +63,8 @@ function filtersToQueryParams(filters: AlertFilters) {
     until,
     sort_by: 'timestamp' as const,
     sort_order: 'desc' as const,
+    page,
+    limit: pageSize,
   };
 }
 
@@ -97,16 +103,51 @@ interface AlertsListProps {
  * - F3 Flow 3: Dismiss requires confirmation
  */
 export function AlertsList({ filters }: AlertsListProps) {
-  // Convert filters to query parameters
-  const queryParams = useMemo(() => filtersToQueryParams(filters), [filters]);
+  // Pagination state
+  const [currentPage, setCurrentPage] = useState(1);
+  const [pageSize, setPageSize] = useState(DEFAULT_PAGE_SIZE);
 
-  // Fetch violations with filters
+  // Reset to page 1 when filters change
+  const queryParams = useMemo(() => {
+    // Reset page when filters change (except for the first render)
+    return filtersToQueryParams(filters, currentPage, pageSize);
+  }, [filters, currentPage, pageSize]);
+
+  // Fetch violations with filters and pagination
   const {
     data,
     isLoading,
+    isFetching,
     isError,
     refetch,
   } = useViolationsQuery(queryParams);
+
+  // Track previous filter values to detect changes
+  const prevFiltersRef = useRef<string | null>(null);
+
+  // Reset to page 1 when filters change
+  useEffect(() => {
+    const filterKey = `${filters.statuses.join(',')}-${filters.dateFrom}-${filters.dateTo}-${filters.cameraId}`;
+
+    // Only reset page if filters actually changed (not on first render)
+    if (prevFiltersRef.current !== null && prevFiltersRef.current !== filterKey) {
+      setCurrentPage(1);
+    }
+    prevFiltersRef.current = filterKey;
+  }, [filters.statuses, filters.dateFrom, filters.dateTo, filters.cameraId]);
+
+  // Handle page change
+  const handlePageChange = useCallback((page: number) => {
+    setCurrentPage(page);
+    // Scroll to top of list when page changes
+    window.scrollTo({ top: 0, behavior: 'smooth' });
+  }, []);
+
+  // Handle page size change
+  const handlePageSizeChange = useCallback((size: number) => {
+    setPageSize(size);
+    setCurrentPage(1);
+  }, []);
 
   // Action mutations
   const acknowledgeMutation = useAcknowledgeViolation();
@@ -296,6 +337,17 @@ export function AlertsList({ filters }: AlertsListProps) {
           />
         ))}
       </div>
+
+      {/* Pagination controls */}
+      <Pagination
+        currentPage={currentPage}
+        totalItems={data?.total ?? 0}
+        pageSize={pageSize}
+        onPageChange={handlePageChange}
+        onPageSizeChange={handlePageSizeChange}
+        pageSizeOptions={[10, 25, 50]}
+        disabled={isFetching}
+      />
 
       {/* Dismiss confirmation dialog */}
       <DismissConfirmationDialog
