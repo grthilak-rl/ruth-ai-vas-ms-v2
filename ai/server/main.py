@@ -32,12 +32,19 @@ sys.path.insert(0, str(Path(__file__).parent.parent))
 from ai.runtime.discovery import DiscoveryScanner
 from ai.runtime.registry import ModelRegistry
 from ai.runtime.loader import ModelLoader
-from ai.runtime.models import LoadState
+from ai.runtime.models import LoadState, HealthStatus
 from ai.runtime.validator import ContractValidator
 from ai.runtime.sandbox import SandboxManager
 from ai.runtime.pipeline import InferencePipeline
 from ai.runtime.concurrency import ConcurrencyManager, AdmissionController
 from ai.runtime.gpu_manager import GPUManager
+from ai.runtime.reporting import (
+    CapabilityPublisher,
+    HealthAggregator,
+    RuntimeCapacityTracker,
+    create_reporting_stack,
+)
+from ai.runtime.backend_client import HTTPBackendClient, BackendClientConfig
 
 from ai.server import dependencies
 from ai.server.config import get_config
@@ -52,16 +59,6 @@ from ai.observability.metrics import (
 
 # Will be configured by configure_logging()
 logger = None
-
-
-# Simple CapabilityReporter for MVP
-class SimpleCapabilityReporter:
-    """Simple capability reporter for MVP (replaces complex CapabilityPublisher)."""
-
-    def __init__(self, registry: ModelRegistry):
-        self.registry = registry
-        self.runtime_id = os.getenv("RUNTIME_ID", f"unified-runtime-{uuid.uuid4().hex[:8]}")
-        logger.info(f"CapabilityReporter initialized with runtime_id={self.runtime_id}")
 
 
 @asynccontextmanager
@@ -134,16 +131,56 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
         admission_controller=admission_controller,
     )
 
-    # Capability reporter (simplified for MVP)
-    reporter = SimpleCapabilityReporter(registry=registry)
+    # ==========================================================================
+    # Backend Integration - Capability Publisher
+    # ==========================================================================
+
+    backend_client = None
+    capability_publisher = None
+
+    if config.backend_integration_enabled:
+        logger.info("Initializing backend integration...", extra={
+            "backend_url": config.backend_url
+        })
+
+        # Create backend client
+        backend_client_config = BackendClientConfig(
+            backend_url=config.backend_url,
+            api_key=config.backend_api_key,
+            service_token=config.backend_service_token,
+            connect_timeout=config.backend_connect_timeout_seconds,
+            read_timeout=config.backend_read_timeout_seconds,
+        )
+
+        backend_client = HTTPBackendClient(
+            config=backend_client_config,
+            runtime_id=config.runtime_id,
+        )
+
+        # Create reporting stack with actual backend client
+        capability_publisher, health_reporter, capacity_tracker = create_reporting_stack(
+            registry=registry,
+            backend_client=backend_client,
+            max_concurrent=config.max_concurrent_inferences,
+            runtime_id=config.runtime_id,
+            concurrency_manager=concurrency_manager,
+        )
+
+        # Store in dependencies
+        dependencies.set_backend_client(backend_client)
+        dependencies.set_capability_publisher(capability_publisher)
+        dependencies.set_reporter(health_reporter)
+
+        logger.info("Backend integration initialized")
+    else:
+        logger.info("Backend integration disabled by configuration")
 
     # Store in global dependencies
     dependencies.set_registry(registry)
     dependencies.set_pipeline(pipeline)
-    dependencies.set_reporter(reporter)
     dependencies.set_sandbox_manager(sandbox_manager)
 
-    # Store GPU manager (will add setter to dependencies)
+    # Store GPU manager
     app.state.gpu_manager = gpu_manager
     app.state.config = config
 
@@ -200,6 +237,13 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
                             LoadState.READY
                         )
 
+                        # Update registry health to HEALTHY
+                        registry.update_health(
+                            model_id,
+                            version,
+                            HealthStatus.HEALTHY
+                        )
+
                         # Update metrics
                         if config.metrics_enabled:
                             set_model_load_status(model_id, version, loaded=True)
@@ -246,12 +290,95 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     except Exception as e:
         logger.error(f"Error during model discovery/loading: {e}", exc_info=True)
 
+    # ==========================================================================
+    # Start Capability Publisher (after models loaded)
+    # ==========================================================================
+
+    if capability_publisher is not None:
+        logger.info("Starting capability publisher...")
+        capability_publisher.start()
+        logger.info("Capability publisher started - will register with backend")
+
     yield  # Server runs
 
-    # Cleanup
-    logger.info("🛑 Runtime shutting down...")
-    # TODO: Graceful model unloading
-    logger.info("Shutdown complete")
+    # ==========================================================================
+    # Graceful Shutdown
+    # ==========================================================================
+    # This runs when SIGTERM/SIGINT is received or server is stopped
+    # uvicorn --timeout-graceful-shutdown handles in-flight request draining
+
+    logger.info("🛑 Runtime shutting down - beginning graceful cleanup...")
+
+    shutdown_start = asyncio.get_event_loop().time()
+
+    # Step 1: Stop capability publisher and deregister from backend
+    try:
+        if capability_publisher is not None:
+            logger.info("Stopping capability publisher...")
+            capability_publisher.stop(timeout=5.0)
+            logger.info("Capability publisher stopped")
+
+        if backend_client is not None:
+            logger.info("Deregistering from backend...")
+            correlation_id = str(uuid.uuid4())
+            backend_client.deregister(correlation_id)
+            backend_client.close()
+            logger.info("Backend client closed")
+    except Exception as e:
+        logger.error(f"Error during backend deregistration: {e}")
+
+    # Step 2: Stop accepting new inference requests
+    # (uvicorn handles this automatically via readiness probe returning 503)
+
+    # Step 3: Wait for in-flight requests to complete
+    # (uvicorn's --timeout-graceful-shutdown handles this)
+
+    # Step 4: Shutdown sandbox executors
+    try:
+        if sandbox_manager:
+            logger.info("Shutting down sandbox executors...")
+            sandbox_manager.shutdown_all()
+            logger.info("Sandbox executors shut down")
+    except Exception as e:
+        logger.error(f"Error during sandbox shutdown: {e}")
+
+    # Step 5: Unload models and release GPU memory
+    try:
+        all_versions = registry.get_all_versions()
+        for version_info in all_versions:
+            model_id = version_info.model_id
+            version = version_info.version
+
+            try:
+                # Update state to UNLOADING
+                registry.update_state(model_id, version, LoadState.UNLOADING)
+
+                # Update metrics
+                if config.metrics_enabled:
+                    set_model_load_status(model_id, version, loaded=False)
+
+                logger.info("Model unloaded", extra={
+                    "model_id": model_id,
+                    "version": version
+                })
+            except Exception as e:
+                logger.warning(f"Error unloading model {model_id}:{version}: {e}")
+    except Exception as e:
+        logger.error(f"Error during model cleanup: {e}")
+
+    # Step 6: Release GPU resources
+    try:
+        if gpu_manager:
+            gpu_manager.release_all()
+            logger.info("GPU resources released")
+    except Exception as e:
+        logger.error(f"Error releasing GPU resources: {e}")
+
+    # Step 7: Clear dependencies
+    dependencies.clear_all()
+
+    shutdown_duration = asyncio.get_event_loop().time() - shutdown_start
+    logger.info(f"✅ Shutdown complete in {shutdown_duration:.2f}s")
 
 
 # Create FastAPI app

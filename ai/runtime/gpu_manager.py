@@ -398,6 +398,38 @@ class GPUManager:
         with self._lock:
             return self._allocations.get(qualified_id)
 
+    def release_all(self) -> int:
+        """
+        Release all GPU memory allocations.
+
+        Used during graceful shutdown to free all resources.
+
+        Returns:
+            Number of allocations released
+        """
+        with self._lock:
+            allocation_count = len(self._allocations)
+
+            # Release all allocations
+            for qualified_id, allocation in list(self._allocations.items()):
+                device = self._devices.get(allocation.device_id)
+                if device:
+                    device.reserved_memory_mb -= allocation.allocated_mb
+
+            self._allocations.clear()
+
+            # Clear CUDA cache
+            if self._torch_available and self._cuda_available:
+                try:
+                    import torch
+                    torch.cuda.empty_cache()
+                    torch.cuda.synchronize()
+                except Exception as e:
+                    logger.warning(f"Failed to clear CUDA cache during shutdown: {e}")
+
+            logger.info(f"Released all GPU allocations ({allocation_count} models)")
+            return allocation_count
+
     def get_all_allocations(self) -> List[ModelAllocation]:
         """Get all current allocations."""
         with self._lock:

@@ -15,11 +15,19 @@ class DeviceStreaming(BaseModel):
 
     Aligned with F6 §4.4 DeviceStreaming interface.
     Note: vas_stream_id exposed to enable frontend video playback via VAS HLS/WebRTC.
+
+    Two status dimensions:
+    - video_live: Whether VAS video stream is live (from VAS)
+    - ai_enabled: Whether AI detection inference is running (from Ruth AI session)
     """
 
-    active: bool = Field(..., description="Whether stream is active")
+    # VAS video stream status
+    video_live: bool = Field(False, description="Whether VAS video stream is live")
     stream_id: str | None = Field(None, description="VAS stream ID for video playback")
-    state: str | None = Field(None, description="Stream state (live, stopped, etc.)")
+
+    # AI inference status (Ruth AI session)
+    active: bool = Field(..., description="Whether AI inference session is active")
+    state: str | None = Field(None, description="AI session state (live, stopped, etc.)")
     ai_enabled: bool = Field(False, description="Whether AI detection is enabled")
     model_id: str | None = Field(None, description="AI model being used")
     # Note: Named ai_model_config to avoid conflict with Pydantic's reserved 'model_config'

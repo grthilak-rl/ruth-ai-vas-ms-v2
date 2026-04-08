@@ -10,7 +10,8 @@ from datetime import datetime
 from fastapi import APIRouter, HTTPException, status
 from pydantic import BaseModel, Field
 
-from ai.server.dependencies import get_registry, get_reporter
+from ai.server.dependencies import get_registry, get_capability_publisher
+from ai.server.config import get_config
 from ai.runtime.models import LoadState, HealthStatus, InputType
 
 router = APIRouter()
@@ -94,9 +95,10 @@ async def get_capabilities() -> CapabilitiesResponse:
         503: Runtime not ready
     """
     registry = get_registry()
-    reporter = get_reporter()
+    publisher = get_capability_publisher()
+    config = get_config()
 
-    if not registry or not reporter:
+    if not registry:
         raise HTTPException(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
             detail="Runtime not initialized"
@@ -126,8 +128,11 @@ async def get_capabilities() -> CapabilitiesResponse:
     import torch
     hardware_type = "gpu" if torch.cuda.is_available() else "cpu"
 
+    # Get runtime_id from publisher or config
+    runtime_id = publisher.runtime_id if publisher else config.runtime_id
+
     return CapabilitiesResponse(
-        runtime_id=reporter.runtime_id,
+        runtime_id=runtime_id,
         runtime_version="1.0.0",
         timestamp=datetime.utcnow(),
         hardware_type=hardware_type,

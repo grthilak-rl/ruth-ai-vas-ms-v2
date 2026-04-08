@@ -37,6 +37,12 @@ from ai.runtime.models import (
     ModelVersionDescriptor,
 )
 
+# Optional GPU manager import - may not be available in all environments
+try:
+    from ai.runtime.gpu_manager import GPUManager
+except ImportError:
+    GPUManager = None  # type: ignore
+
 logger = logging.getLogger(__name__)
 
 
@@ -89,9 +95,10 @@ class LoadedModel:
     postprocess: Optional[PostprocessFunction] = None
     model_instance: Any = None  # For models that need persistent state
     load_time_ms: int = 0
+    device: str = "cpu"  # Device the model is loaded on ("cpu", "cuda:0", etc.)
 
     def __repr__(self) -> str:
-        return f"LoadedModel({self.model_id}:{self.version})"
+        return f"LoadedModel({self.model_id}:{self.version}, device={self.device})"
 
 
 @dataclass
@@ -126,12 +133,23 @@ class ModelLoader:
     The loader imports Python modules, locates required functions,
     optionally loads weights, and performs warmup inferences.
 
+    When a GPUManager is provided, the loader will:
+    1. Check if GPU memory is available before loading
+    2. Allocate GPU memory for the model
+    3. Pass the device string to the model's loader
+    4. Release GPU memory when unloading
+
     Usage:
         loader = ModelLoader()
         result = loader.load(descriptor)
         if result.success:
             model = result.loaded_model
             output = model.infer(frame)
+
+        # With GPU manager:
+        from ai.runtime.gpu_manager import GPUManager
+        gpu_manager = GPUManager()
+        loader = ModelLoader(gpu_manager=gpu_manager)
     """
 
     def __init__(
@@ -139,6 +157,8 @@ class ModelLoader:
         load_timeout_ms: int = 60000,
         warmup_enabled: bool = True,
         warmup_timeout_ms: int = 30000,
+        gpu_manager: Optional["GPUManager"] = None,
+        default_memory_estimate_mb: float = 2048.0,
     ):
         """
         Initialize the model loader.
@@ -147,13 +167,20 @@ class ModelLoader:
             load_timeout_ms: Maximum time for loading (default 60s)
             warmup_enabled: Whether to run warmup inference after loading
             warmup_timeout_ms: Maximum time for warmup (default 30s)
+            gpu_manager: Optional GPU manager for memory allocation
+            default_memory_estimate_mb: Default memory estimate when not specified in model contract
         """
         self.load_timeout_ms = load_timeout_ms
         self.warmup_enabled = warmup_enabled
         self.warmup_timeout_ms = warmup_timeout_ms
+        self.gpu_manager = gpu_manager
+        self.default_memory_estimate_mb = default_memory_estimate_mb
 
         # Track loaded modules for cleanup
         self._loaded_modules: dict[str, list[str]] = {}
+
+        # Track GPU allocations for cleanup on unload
+        self._gpu_allocations: dict[str, str] = {}  # qualified_id -> device
 
     def load(self, descriptor: ModelVersionDescriptor) -> LoadResult:
         """
@@ -181,6 +208,9 @@ class ModelLoader:
             },
         )
 
+        # Step 0: Determine device (GPU allocation if available)
+        device = self._allocate_device(descriptor)
+
         try:
             # Step 1: Import inference module
             infer_func = self._import_inference(descriptor)
@@ -192,7 +222,7 @@ class ModelLoader:
             postprocess_func = self._import_postprocess(descriptor)
 
             # Step 4: Load model instance if custom loader exists
-            model_instance = self._load_model_instance(descriptor)
+            model_instance = self._load_model_instance(descriptor, device=device)
 
             # Calculate load time
             load_time_ms = int((time.monotonic() - start_time) * 1000)
@@ -206,12 +236,15 @@ class ModelLoader:
                 postprocess=postprocess_func,
                 model_instance=model_instance,
                 load_time_ms=load_time_ms,
+                device=device,
             )
 
             # Step 5: Warmup if enabled
             if self.warmup_enabled:
                 warmup_error = self._run_warmup(loaded, descriptor)
                 if warmup_error:
+                    # Release GPU allocation on warmup failure
+                    self._release_device(model_id, version)
                     return LoadResult.fail(warmup_error)
 
             total_time_ms = int((time.monotonic() - start_time) * 1000)
@@ -222,12 +255,15 @@ class ModelLoader:
                     "model_id": model_id,
                     "version": version,
                     "load_time_ms": total_time_ms,
+                    "device": device,
                 },
             )
 
             return LoadResult.ok(loaded, total_time_ms)
 
         except LoadError as e:
+            # Release GPU allocation on failure
+            self._release_device(model_id, version)
             logger.error(
                 "Model load failed",
                 extra=e.to_log_dict(),
@@ -235,6 +271,8 @@ class ModelLoader:
             return LoadResult.fail(e)
 
         except Exception as e:
+            # Release GPU allocation on failure
+            self._release_device(model_id, version)
             error = load_error(
                 code=ErrorCode.LOAD_GENERIC_ERROR,
                 message=f"Unexpected error during load: {e}",
@@ -253,6 +291,8 @@ class ModelLoader:
     def unload(self, model_id: str, version: str) -> bool:
         """
         Unload a model and clean up its modules.
+
+        Also releases any GPU memory allocated for this model.
 
         Args:
             model_id: Model identifier
@@ -275,6 +315,9 @@ class ModelLoader:
         for module_name in module_names:
             if module_name in sys.modules:
                 del sys.modules[module_name]
+
+        # Release GPU memory if allocated
+        self._release_device(model_id, version)
 
         logger.info(
             "Model unloaded",
@@ -451,13 +494,17 @@ class ModelLoader:
         return getattr(module, "postprocess")
 
     def _load_model_instance(
-        self, descriptor: ModelVersionDescriptor
+        self, descriptor: ModelVersionDescriptor, device: str = "cpu"
     ) -> Optional[Any]:
         """
         Load model instance using custom loader if provided.
 
         Some models need to load weights into a persistent object
         that is passed to infer() calls. This method handles that case.
+
+        Args:
+            descriptor: Model version descriptor
+            device: Target device for model ("cpu", "cuda:0", etc.)
         """
         if not descriptor.entry_points.loader:
             return None
@@ -494,8 +541,33 @@ class ModelLoader:
         load_func = getattr(module, "load")
 
         try:
-            # Call the loader with weights path
-            model_instance = load_func(descriptor.weights_path)
+            # Call the loader with weights path and device
+            # The loader function signature can be:
+            #   load(weights_path) - legacy, no device support
+            #   load(weights_path, device=None) - device-aware
+            import inspect
+            sig = inspect.signature(load_func)
+
+            if "device" in sig.parameters:
+                logger.debug(
+                    "Loading model with device parameter",
+                    extra={
+                        "model_id": descriptor.model_id,
+                        "version": descriptor.version,
+                        "device": device,
+                    },
+                )
+                model_instance = load_func(descriptor.weights_path, device=device)
+            else:
+                logger.debug(
+                    "Loading model without device parameter (legacy loader)",
+                    extra={
+                        "model_id": descriptor.model_id,
+                        "version": descriptor.version,
+                    },
+                )
+                model_instance = load_func(descriptor.weights_path)
+
             return model_instance
         except MemoryError as e:
             raise load_error(
@@ -631,3 +703,111 @@ class ModelLoader:
                 cause=e,
                 traceback=traceback.format_exc(),
             )
+
+    # =========================================================================
+    # GPU Memory Management
+    # =========================================================================
+
+    def _allocate_device(self, descriptor: ModelVersionDescriptor) -> str:
+        """
+        Allocate a device for the model.
+
+        If a GPUManager is available, attempts to allocate GPU memory.
+        Falls back to CPU if GPU is unavailable or allocation fails.
+
+        Args:
+            descriptor: Model version descriptor
+
+        Returns:
+            Device string ("cpu", "cuda:0", etc.)
+        """
+        if self.gpu_manager is None:
+            logger.debug(
+                "No GPU manager configured, using CPU",
+                extra={
+                    "model_id": descriptor.model_id,
+                    "version": descriptor.version,
+                },
+            )
+            return "cpu"
+
+        # Get memory requirement from model contract or use default estimate
+        required_mb = self.default_memory_estimate_mb
+        if descriptor.limits and descriptor.limits.max_memory_mb:
+            required_mb = float(descriptor.limits.max_memory_mb)
+
+        model_id = descriptor.model_id
+        version = descriptor.version
+        qualified_id = descriptor.qualified_id
+
+        # Check if we can allocate GPU memory
+        if not self.gpu_manager.can_allocate(model_id, required_mb):
+            logger.info(
+                "GPU memory insufficient, using CPU",
+                extra={
+                    "model_id": model_id,
+                    "version": version,
+                    "required_mb": required_mb,
+                },
+            )
+            return "cpu"
+
+        try:
+            device = self.gpu_manager.allocate(model_id, version, required_mb)
+            self._gpu_allocations[qualified_id] = device
+
+            logger.info(
+                "GPU memory allocated",
+                extra={
+                    "model_id": model_id,
+                    "version": version,
+                    "device": device,
+                    "allocated_mb": required_mb,
+                },
+            )
+
+            return device
+
+        except RuntimeError as e:
+            # Allocation failed, fall back to CPU
+            logger.warning(
+                "GPU allocation failed, falling back to CPU",
+                extra={
+                    "model_id": model_id,
+                    "version": version,
+                    "error": str(e),
+                },
+            )
+            return "cpu"
+
+    def _release_device(self, model_id: str, version: str) -> None:
+        """
+        Release GPU memory allocated for a model.
+
+        Args:
+            model_id: Model identifier
+            version: Model version
+        """
+        qualified_id = f"{model_id}:{version}"
+
+        # Check if this model had a GPU allocation
+        if qualified_id not in self._gpu_allocations:
+            return
+
+        device = self._gpu_allocations.pop(qualified_id)
+
+        if self.gpu_manager is None:
+            return
+
+        # Only release if it was a GPU device
+        if device.startswith("cuda"):
+            released = self.gpu_manager.release(model_id, version)
+            if released:
+                logger.info(
+                    "GPU memory released",
+                    extra={
+                        "model_id": model_id,
+                        "version": version,
+                        "device": device,
+                    },
+                )

@@ -88,8 +88,8 @@ async def list_devices(
     # Build F6-aligned response with streaming status for each device
     items = []
     for d in devices:
-        # Get stream status for this device
-        stream_status = await stream_service.get_stream_status(d.id)
+        # Get combined VAS video + AI inference status
+        stream_status = await stream_service.get_combined_status(d.id, d.vas_device_id)
 
         items.append(
             Device(
@@ -97,9 +97,11 @@ async def list_devices(
                 name=d.name,
                 is_active=d.is_active,
                 streaming=DeviceStreaming(
+                    # VAS video status
+                    video_live=stream_status.get("video_live", False),
+                    stream_id=stream_status.get("stream_id"),
+                    # AI inference status
                     active=stream_status["active"],
-                    # Use vas_stream_id for frontend video playback (HLS/WebRTC)
-                    stream_id=stream_status.get("vas_stream_id"),
                     state=stream_status.get("state"),
                     ai_enabled=stream_status["active"] and stream_status.get("model_id") is not None,
                     model_id=stream_status.get("model_id"),
@@ -152,8 +154,8 @@ async def get_device(
             },
         ) from e
 
-    # Get stream status
-    stream_status_dict = await stream_service.get_stream_status(device_id)
+    # Get combined VAS video + AI inference status
+    stream_status_dict = await stream_service.get_combined_status(device_id, device.vas_device_id)
 
     logger.info("Retrieved device", device_id=str(device_id))
 
@@ -164,9 +166,11 @@ async def get_device(
         location=device.location,
         is_active=device.is_active,
         streaming=DeviceStreaming(
+            # VAS video status
+            video_live=stream_status_dict.get("video_live", False),
+            stream_id=stream_status_dict.get("stream_id"),
+            # AI inference status
             active=stream_status_dict["active"],
-            # Use vas_stream_id for frontend video playback (HLS/WebRTC)
-            stream_id=stream_status_dict.get("vas_stream_id"),
             state=stream_status_dict.get("state"),
             ai_enabled=stream_status_dict["active"] and stream_status_dict.get("model_id") is not None,
             model_id=stream_status_dict.get("model_id"),

@@ -344,9 +344,14 @@ async def _ensure_stream_session_by_vas_id(
 ) -> StreamSession:
     """Find or create a stream session by VAS stream ID."""
     # First try to find existing session by vas_stream_id
-    stmt = select(StreamSession).where(StreamSession.vas_stream_id == vas_stream_id)
+    # Use order by started_at DESC and .first() to handle duplicates gracefully
+    stmt = (
+        select(StreamSession)
+        .where(StreamSession.vas_stream_id == vas_stream_id)
+        .order_by(StreamSession.started_at.desc())
+    )
     result = await db.execute(stmt)
-    session = result.scalar_one_or_none()
+    session = result.scalars().first()
 
     if session is None:
         # Create new session with vas_stream_id

@@ -73,6 +73,12 @@ class Settings(BaseSettings):
         description="Max Redis connections",
     )
 
+    # Unified AI Runtime
+    unified_runtime_url: str = Field(
+        default="http://ruth-ai-unified-runtime:8000",
+        description="Ruth AI Unified Runtime endpoint (GPU-enabled service)",
+    )
+
     # AI Runtime (Fall Detection)
     ai_runtime_url: str = Field(
         default="http://fall-detection-model:8000",

@@ -310,15 +310,22 @@ export type StreamState = 'live' | 'stopped' | 'LIVE' | 'STOPPED' | string;
 
 /**
  * Device streaming status (F6 §4.4)
+ *
+ * Two status dimensions:
+ * - video_live: Whether VAS video stream is live (for "Online/Offline" display)
+ * - active: Whether AI inference session is active (for "Detection" status)
  */
 export interface DeviceStreaming {
-  /** Whether stream is running */
+  /** Whether VAS video stream is live (use for Online/Offline display) */
+  video_live: boolean;
+
+  /** Whether AI inference session is active */
   active: boolean;
 
   /** VAS stream ID - null if not streaming */
   stream_id: string | null;
 
-  /** Stream state - MAY be null */
+  /** AI session state - MAY be null */
   state: StreamState | null;
 
   /** Whether AI inference is enabled */

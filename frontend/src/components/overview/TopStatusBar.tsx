@@ -1,42 +1,38 @@
-import { useMemo } from 'react';
+import { useMemo, useState, useEffect } from 'react';
 import { Link } from 'react-router-dom';
 import {
   useViolationsQuery,
   useDevicesQuery,
   useModelsStatusQuery,
-  useHealthQuery,
-  formatUptime,
-  getComponentDisplayName,
-  useIsAdmin,
-  type ComponentHealthStatus,
+  getCameraStatus,
+  getDetectionStatus,
+  isAnyModelHealthy,
+  type Device,
 } from '../../state';
+import { getGridSize, type GridSize } from '../../utils/cameraGridPreferences';
 import './TopStatusBar.css';
-
-/**
- * Component order for health indicators
- */
-const COMPONENT_ORDER = ['database', 'redis', 'ai_runtime', 'vas', 'nlp_chat'] as const;
 
 /**
  * Top Status Bar (Enhanced Overview Header)
  *
- * Displays detailed summary cards and system health in a prominent header section.
+ * Displays detailed summary cards and camera grid in a prominent header section.
  * Each metric card shows the value prominently with a descriptive label and optional link.
- * System health shows all components with their status and latency.
+ * Camera grid shows status tiles for quick camera overview.
  */
 export function TopStatusBar() {
-  // Fetch violations for open count
+  // Fetch violations for open count (summary card)
   const {
     data: violationsData,
     isLoading: isViolationsLoading,
     isError: isViolationsError,
   } = useViolationsQuery({ status: 'open' });
 
-  // Fetch devices for camera count
+  // Fetch devices for camera count and grid
   const {
     data: devicesData,
     isLoading: isDevicesLoading,
     isError: isDevicesError,
+    refetch: refetchDevices,
   } = useDevicesQuery();
 
   // Fetch models for model health
@@ -45,15 +41,6 @@ export function TopStatusBar() {
     isLoading: isModelsLoading,
     isError: isModelsError,
   } = useModelsStatusQuery();
-
-  // Fetch system health
-  const {
-    data: healthData,
-    isLoading: isHealthLoading,
-    isError: isHealthError,
-  } = useHealthQuery();
-
-  const isAdmin = useIsAdmin();
 
   // Derive open violations count
   const openViolationsCount = useMemo(() => {
@@ -81,29 +68,11 @@ export function TopStatusBar() {
     return { healthy, total };
   }, [modelsData]);
 
-  // Derive health statuses with latency
-  const healthStatuses = useMemo(() => {
-    const components = healthData?.components;
-    return COMPONENT_ORDER.map((key) => ({
-      key,
-      name: getComponentDisplayName(key),
-      status: (components?.[key]?.status ?? 'unhealthy') as ComponentHealthStatus,
-      latencyMs: components?.[key]?.latency_ms,
-    }));
-  }, [healthData]);
-
-  // Overall health status
-  const overallHealth = useMemo(() => {
-    const statuses = healthStatuses.map((h) => h.status);
-    if (statuses.every((s) => s === 'healthy')) return 'healthy';
-    if (statuses.some((s) => s === 'unhealthy')) return 'unhealthy';
-    return 'degraded';
-  }, [healthStatuses]);
-
-  // Uptime display
-  const uptimeDisplay = useMemo(() => {
-    return formatUptime(healthData?.uptime_seconds);
-  }, [healthData]);
+  // Check if any model is healthy for camera grid
+  const isModelHealthy = useMemo(() => {
+    if (!modelsData?.models) return true;
+    return isAnyModelHealthy(modelsData.models);
+  }, [modelsData]);
 
   return (
     <div className="top-status-bar">
@@ -139,41 +108,14 @@ export function TopStatusBar() {
         />
       </div>
 
-      {/* System Health Panel */}
-      <div className={`top-status-bar__health top-status-bar__health--${overallHealth}`}>
-        <div className="top-status-bar__health-header">
-          <span className="top-status-bar__health-title">System Health</span>
-          <span className={`top-status-bar__health-badge top-status-bar__health-badge--${overallHealth}`}>
-            {overallHealth === 'healthy' ? 'All Systems OK' : overallHealth === 'degraded' ? 'Degraded' : 'Issues'}
-          </span>
-        </div>
-        <div className="top-status-bar__health-grid">
-          {healthStatuses.map(({ key, name, status, latencyMs }) => (
-            <HealthItem
-              key={key}
-              name={name}
-              status={status}
-              latencyMs={latencyMs}
-              isLoading={isHealthLoading && !healthData}
-            />
-          ))}
-        </div>
-        <div className="top-status-bar__health-footer">
-          <span className="top-status-bar__health-uptime">
-            Uptime: <strong>{uptimeDisplay}</strong>
-          </span>
-          {isAdmin && (
-            <Link to="/settings/health" className="top-status-bar__health-link">
-              Details &rarr;
-            </Link>
-          )}
-        </div>
-        {isHealthError && !healthData && (
-          <div className="top-status-bar__health-error">
-            Unable to check system health
-          </div>
-        )}
-      </div>
+      {/* Camera Grid Panel */}
+      <CameraGridPanel
+        devices={devicesData?.items ?? []}
+        isLoading={isDevicesLoading}
+        isError={isDevicesError}
+        isModelHealthy={isModelHealthy}
+        onRetry={refetchDevices}
+      />
     </div>
   );
 }
@@ -241,34 +183,185 @@ function MetricCard({
   );
 }
 
-interface HealthItemProps {
-  name: string;
-  status: ComponentHealthStatus;
-  latencyMs?: number | null;
+interface CameraGridPanelProps {
+  devices: Device[];
   isLoading: boolean;
+  isError: boolean;
+  isModelHealthy: boolean;
+  onRetry: () => void;
 }
 
 /**
- * Individual health component item with status and latency
+ * Camera Grid Panel for the top status bar
  */
-function HealthItem({ name, status, latencyMs, isLoading }: HealthItemProps) {
-  const statusClass = isLoading
-    ? 'top-status-bar__health-item--loading'
-    : `top-status-bar__health-item--${status}`;
+function CameraGridPanel({
+  devices,
+  isLoading,
+  isError,
+  isModelHealthy,
+  onRetry,
+}: CameraGridPanelProps) {
+  // Read grid size preference from localStorage (synced with Camera Monitoring page)
+  const [gridSize, setGridSizeState] = useState<GridSize>(getGridSize);
 
-  const latencyDisplay = useMemo(() => {
-    if (isLoading) return '...';
-    if (latencyMs === null || latencyMs === undefined) return '';
-    return `${latencyMs}ms`;
-  }, [latencyMs, isLoading]);
+  // Listen for storage changes to sync with Camera Monitoring page
+  useEffect(() => {
+    const handleStorageChange = () => {
+      setGridSizeState(getGridSize());
+    };
 
+    window.addEventListener('storage', handleStorageChange);
+    const handleFocus = () => {
+      setGridSizeState(getGridSize());
+    };
+    window.addEventListener('focus', handleFocus);
+
+    return () => {
+      window.removeEventListener('storage', handleStorageChange);
+      window.removeEventListener('focus', handleFocus);
+    };
+  }, []);
+
+  const maxCameras = gridSize * gridSize;
+  const cameras = devices.slice(0, maxCameras);
+
+  // Dynamic grid style based on preference
+  const gridStyle = {
+    gridTemplateColumns: `repeat(${gridSize}, 1fr)`,
+  };
+
+  // Loading state
+  if (isLoading && devices.length === 0) {
+    return (
+      <div className="top-status-bar__camera-grid">
+        <div className="top-status-bar__camera-grid-header">
+          <span className="top-status-bar__camera-grid-title">Camera Grid</span>
+        </div>
+        <div className="top-status-bar__camera-grid-tiles" style={gridStyle}>
+          {Array.from({ length: maxCameras }).map((_, i) => (
+            <div key={i} className="top-status-bar__camera-tile top-status-bar__camera-tile--skeleton">
+              <span className="top-status-bar__skeleton-bar" />
+              <span className="top-status-bar__skeleton-bar top-status-bar__skeleton-bar--short" />
+            </div>
+          ))}
+        </div>
+      </div>
+    );
+  }
+
+  // Error state
+  if (isError && devices.length === 0) {
+    return (
+      <div className="top-status-bar__camera-grid top-status-bar__camera-grid--error">
+        <div className="top-status-bar__camera-grid-header">
+          <span className="top-status-bar__camera-grid-title">Camera Grid</span>
+        </div>
+        <div className="top-status-bar__camera-grid-error">
+          <p>Couldn't load cameras.</p>
+          <button
+            type="button"
+            className="top-status-bar__camera-grid-retry"
+            onClick={() => onRetry()}
+          >
+            Retry
+          </button>
+        </div>
+      </div>
+    );
+  }
+
+  // Empty state
+  if (cameras.length === 0) {
+    return (
+      <div className="top-status-bar__camera-grid">
+        <div className="top-status-bar__camera-grid-header">
+          <span className="top-status-bar__camera-grid-title">Camera Grid</span>
+        </div>
+        <div className="top-status-bar__camera-grid-empty">
+          <p>No cameras configured</p>
+          <p className="top-status-bar__camera-grid-empty-hint">
+            Cameras will appear here when added.
+          </p>
+        </div>
+      </div>
+    );
+  }
+
+  // Normal state with cameras
   return (
-    <div className={`top-status-bar__health-item ${statusClass}`}>
-      <span className="top-status-bar__health-dot">●</span>
-      <span className="top-status-bar__health-name">{name}</span>
-      {latencyDisplay && (
-        <span className="top-status-bar__health-latency">{latencyDisplay}</span>
-      )}
+    <div className="top-status-bar__camera-grid">
+      <div className="top-status-bar__camera-grid-header">
+        <span className="top-status-bar__camera-grid-title">Camera Grid</span>
+        <Link to="/cameras" className="top-status-bar__camera-grid-link">
+          View All &rarr;
+        </Link>
+      </div>
+      <div className="top-status-bar__camera-grid-tiles" style={gridStyle}>
+        {cameras.map((device) => (
+          <CameraTile
+            key={device.id}
+            device={device}
+            isModelHealthy={isModelHealthy}
+          />
+        ))}
+      </div>
     </div>
   );
+}
+
+interface CameraTileProps {
+  device: Device;
+  isModelHealthy: boolean;
+}
+
+/**
+ * Single camera tile in the top bar panel
+ */
+function CameraTile({ device, isModelHealthy }: CameraTileProps) {
+  const cameraStatus = getCameraStatus(device);
+  const detectionStatus = getDetectionStatus(device, isModelHealthy);
+
+  const isLive = cameraStatus === 'live';
+  const statusIndicator = isLive ? '●' : '○';
+  const statusLabel = isLive ? 'Live' : 'Offline';
+
+  const detectionLabel = getDetectionLabel(detectionStatus);
+
+  return (
+    <Link
+      to={`/cameras/${device.id}`}
+      className={`top-status-bar__camera-tile ${isLive ? '' : 'top-status-bar__camera-tile--offline'}`}
+    >
+      <div className="top-status-bar__camera-tile-header">
+        <span className={`top-status-bar__camera-status ${isLive ? 'top-status-bar__camera-status--live' : 'top-status-bar__camera-status--offline'}`}>
+          {statusIndicator}
+        </span>
+        <span className="top-status-bar__camera-name">{device.name}</span>
+      </div>
+      <div className="top-status-bar__camera-tile-body">
+        <span className="top-status-bar__camera-status-label">{statusLabel}</span>
+        <span className={`top-status-bar__camera-detection top-status-bar__camera-detection--${detectionStatus}`}>
+          {detectionLabel}
+        </span>
+      </div>
+    </Link>
+  );
+}
+
+/**
+ * Get human-readable detection label
+ */
+function getDetectionLabel(status: string): string {
+  switch (status) {
+    case 'active':
+      return 'Detection Active';
+    case 'paused':
+      return 'Detection Paused';
+    case 'disabled':
+      return 'Detection Disabled';
+    case 'unavailable':
+      return 'Detection Unavailable';
+    default:
+      return 'Detection Unknown';
+  }
 }

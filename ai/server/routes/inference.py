@@ -2,20 +2,22 @@
 Ruth AI Unified Runtime - Inference Endpoint
 
 Accepts base64-encoded frames and routes to appropriate models for inference.
+Includes input validation for security hardening.
 """
 
 import base64
 import io
+import re
 import time
 import uuid
-from datetime import datetime
+from datetime import datetime, timezone, timedelta
 from typing import Any, Dict, Optional
 
 import cv2
 import numpy as np
 from fastapi import APIRouter, HTTPException, status
 from PIL import Image
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator, model_validator
 
 from ai.server.dependencies import get_pipeline, get_registry, get_sandbox_manager
 from ai.runtime.errors import ModelError, PipelineError, ExecutionError
@@ -31,8 +33,103 @@ router = APIRouter()
 logger = get_logger(__name__)
 
 
+# =============================================================================
+# VALIDATION CONSTANTS - Security and sanity limits
+# =============================================================================
+
+# Frame size limits
+MAX_FRAME_BASE64_SIZE = 50 * 1024 * 1024  # 50MB max (base64 encoded)
+MAX_FRAME_DECODED_SIZE = 100 * 1024 * 1024  # 100MB max (decoded)
+MAX_FRAME_WIDTH = 7680  # 8K resolution
+MAX_FRAME_HEIGHT = 4320
+MIN_FRAME_WIDTH = 64
+MIN_FRAME_HEIGHT = 64
+
+# Metadata limits
+MAX_METADATA_SIZE = 65536  # 64KB max for metadata dict
+MAX_METADATA_DEPTH = 5  # Max nesting depth
+MAX_STRING_LENGTH = 10000  # Max string length in metadata
+
+# ID validation
+UUID_PATTERN = re.compile(
+    r'^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$',
+    re.IGNORECASE
+)
+MODEL_ID_PATTERN = re.compile(r'^[a-zA-Z][a-zA-Z0-9_-]{0,63}$')
+VERSION_PATTERN = re.compile(r'^[0-9]+\.[0-9]+\.[0-9]+(-[a-zA-Z0-9]+)?$')
+
+# Timestamp limits
+MAX_TIMESTAMP_DRIFT_SECONDS = 86400  # 24 hours max drift
+
+
+# =============================================================================
+# VALIDATION FUNCTIONS
+# =============================================================================
+
+
+def validate_metadata_depth(obj: Any, depth: int = 0) -> bool:
+    """
+    Validate metadata nesting depth to prevent DoS via deep structures.
+
+    Args:
+        obj: Object to validate
+        depth: Current depth
+
+    Returns:
+        True if valid
+
+    Raises:
+        ValueError: If depth exceeds limit
+    """
+    if depth > MAX_METADATA_DEPTH:
+        raise ValueError(f"Metadata nesting depth exceeds limit ({MAX_METADATA_DEPTH})")
+
+    if isinstance(obj, dict):
+        for v in obj.values():
+            validate_metadata_depth(v, depth + 1)
+    elif isinstance(obj, (list, tuple)):
+        for item in obj:
+            validate_metadata_depth(item, depth + 1)
+    elif isinstance(obj, str) and len(obj) > MAX_STRING_LENGTH:
+        raise ValueError(f"String in metadata exceeds max length ({MAX_STRING_LENGTH})")
+
+    return True
+
+
+def validate_base64_frame(data: str) -> None:
+    """
+    Validate base64-encoded frame data.
+
+    Args:
+        data: Base64 string to validate
+
+    Raises:
+        ValueError: If validation fails
+    """
+    # Check size
+    if len(data) > MAX_FRAME_BASE64_SIZE:
+        raise ValueError(
+            f"Frame data too large: {len(data)} bytes "
+            f"(max: {MAX_FRAME_BASE64_SIZE} bytes)"
+        )
+
+    # Check for valid base64 characters
+    # Remove whitespace and padding for validation
+    clean_data = data.replace('\n', '').replace('\r', '').replace(' ', '')
+    if not re.match(r'^[A-Za-z0-9+/]*={0,2}$', clean_data):
+        raise ValueError("Invalid base64 encoding: contains illegal characters")
+
+
 class InferenceRequest(BaseModel):
-    """Inference request from backend."""
+    """
+    Inference request from backend.
+
+    Includes comprehensive validation for security hardening:
+    - UUID format validation for IDs
+    - Frame size and format limits
+    - Timestamp drift detection
+    - Metadata depth and size limits
+    """
 
     stream_id: str = Field(description="Source stream UUID")
     device_id: Optional[str] = Field(None, description="Source device UUID")
@@ -40,8 +137,8 @@ class InferenceRequest(BaseModel):
     # Phase 2: Accept base64-encoded frame data instead of reference
     frame_base64: str = Field(description="Base64-encoded frame image data")
     frame_format: str = Field(default="jpeg", description="Image format: jpeg, png")
-    frame_width: Optional[int] = Field(None, description="Image width in pixels")
-    frame_height: Optional[int] = Field(None, description="Image height in pixels")
+    frame_width: Optional[int] = Field(None, ge=MIN_FRAME_WIDTH, le=MAX_FRAME_WIDTH, description="Image width in pixels")
+    frame_height: Optional[int] = Field(None, ge=MIN_FRAME_HEIGHT, le=MAX_FRAME_HEIGHT, description="Image height in pixels")
 
     timestamp: datetime = Field(description="Frame capture timestamp")
     model_id: str = Field(default="fall_detection", description="Target model identifier")
@@ -49,6 +146,118 @@ class InferenceRequest(BaseModel):
     priority: int = Field(default=0, ge=0, le=10, description="Request priority (0-10)")
     metadata: Dict[str, Any] = Field(default_factory=dict, description="Additional metadata")
     config: Optional[Dict[str, Any]] = Field(None, description="Model-specific configuration (e.g., tank corners, ROI)")
+
+    @field_validator("stream_id")
+    @classmethod
+    def validate_stream_id(cls, v: str) -> str:
+        """Validate stream_id is a valid UUID."""
+        if not UUID_PATTERN.match(v):
+            raise ValueError("stream_id must be a valid UUID")
+        return v
+
+    @field_validator("device_id")
+    @classmethod
+    def validate_device_id(cls, v: Optional[str]) -> Optional[str]:
+        """Validate device_id is a valid UUID if provided."""
+        if v is not None and not UUID_PATTERN.match(v):
+            raise ValueError("device_id must be a valid UUID")
+        return v
+
+    @field_validator("model_id")
+    @classmethod
+    def validate_model_id(cls, v: str) -> str:
+        """Validate model_id format."""
+        if not MODEL_ID_PATTERN.match(v):
+            raise ValueError(
+                "model_id must start with a letter and contain only "
+                "alphanumeric characters, underscores, and hyphens (max 64 chars)"
+            )
+        return v
+
+    @field_validator("model_version")
+    @classmethod
+    def validate_model_version(cls, v: Optional[str]) -> Optional[str]:
+        """Validate model_version is semver format if provided."""
+        if v is not None and not VERSION_PATTERN.match(v):
+            raise ValueError("model_version must be semantic version (e.g., 1.0.0)")
+        return v
+
+    @field_validator("frame_format")
+    @classmethod
+    def validate_frame_format(cls, v: str) -> str:
+        """Validate frame_format is a supported image format."""
+        allowed = {"jpeg", "jpg", "png", "webp"}
+        if v.lower() not in allowed:
+            raise ValueError(f"frame_format must be one of: {', '.join(allowed)}")
+        return v.lower()
+
+    @field_validator("frame_base64")
+    @classmethod
+    def validate_frame_base64(cls, v: str) -> str:
+        """Validate base64 frame data."""
+        validate_base64_frame(v)
+        return v
+
+    @field_validator("metadata")
+    @classmethod
+    def validate_metadata(cls, v: Dict[str, Any]) -> Dict[str, Any]:
+        """Validate metadata structure and depth."""
+        # Check serialized size
+        import json
+        try:
+            serialized = json.dumps(v)
+            if len(serialized) > MAX_METADATA_SIZE:
+                raise ValueError(
+                    f"metadata too large: {len(serialized)} bytes "
+                    f"(max: {MAX_METADATA_SIZE} bytes)"
+                )
+        except (TypeError, ValueError) as e:
+            raise ValueError(f"metadata must be JSON-serializable: {e}")
+
+        # Check nesting depth
+        validate_metadata_depth(v)
+        return v
+
+    @field_validator("config")
+    @classmethod
+    def validate_config(cls, v: Optional[Dict[str, Any]]) -> Optional[Dict[str, Any]]:
+        """Validate config structure and depth."""
+        if v is None:
+            return v
+
+        # Check serialized size
+        import json
+        try:
+            serialized = json.dumps(v)
+            if len(serialized) > MAX_METADATA_SIZE:
+                raise ValueError(
+                    f"config too large: {len(serialized)} bytes "
+                    f"(max: {MAX_METADATA_SIZE} bytes)"
+                )
+        except (TypeError, ValueError) as e:
+            raise ValueError(f"config must be JSON-serializable: {e}")
+
+        # Check nesting depth
+        validate_metadata_depth(v)
+        return v
+
+    @model_validator(mode="after")
+    def validate_timestamp_drift(self) -> "InferenceRequest":
+        """Validate timestamp is not too far in past or future."""
+        now = datetime.now(timezone.utc)
+        ts = self.timestamp
+
+        # Make timestamp timezone-aware if it isn't
+        if ts.tzinfo is None:
+            ts = ts.replace(tzinfo=timezone.utc)
+
+        drift = abs((now - ts).total_seconds())
+        if drift > MAX_TIMESTAMP_DRIFT_SECONDS:
+            raise ValueError(
+                f"timestamp drift too large: {drift:.0f}s "
+                f"(max: {MAX_TIMESTAMP_DRIFT_SECONDS}s)"
+            )
+        return self
 
     class Config:
         json_schema_extra = {
@@ -249,6 +458,11 @@ def _decode_base64_frame(base64_data: str, format: str = "jpeg") -> np.ndarray:
     """
     Decode base64 string to numpy array (BGR format for OpenCV).
 
+    Includes security validation:
+    - Decoded size limits
+    - Image dimension limits
+    - Memory protection via PIL limits
+
     Args:
         base64_data: Base64-encoded image data
         format: Image format (jpeg, png)
@@ -257,25 +471,62 @@ def _decode_base64_frame(base64_data: str, format: str = "jpeg") -> np.ndarray:
         Numpy array in BGR format (H, W, 3)
 
     Raises:
-        ValueError: If decoding fails
+        ValueError: If decoding fails or validation fails
     """
     try:
         # Decode base64
         image_bytes = base64.b64decode(base64_data)
 
+        # Check decoded size
+        if len(image_bytes) > MAX_FRAME_DECODED_SIZE:
+            raise ValueError(
+                f"Decoded frame too large: {len(image_bytes)} bytes "
+                f"(max: {MAX_FRAME_DECODED_SIZE} bytes)"
+            )
+
+        # Set PIL limits to prevent decompression bombs
+        Image.MAX_IMAGE_PIXELS = MAX_FRAME_WIDTH * MAX_FRAME_HEIGHT
+
         # Convert to PIL Image
         image = Image.open(io.BytesIO(image_bytes))
+
+        # Validate dimensions
+        width, height = image.size
+        if width > MAX_FRAME_WIDTH or height > MAX_FRAME_HEIGHT:
+            raise ValueError(
+                f"Frame dimensions too large: {width}x{height} "
+                f"(max: {MAX_FRAME_WIDTH}x{MAX_FRAME_HEIGHT})"
+            )
+        if width < MIN_FRAME_WIDTH or height < MIN_FRAME_HEIGHT:
+            raise ValueError(
+                f"Frame dimensions too small: {width}x{height} "
+                f"(min: {MIN_FRAME_WIDTH}x{MIN_FRAME_HEIGHT})"
+            )
 
         # Convert to RGB numpy array
         frame_rgb = np.array(image)
 
+        # Validate array size
+        if frame_rgb.nbytes > MAX_FRAME_DECODED_SIZE:
+            raise ValueError(
+                f"Decoded frame array too large: {frame_rgb.nbytes} bytes"
+            )
+
         # Convert RGB to BGR for OpenCV
         if len(frame_rgb.shape) == 3 and frame_rgb.shape[2] == 3:
             frame_bgr = cv2.cvtColor(frame_rgb, cv2.COLOR_RGB2BGR)
+        elif len(frame_rgb.shape) == 3 and frame_rgb.shape[2] == 4:
+            # RGBA to BGR
+            frame_bgr = cv2.cvtColor(frame_rgb, cv2.COLOR_RGBA2BGR)
+        elif len(frame_rgb.shape) == 2:
+            # Grayscale to BGR
+            frame_bgr = cv2.cvtColor(frame_rgb, cv2.COLOR_GRAY2BGR)
         else:
             frame_bgr = frame_rgb
 
         return frame_bgr
 
+    except ValueError:
+        raise
     except Exception as e:
         raise ValueError(f"Failed to decode base64 frame: {e}")

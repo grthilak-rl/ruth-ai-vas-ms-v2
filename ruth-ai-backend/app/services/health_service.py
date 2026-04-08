@@ -226,7 +226,8 @@ class HealthService:
     ) -> ComponentHealth:
         """Check AI Runtime service health.
 
-        Calls the runtime's health endpoint and checks model availability.
+        Uses the internal runtime registry to check if any AI runtimes
+        are registered and healthy.
 
         Args:
             timeout_seconds: Maximum time to wait for response
@@ -234,48 +235,51 @@ class HealthService:
         Returns:
             ComponentHealth with status, latency, and model info
         """
-        if self._ai_runtime_client is None:
-            return ComponentHealth(
-                status="unhealthy",
-                error="AI Runtime client not initialized",
-            )
+        # Import here to avoid circular imports
+        from app.api.internal.ai_runtime import _registered_runtimes
 
         start_time = time.perf_counter()
 
         try:
-            async with asyncio.timeout(timeout_seconds):
-                health = await self._ai_runtime_client.check_health(
-                    include_models=True
+            # Check registered runtimes from internal registry
+            if not _registered_runtimes:
+                return ComponentHealth(
+                    status="unhealthy",
+                    error="No AI Runtimes registered",
                 )
 
             latency_ms = int((time.perf_counter() - start_time) * 1000)
 
-            # Extract model list from health response
-            models_loaded: list[str] = []
-            if health.models:
-                models_loaded = [m.model_id for m in health.models]
+            # Get first registered runtime (usually only one)
+            runtime = next(iter(_registered_runtimes.values()))
 
-            # Determine GPU availability from hardware type
-            gpu_available = health.hardware_type.value in ("gpu", "jetson") if health.hardware_type else None
+            # Extract model IDs from runtime
+            models_loaded: list[str] = []
+            for model in runtime.models:
+                model_id = model.get("model_id")
+                if model_id:
+                    models_loaded.append(model_id)
 
             details = AIRuntimeDetails(
-                runtime_id=health.runtime_id,
+                runtime_id=runtime.runtime_id,
                 models_loaded=models_loaded if models_loaded else None,
-                gpu_available=gpu_available,
-                hardware_type=health.hardware_type.value if health.hardware_type else None,
+                gpu_available=None,  # Not tracked in registry yet
+                hardware_type=None,
             ).model_dump(exclude_none=True)
 
             # Determine status based on runtime health
             status: HealthStatus = "healthy"
             error: str | None = None
 
-            if not health.is_healthy:
-                if health.error:
-                    status = "unhealthy"
-                    error = health.error
-                else:
-                    status = "degraded"
-                    error = "AI Runtime not fully operational"
+            if runtime.runtime_health == "unhealthy":
+                status = "unhealthy"
+                error = "AI Runtime unhealthy"
+            elif runtime.runtime_health == "degraded":
+                status = "degraded"
+                error = "AI Runtime degraded"
+            elif runtime.runtime_health == "unknown":
+                status = "degraded"
+                error = "AI Runtime health unknown"
 
             return ComponentHealth(
                 status=status,
@@ -284,30 +288,9 @@ class HealthService:
                 details=details if details else None,
             )
 
-        except asyncio.TimeoutError:
-            latency_ms = int((time.perf_counter() - start_time) * 1000)
-            logger.error(
-                "AI Runtime health check timed out",
-                timeout_seconds=timeout_seconds,
-            )
-            return ComponentHealth(
-                status="unhealthy",
-                latency_ms=latency_ms,
-                error=f"AI Runtime health check timed out after {timeout_seconds}s",
-            )
-
-        except AIRuntimeError as e:
-            latency_ms = int((time.perf_counter() - start_time) * 1000)
-            logger.error("AI Runtime health check failed", error=str(e))
-            return ComponentHealth(
-                status="unhealthy",
-                latency_ms=latency_ms,
-                error=f"AI Runtime unavailable: {type(e).__name__}",
-            )
-
         except Exception as e:
             latency_ms = int((time.perf_counter() - start_time) * 1000)
-            logger.error("AI Runtime health check failed unexpectedly", error=str(e))
+            logger.error("AI Runtime health check failed", error=str(e))
             return ComponentHealth(
                 status="unhealthy",
                 latency_ms=latency_ms,

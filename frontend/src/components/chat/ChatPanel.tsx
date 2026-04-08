@@ -45,7 +45,7 @@ interface ChatPanelProps {
 export function ChatPanel({
   showSql = false,
   placeholder = 'Ask about violations, cameras, events...',
-  title = 'Ask Ruth',
+  title = 'Ask Visi',
 }: ChatPanelProps) {
   const [messages, setMessages] = useState<ChatMessageType[]>([]);
   const [input, setInput] = useState('');

@@ -95,21 +95,107 @@ class HardwareService:
                 pass
 
     async def get_gpu_metrics(self) -> GPUMetrics:
-        """Get GPU metrics using NVIDIA pynvml.
+        """Get GPU metrics from the AI Runtime service.
+
+        The AI Runtime container has GPU access and reports GPU status
+        via its /health?verbose=true endpoint. This avoids the need for
+        the backend container to have GPU access.
+
+        Returns:
+            GPUMetrics with GPU information, or available=False if no GPU
+        """
+        # First try to get GPU info from unified AI runtime (preferred)
+        gpu_metrics = await self._get_gpu_from_runtime()
+        if gpu_metrics.available:
+            return gpu_metrics
+
+        # Fallback to local pynvml if runtime is unavailable
+        return await self._get_gpu_local()
+
+    async def _get_gpu_from_runtime(self) -> GPUMetrics:
+        """Fetch GPU metrics from AI Runtime /health?verbose=true endpoint."""
+        try:
+            async with asyncio.timeout(self._settings.hardware_model_service_timeout):
+                async with httpx.AsyncClient() as client:
+                    response = await client.get(
+                        f"{self._settings.unified_runtime_url}/health",
+                        params={"verbose": "true"},
+                    )
+                    response.raise_for_status()
+                    data = response.json()
+
+            # Check if GPU is available in the response
+            if not data.get("gpu_available"):
+                logger.debug("AI Runtime reports no GPU available")
+                return GPUMetrics(available=False)
+
+            # Extract GPU device info (use first device)
+            gpu_devices = data.get("gpu_devices", [])
+            if not gpu_devices:
+                logger.debug("AI Runtime has GPU but no device details")
+                return GPUMetrics(
+                    available=True,
+                    name=None,
+                    vram_total_gb=None,
+                    vram_used_gb=None,
+                    vram_percent=None,
+                    utilization_percent=None,
+                    temperature_c=None,
+                )
+
+            device = gpu_devices[0]
+            total_mb = device.get("total_memory_mb", 0)
+            used_mb = device.get("used_memory_mb", 0)
+            vram_total_gb = round(total_mb / 1024, 1) if total_mb else None
+            vram_used_gb = round(used_mb / 1024, 1) if used_mb else None
+            vram_percent = int((used_mb / total_mb) * 100) if total_mb else None
+
+            return GPUMetrics(
+                available=True,
+                name=device.get("name"),
+                vram_total_gb=vram_total_gb,
+                vram_used_gb=vram_used_gb,
+                vram_percent=vram_percent,
+                utilization_percent=device.get("utilization_percent"),
+                temperature_c=device.get("temperature_c"),
+            )
+
+        except asyncio.TimeoutError:
+            logger.warning("AI Runtime GPU query timed out")
+            return GPUMetrics(available=False)
+
+        except httpx.HTTPStatusError as e:
+            logger.warning(
+                "AI Runtime GPU query failed",
+                status_code=e.response.status_code,
+            )
+            return GPUMetrics(available=False)
+
+        except httpx.RequestError as e:
+            logger.debug(
+                "AI Runtime unreachable for GPU query",
+                error=str(e),
+            )
+            return GPUMetrics(available=False)
+
+        except Exception as e:
+            logger.warning(
+                "Unexpected error fetching GPU metrics from AI Runtime",
+                error=str(e),
+            )
+            return GPUMetrics(available=False)
+
+    async def _get_gpu_local(self) -> GPUMetrics:
+        """Fallback: Get GPU metrics using local NVIDIA pynvml.
+
+        This is only used if AI Runtime is unavailable. Requires the
+        backend container to have GPU access (usually not the case).
 
         Returns:
             GPUMetrics with GPU information, or available=False if no GPU
         """
         if not self._init_nvml():
-            return GPUMetrics(
-                available=False,
-                name=None,
-                vram_total_gb=None,
-                vram_used_gb=None,
-                vram_percent=None,
-                utilization_percent=None,
-                temperature_c=None,
-            )
+            return GPUMetrics(available=False)
 
         try:
             # Get the first GPU (device 0)
@@ -149,16 +235,8 @@ class HardwareService:
             )
 
         except Exception as e:
-            logger.warning("Failed to get GPU metrics", error=str(e))
-            return GPUMetrics(
-                available=False,
-                name=None,
-                vram_total_gb=None,
-                vram_used_gb=None,
-                vram_percent=None,
-                utilization_percent=None,
-                temperature_c=None,
-            )
+            logger.warning("Failed to get local GPU metrics", error=str(e))
+            return GPUMetrics(available=False)
 
     async def get_cpu_metrics(self) -> CPUMetrics:
         """Get CPU metrics using psutil.

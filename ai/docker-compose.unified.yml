@@ -25,9 +25,12 @@ services:
   # Multi-model inference platform
   # ============================================
   unified-ai-runtime:
+    image: ruth-ai-runtime:gpu
     build:
       context: .
       dockerfile: Dockerfile
+      args:
+        - VARIANT=gpu
     container_name: ruth-ai-unified-runtime
     restart: unless-stopped
     ports:
@@ -42,6 +45,10 @@ services:
       - MAX_CONCURRENT_INFERENCES=10
       - SERVER_HOST=0.0.0.0
       - SERVER_PORT=8000
+      # Backend Integration
+      - BACKEND_URL=http://ruth-ai-vas-backend:8080
+      - BACKEND_INTEGRATION_ENABLED=true
+      - BACKEND_HEALTH_PUSH_INTERVAL_SECONDS=30
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
       interval: 30s
@@ -56,11 +63,10 @@ services:
           memory: 4G  # Adjust based on models
         reservations:
           memory: 2G
-          # GPU support will be added in Phase 3:
-          # devices:
-          #   - driver: nvidia
-          #     count: 1
-          #     capabilities: [gpu]
+          devices:
+            - driver: nvidia
+              count: 1
+              capabilities: [gpu]
 
   # ============================================
   # Development Helper (Optional)

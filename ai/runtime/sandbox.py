@@ -343,26 +343,89 @@ class HealthManager:
 # =============================================================================
 
 
+class ExecutorMode(Enum):
+    """Execution mode for the timeout executor."""
+
+    THREAD = "thread"  # ThreadPoolExecutor (faster, but can't truly cancel)
+    PROCESS = "process"  # ProcessPoolExecutor (true isolation, but slower)
+
+
 class TimeoutExecutor:
     """
     Executes functions with strict timeout enforcement.
 
-    Uses a thread pool to run functions and cancel them
-    if they exceed the timeout.
+    IMPORTANT: Thread-based execution (default) has a known limitation:
+    - future.cancel() only prevents not-yet-started tasks from starting
+    - Already-running tasks will continue until completion
+    - This can lead to resource exhaustion under timeout scenarios
+
+    For true cancellation guarantees, use PROCESS mode. However, this has
+    trade-offs:
+    - Higher latency (process creation overhead)
+    - Serialization overhead for function arguments
+    - Cannot share in-memory model state (models must be loaded per-process)
+
+    The default THREAD mode is suitable for most use cases where:
+    - Timeouts are rare (healthy models complete within limits)
+    - Resource exhaustion is managed by admission control
+    - Model inference is reasonably bounded
+
+    Use PROCESS mode when:
+    - True isolation is required (untrusted model code)
+    - Timeouts are expected and must be enforced strictly
+    - Model code may hang or have infinite loops
     """
 
-    def __init__(self, max_workers: int = 4):
+    def __init__(
+        self,
+        max_workers: int = 4,
+        mode: ExecutorMode = ExecutorMode.THREAD,
+    ):
         """
         Initialize the timeout executor.
 
         Args:
             max_workers: Maximum concurrent executions
+            mode: Execution mode (THREAD or PROCESS)
         """
-        self._executor = concurrent.futures.ThreadPoolExecutor(
-            max_workers=max_workers,
-            thread_name_prefix="sandbox_exec_",
-        )
+        self._mode = mode
+        self._max_workers = max_workers
         self._shutdown = False
+
+        # Track pending futures for monitoring
+        self._pending_futures: dict[int, tuple[concurrent.futures.Future, float]] = {}
+        self._future_lock = threading.Lock()
+        self._future_counter = 0
+
+        # Create appropriate executor
+        if mode == ExecutorMode.PROCESS:
+            self._executor = concurrent.futures.ProcessPoolExecutor(
+                max_workers=max_workers,
+            )
+            logger.info(
+                f"TimeoutExecutor initialized with ProcessPoolExecutor "
+                f"(max_workers={max_workers})"
+            )
+        else:
+            self._executor = concurrent.futures.ThreadPoolExecutor(
+                max_workers=max_workers,
+                thread_name_prefix="sandbox_exec_",
+            )
+            logger.info(
+                f"TimeoutExecutor initialized with ThreadPoolExecutor "
+                f"(max_workers={max_workers})"
+            )
+
+    @property
+    def mode(self) -> ExecutorMode:
+        """Get the executor mode."""
+        return self._mode
+
+    @property
+    def pending_count(self) -> int:
+        """Get count of pending/running tasks."""
+        with self._future_lock:
+            return len(self._pending_futures)
 
     def execute_with_timeout(
         self,
@@ -385,6 +448,11 @@ class TimeoutExecutor:
             - On success: (result, None, duration_ms)
             - On timeout: (None, TimeoutError, duration_ms)
             - On exception: (None, exception, duration_ms)
+
+        Note:
+            In THREAD mode, timeouts do NOT stop already-running tasks.
+            The task will continue running in the background until completion.
+            Monitor pending_count to detect resource exhaustion.
         """
         if self._shutdown:
             raise RuntimeError("Executor has been shut down")
@@ -392,8 +460,18 @@ class TimeoutExecutor:
         timeout_seconds = timeout_ms / 1000.0
         start_time = time.monotonic()
 
+        # Track this execution
+        with self._future_lock:
+            self._future_counter += 1
+            future_id = self._future_counter
+
+        future = None
         try:
             future = self._executor.submit(func, *args, **kwargs)
+
+            # Track pending future
+            with self._future_lock:
+                self._pending_futures[future_id] = (future, start_time)
 
             try:
                 result = future.result(timeout=timeout_seconds)
@@ -401,18 +479,88 @@ class TimeoutExecutor:
                 return result, None, duration_ms
 
             except concurrent.futures.TimeoutError:
-                # Attempt to cancel the future (may not actually stop execution)
-                future.cancel()
+                # Attempt to cancel the future
+                # Note: For threads, this only works if the task hasn't started yet
+                cancelled = future.cancel()
                 duration_ms = int((time.monotonic() - start_time) * 1000)
+
+                if not cancelled and self._mode == ExecutorMode.THREAD:
+                    logger.warning(
+                        f"Task timed out but could not be cancelled "
+                        f"(thread still running). future_id={future_id}, "
+                        f"pending_count={self.pending_count}"
+                    )
+
                 return None, TimeoutError(f"Execution exceeded {timeout_ms}ms"), duration_ms
 
         except Exception as e:
             duration_ms = int((time.monotonic() - start_time) * 1000)
             return None, e, duration_ms
 
+        finally:
+            # Remove from pending tracking
+            with self._future_lock:
+                self._pending_futures.pop(future_id, None)
+
+    def get_zombie_tasks(self, threshold_seconds: float = 60.0) -> list[dict[str, Any]]:
+        """
+        Get information about tasks running longer than threshold.
+
+        These are potential "zombie" tasks that timed out but are still running.
+
+        Args:
+            threshold_seconds: Time threshold to consider a task as zombie
+
+        Returns:
+            List of zombie task info dictionaries
+        """
+        zombies = []
+        current_time = time.monotonic()
+
+        with self._future_lock:
+            for future_id, (future, start_time) in self._pending_futures.items():
+                elapsed = current_time - start_time
+                if elapsed > threshold_seconds:
+                    zombies.append({
+                        "future_id": future_id,
+                        "elapsed_seconds": elapsed,
+                        "running": future.running(),
+                        "done": future.done(),
+                        "cancelled": future.cancelled(),
+                    })
+
+        return zombies
+
+    def get_stats(self) -> dict[str, Any]:
+        """Get executor statistics."""
+        with self._future_lock:
+            pending = len(self._pending_futures)
+
+        return {
+            "mode": self._mode.value,
+            "max_workers": self._max_workers,
+            "pending_count": pending,
+            "total_submitted": self._future_counter,
+            "shutdown": self._shutdown,
+        }
+
     def shutdown(self, wait: bool = True) -> None:
-        """Shutdown the executor."""
+        """
+        Shutdown the executor.
+
+        Args:
+            wait: Whether to wait for pending tasks to complete
+        """
         self._shutdown = True
+
+        # Log any remaining pending tasks
+        with self._future_lock:
+            if self._pending_futures:
+                logger.warning(
+                    f"Shutting down executor with {len(self._pending_futures)} "
+                    f"pending tasks"
+                )
+
         self._executor.shutdown(wait=wait)
 
 
@@ -965,8 +1113,47 @@ class ExecutionSandbox:
             self._metrics = ExecutionMetrics()
             self._current_health = HealthStatus.HEALTHY
 
+    def get_executor_stats(self) -> dict[str, Any]:
+        """
+        Get statistics about the underlying executor.
+
+        Useful for monitoring resource utilization and detecting
+        potential zombie tasks.
+
+        Returns:
+            Dictionary with executor statistics
+        """
+        return self._executor.get_stats()
+
+    def get_zombie_tasks(self, threshold_seconds: float = 60.0) -> list[dict[str, Any]]:
+        """
+        Get information about potential zombie tasks.
+
+        Zombie tasks are those that timed out but are still running
+        (only possible in THREAD mode).
+
+        Args:
+            threshold_seconds: Time threshold to consider a task as zombie
+
+        Returns:
+            List of zombie task info dictionaries
+        """
+        return self._executor.get_zombie_tasks(threshold_seconds)
+
     def shutdown(self) -> None:
         """Shutdown the sandbox and release resources."""
+        # Log zombie tasks before shutdown
+        zombies = self.get_zombie_tasks(threshold_seconds=30.0)
+        if zombies:
+            logger.warning(
+                "Shutting down with zombie tasks",
+                extra={
+                    **self._log_context,
+                    "zombie_count": len(zombies),
+                    "zombies": zombies,
+                },
+            )
+
         if self._owns_executor:
             self._executor.shutdown(wait=False)
 
@@ -1006,6 +1193,9 @@ class SandboxManager:
 
         # Remove sandbox
         manager.remove_sandbox("model_id", "1.0.0")
+
+        # Monitor for zombie tasks (useful for health checks)
+        zombies = manager.get_all_zombie_tasks()
     """
 
     def __init__(
@@ -1013,6 +1203,8 @@ class SandboxManager:
         shared_executor: Optional[TimeoutExecutor] = None,
         health_manager: Optional[HealthManager] = None,
         on_health_change: Optional[ExecutionSandbox.HealthChangeCallback] = None,
+        executor_mode: ExecutorMode = ExecutorMode.THREAD,
+        executor_max_workers: int = 4,
     ):
         """
         Initialize the sandbox manager.
@@ -1021,12 +1213,27 @@ class SandboxManager:
             shared_executor: Optional shared executor for all sandboxes
             health_manager: Optional shared health manager
             on_health_change: Optional callback when any sandbox health changes
+            executor_mode: Mode for new executors (THREAD or PROCESS)
+            executor_max_workers: Max workers for new executors
         """
         self._sandboxes: dict[str, ExecutionSandbox] = {}
         self._lock = threading.Lock()
         self._shared_executor = shared_executor
         self._health_manager = health_manager
         self._on_health_change = on_health_change
+        self._executor_mode = executor_mode
+        self._executor_max_workers = executor_max_workers
+
+        # If no shared executor provided but mode is specified, create one
+        if shared_executor is None and executor_mode == ExecutorMode.PROCESS:
+            logger.info(
+                f"Creating shared ProcessPoolExecutor for SandboxManager "
+                f"(max_workers={executor_max_workers})"
+            )
+            self._shared_executor = TimeoutExecutor(
+                max_workers=executor_max_workers,
+                mode=executor_mode,
+            )
 
     def set_health_change_callback(
         self,
@@ -1185,6 +1392,65 @@ class SandboxManager:
                 qid: sandbox.metrics
                 for qid, sandbox in self._sandboxes.items()
             }
+
+    def get_all_executor_stats(self) -> dict[str, dict[str, Any]]:
+        """
+        Get executor statistics for all sandboxes.
+
+        Useful for monitoring resource utilization.
+
+        Returns:
+            Dictionary mapping qualified_id to executor stats
+        """
+        with self._lock:
+            return {
+                qid: sandbox.get_executor_stats()
+                for qid, sandbox in self._sandboxes.items()
+            }
+
+    def get_all_zombie_tasks(
+        self, threshold_seconds: float = 60.0
+    ) -> dict[str, list[dict[str, Any]]]:
+        """
+        Get zombie tasks across all sandboxes.
+
+        Zombie tasks are those that timed out but are still running
+        in the background (only possible in THREAD mode).
+
+        This is useful for:
+        - Health checks to detect resource exhaustion
+        - Monitoring dashboards
+        - Alerting on stuck tasks
+
+        Args:
+            threshold_seconds: Time threshold to consider a task as zombie
+
+        Returns:
+            Dictionary mapping qualified_id to list of zombie tasks
+        """
+        result = {}
+        with self._lock:
+            for qid, sandbox in self._sandboxes.items():
+                zombies = sandbox.get_zombie_tasks(threshold_seconds)
+                if zombies:
+                    result[qid] = zombies
+        return result
+
+    def get_total_pending_tasks(self) -> int:
+        """
+        Get total count of pending tasks across all sandboxes.
+
+        Useful for admission control and capacity planning.
+
+        Returns:
+            Total number of pending/running tasks
+        """
+        total = 0
+        with self._lock:
+            for sandbox in self._sandboxes.values():
+                stats = sandbox.get_executor_stats()
+                total += stats.get("pending_count", 0)
+        return total
 
     @property
     def sandbox_count(self) -> int:

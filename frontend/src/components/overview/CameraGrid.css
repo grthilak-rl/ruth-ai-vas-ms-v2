@@ -36,7 +36,7 @@
 
 .camera-grid__tiles {
   display: grid;
-  grid-template-columns: repeat(3, 1fr);
+  /* Grid columns set dynamically via inline style to match Camera Monitoring preference */
   gap: 1px;
   background: #e0e0e0;
 }
@@ -212,12 +212,13 @@
 
 @media (max-width: 768px) {
   .camera-grid__tiles {
-    grid-template-columns: repeat(2, 1fr);
+    /* Override inline style on smaller screens for better mobile UX */
+    grid-template-columns: repeat(2, 1fr) !important;
   }
 }
 
 @media (max-width: 480px) {
   .camera-grid__tiles {
-    grid-template-columns: 1fr;
+    grid-template-columns: 1fr !important;
   }
 }

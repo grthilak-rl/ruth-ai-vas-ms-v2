@@ -264,7 +264,7 @@ class ExportService:
         ws_summary.title = "Summary"
 
         # Add summary information
-        ws_summary["A1"] = "Ruth AI Analytics Report"
+        ws_summary["A1"] = "Analytics Report"
         ws_summary["A1"].font = Font(size=16, bold=True)
 
         ws_summary["A3"] = "Time Range:"
@@ -387,7 +387,7 @@ class ExportService:
             spaceAfter=30,
             alignment=1,  # Center
         )
-        elements.append(Paragraph("Ruth AI Analytics Report", title_style))
+        elements.append(Paragraph("Analytics Report", title_style))
         elements.append(Spacer(1, 12))
 
         # Metadata

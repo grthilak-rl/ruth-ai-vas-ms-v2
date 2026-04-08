@@ -37,7 +37,7 @@ export function TopNav() {
   return (
     <header className="top-nav">
       <div className="top-nav__brand">
-        <span className="top-nav__logo">Ruth AI</span>
+        <img src="/visics_logo.jpeg" alt="Visics" className="top-nav__logo" />
       </div>
 
       <nav className="top-nav__links" role="navigation" aria-label="Main navigation">

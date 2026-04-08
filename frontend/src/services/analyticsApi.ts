@@ -157,7 +157,7 @@ export function downloadBlob(blob: Blob, filename: string): void {
 /**
  * Helper: Generate filename for export
  *
- * Format: ruth-ai-analytics-{date}.{ext}
+ * Format: analytics-report-{date}.{ext}
  *
  * @param format - Export format
  * @returns Generated filename
@@ -166,7 +166,7 @@ export function generateExportFilename(
   format: 'csv' | 'xlsx' | 'pdf'
 ): string {
   const date = new Date().toISOString().split('T')[0]; // YYYY-MM-DD
-  return `ruth-ai-analytics-${date}.${format}`;
+  return `analytics-report-${date}.${format}`;
 }
 
 /**
