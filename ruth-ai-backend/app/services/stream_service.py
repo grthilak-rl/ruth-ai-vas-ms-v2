@@ -11,7 +11,7 @@ This service is the single source of truth for:
 - Which AI sessions are running
 
 Usage:
-    stream_service = StreamService(vas_client, ai_runtime_client, db)
+    stream_service = StreamService(vas_client, db)
 
     # Start a stream
     session = await stream_service.start_stream(device_id, model_id="fall_detection")
@@ -30,11 +30,6 @@ from sqlalchemy import and_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.logging import get_logger
-from app.integrations.ai_runtime import (
-    AIRuntimeClient,
-    AIRuntimeError,
-    AIRuntimeUnavailableError,
-)
 from app.integrations.vas import (
     VASClient,
     VASError,
@@ -80,18 +75,15 @@ class StreamService:
     def __init__(
         self,
         vas_client: VASClient,
-        ai_runtime_client: AIRuntimeClient | None,
         db: AsyncSession,
     ) -> None:
         """Initialize stream service.
 
         Args:
             vas_client: VAS API client (dependency injected)
-            ai_runtime_client: AI Runtime client (optional, can be None)
             db: Database session (dependency injected)
         """
         self._vas = vas_client
-        self._ai_runtime = ai_runtime_client
         self._db = db
 
     # -------------------------------------------------------------------------
@@ -682,44 +674,9 @@ class StreamService:
     ) -> None:
         """Attach AI Runtime session to stream.
 
-        This is best-effort - failures are logged but don't fail the stream.
+        No-op: inference is handled by the unified runtime via InferenceLoopService.
         """
-        if not self._ai_runtime:
-            return
-
-        try:
-            # Check if runtime is healthy
-            is_healthy = await self._ai_runtime.is_healthy()
-            if not is_healthy:
-                logger.warning(
-                    "AI Runtime not healthy, skipping attach",
-                    session_id=str(session.id),
-                )
-                return
-
-            # Check if model is available
-            if not self._ai_runtime.has_model(session.model_id):
-                # Try to refresh capabilities
-                await self._ai_runtime.get_capabilities(force_refresh=True)
-
-            logger.info(
-                "AI Runtime session attached",
-                session_id=str(session.id),
-                model_id=session.model_id,
-            )
-
-        except AIRuntimeUnavailableError as e:
-            logger.warning(
-                "AI Runtime unavailable for attach",
-                session_id=str(session.id),
-                error=str(e),
-            )
-        except AIRuntimeError as e:
-            logger.error(
-                "AI Runtime error during attach",
-                session_id=str(session.id),
-                error=str(e),
-            )
+        return
 
     async def _detach_ai_runtime_session(
         self,
@@ -727,21 +684,6 @@ class StreamService:
     ) -> None:
         """Detach AI Runtime session from stream.
 
-        This is best-effort - failures are logged but don't fail the stop.
+        No-op: inference is handled by the unified runtime via InferenceLoopService.
         """
-        if not self._ai_runtime:
-            return
-
-        try:
-            # Currently just logging - actual detach depends on AI Runtime contract
-            logger.info(
-                "AI Runtime session detached",
-                session_id=str(session.id),
-            )
-
-        except AIRuntimeError as e:
-            logger.warning(
-                "AI Runtime error during detach",
-                session_id=str(session.id),
-                error=str(e),
-            )
+        return

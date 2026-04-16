@@ -325,14 +325,7 @@ def load_model(weights_path: str, **kwargs) -> Any:
     Returns:
         Loaded model object (or None for MVP stub)
 
-    TODO Phase 2: Implement actual model loading:
-        from pathlib import Path
-        import sys
-        sys.path.insert(0, str(Path(__file__).parent.parent.parent.parent / "fall-detection-model"))
-        from models.experimental import attempt_load
-        model = attempt_load(str(weights_path / "yolov7-w6-pose.pt"), map_location='cpu')
-        model.eval()
-        return model
+    TODO Phase 2: Implement actual model loading via lib/ directory.
     """
     # MVP: No model loading, just validate weights path exists
     from pathlib import Path

@@ -29,7 +29,6 @@ from app.core.errors import (
     # Mapping Functions
     map_domain_exception,
     map_vas_exception,
-    map_ai_runtime_exception,
     map_exception_to_api_error,
 )
 
@@ -80,18 +79,6 @@ from app.integrations.vas.exceptions import (
     VASError,
 )
 
-# AI Runtime exceptions
-from app.integrations.ai_runtime.exceptions import (
-    AIRuntimeUnavailableError,
-    AIRuntimeConnectionError,
-    AIRuntimeTimeoutError,
-    AIRuntimeOverloadedError,
-    AIRuntimeModelNotFoundError,
-    AIRuntimeCapabilityError,
-    AIRuntimeProtocolError,
-    AIRuntimeInvalidResponseError,
-    AIRuntimeError,
-)
 
 
 class TestAPIErrorTaxonomy:
@@ -523,82 +510,6 @@ class TestVASExceptionMapping:
         assert api_error.http_status == 502
 
 
-class TestAIRuntimeExceptionMapping:
-    """Tests for AI Runtime exception to API error mapping."""
-
-    def test_ai_runtime_unavailable_maps_to_503(self):
-        """AIRuntimeUnavailableError maps to 503 ServiceUnavailable."""
-        exc = AIRuntimeUnavailableError("Runtime down")
-        api_error = map_ai_runtime_exception(exc)
-
-        assert isinstance(api_error, ServiceUnavailableAPIError)
-        assert api_error.http_status == 503
-
-    def test_ai_runtime_connection_maps_to_503(self):
-        """AIRuntimeConnectionError maps to 503 ServiceUnavailable."""
-        exc = AIRuntimeConnectionError("Cannot connect")
-        api_error = map_ai_runtime_exception(exc)
-
-        assert isinstance(api_error, ServiceUnavailableAPIError)
-        assert api_error.http_status == 503
-
-    def test_ai_runtime_timeout_maps_to_504(self):
-        """AIRuntimeTimeoutError maps to 504 Timeout."""
-        exc = AIRuntimeTimeoutError("Inference timeout")
-        api_error = map_ai_runtime_exception(exc)
-
-        assert isinstance(api_error, TimeoutAPIError)
-        assert api_error.http_status == 504
-
-    def test_ai_runtime_overloaded_maps_to_503(self):
-        """AIRuntimeOverloadedError maps to 503 ServiceUnavailable."""
-        exc = AIRuntimeOverloadedError("Queue full")
-        api_error = map_ai_runtime_exception(exc)
-
-        assert isinstance(api_error, ServiceUnavailableAPIError)
-        assert api_error.http_status == 503
-
-    def test_ai_runtime_model_not_found_maps_to_404(self):
-        """AIRuntimeModelNotFoundError maps to 404 NotFound."""
-        exc = AIRuntimeModelNotFoundError("Model not found")
-        api_error = map_ai_runtime_exception(exc)
-
-        assert isinstance(api_error, NotFoundAPIError)
-        assert api_error.http_status == 404
-
-    def test_ai_runtime_capability_maps_to_502(self):
-        """AIRuntimeCapabilityError maps to 502 BadGateway."""
-        exc = AIRuntimeCapabilityError("Capability mismatch")
-        api_error = map_ai_runtime_exception(exc)
-
-        assert isinstance(api_error, BadGatewayAPIError)
-        assert api_error.http_status == 502
-
-    def test_ai_runtime_protocol_maps_to_502(self):
-        """AIRuntimeProtocolError maps to 502 BadGateway."""
-        exc = AIRuntimeProtocolError("Protocol error")
-        api_error = map_ai_runtime_exception(exc)
-
-        assert isinstance(api_error, BadGatewayAPIError)
-        assert api_error.http_status == 502
-
-    def test_ai_runtime_invalid_response_maps_to_502(self):
-        """AIRuntimeInvalidResponseError maps to 502 BadGateway."""
-        exc = AIRuntimeInvalidResponseError("Invalid response")
-        api_error = map_ai_runtime_exception(exc)
-
-        assert isinstance(api_error, BadGatewayAPIError)
-        assert api_error.http_status == 502
-
-    def test_generic_ai_runtime_error_maps_to_502(self):
-        """Generic AIRuntimeError maps to 502 BadGateway."""
-        exc = AIRuntimeError("AI error")
-        api_error = map_ai_runtime_exception(exc)
-
-        assert isinstance(api_error, BadGatewayAPIError)
-        assert api_error.http_status == 502
-
-
 class TestMapExceptionToAPIError:
     """Tests for the unified exception mapping function."""
 
@@ -619,13 +530,6 @@ class TestMapExceptionToAPIError:
     def test_maps_vas_errors(self):
         """VASError subclasses are mapped."""
         exc = VASTimeoutError("Timeout")
-        result = map_exception_to_api_error(exc)
-
-        assert isinstance(result, TimeoutAPIError)
-
-    def test_maps_ai_runtime_errors(self):
-        """AIRuntimeError subclasses are mapped."""
-        exc = AIRuntimeTimeoutError("Timeout")
         result = map_exception_to_api_error(exc)
 
         assert isinstance(result, TimeoutAPIError)

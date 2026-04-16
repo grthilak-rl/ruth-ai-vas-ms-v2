@@ -42,7 +42,6 @@ def _get_health_service() -> HealthService:
         engine=get_engine(),
         redis_client=get_redis_client_optional(),
         vas_client=get_vas_client_optional(),
-        ai_runtime_client=None,  # AI Runtime client initialization pending
     )
 
 

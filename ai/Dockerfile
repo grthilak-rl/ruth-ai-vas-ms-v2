@@ -105,24 +105,15 @@ FROM system-deps AS runtime
 # Re-declare for this stage
 ARG VARIANT=cpu
 
-# Copy installed packages from dependencies stage
-# Package locations vary by base image:
-# - CPU (python:3.11-slim): /usr/local/lib/python3.11/site-packages
-# - GPU (Ubuntu + apt python): /usr/lib/python3/dist-packages
-# We use a script to handle copying from the right location
-RUN --mount=from=dependencies,source=/,target=/deps \
-    if [ "$VARIANT" = "cpu" ]; then \
-        mkdir -p /usr/local/lib/python3.11/site-packages && \
-        cp -r /deps/usr/local/lib/python3.11/site-packages/* /usr/local/lib/python3.11/site-packages/ 2>/dev/null || true && \
-        cp -r /deps/usr/local/bin/* /usr/local/bin/ 2>/dev/null || true; \
-    elif [ "$VARIANT" = "gpu" ]; then \
-        # GPU variant: pip installs to dist-packages (Ubuntu Python convention) \
-        mkdir -p /usr/local/lib/python3.11/dist-packages && \
-        cp -r /deps/usr/local/lib/python3.11/dist-packages/* /usr/local/lib/python3.11/dist-packages/ 2>/dev/null || true && \
-        cp -r /deps/usr/local/bin/* /usr/local/bin/ 2>/dev/null || true; \
-    elif [ "$VARIANT" = "jetson" ]; then \
-        cp -r /deps/usr/lib/python3/dist-packages/* /usr/lib/python3/dist-packages/ 2>/dev/null || true; \
-    fi
+# Copy installed Python packages and binaries from dependencies stage.
+# Only copy the directories that actually contain installed packages — not the
+# entire filesystem. COPY --from tolerates missing sources in multi-stage builds
+# when the path exists as an empty dir in the target, so we pre-create them.
+RUN mkdir -p /usr/local/lib/python3.11/site-packages \
+             /usr/local/lib/python3.11/dist-packages \
+             /usr/lib/python3/dist-packages
+COPY --from=dependencies /usr/local/lib/python3.11/ /usr/local/lib/python3.11/
+COPY --from=dependencies /usr/local/bin/ /usr/local/bin/
 
 # Copy application code
 COPY runtime/ /app/ai/runtime/

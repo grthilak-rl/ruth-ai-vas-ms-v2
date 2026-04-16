@@ -146,13 +146,6 @@ class RuntimeRouter:
                 metadata=metadata,
                 config=config,
             )
-        elif decision.target == RoutingTarget.CONTAINER:
-            # For container-based models, delegate to existing integration
-            # This preserves the demo-critical fall-detection-model and ppe-detection-model
-            raise NotImplementedError(
-                f"Container routing not yet implemented. "
-                f"Use existing endpoints for {model_id}"
-            )
         else:
             raise ValueError(f"Unsupported routing target: {decision.target}")
 

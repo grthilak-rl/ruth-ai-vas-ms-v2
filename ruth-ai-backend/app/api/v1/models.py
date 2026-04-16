@@ -155,48 +155,6 @@ async def get_models_status(
             )
         )
 
-    # Add legacy container models (always add them - they have different model_ids)
-    legacy_models = ["fall_detection_container", "ppe_detection_container"]
-    logger.info(
-        "Adding legacy container models",
-        legacy_models=legacy_models,
-        runtime_models=list(runtime_models.keys()),
-    )
-    for model_id in legacy_models:
-        # Count active sessions for legacy model
-        active_sessions_stmt = (
-            select(func.count())
-            .select_from(StreamSession)
-            .where(StreamSession.state == StreamState.LIVE)
-            .where(StreamSession.model_id == model_id)
-        )
-        result = await db.execute(active_sessions_stmt)
-        cameras_active = result.scalar() or 0
-
-        # Get most recent inference time
-        last_session_stmt = (
-            select(StreamSession.started_at)
-            .where(StreamSession.model_id == model_id)
-            .order_by(StreamSession.started_at.desc())
-            .limit(1)
-        )
-        result = await db.execute(last_session_stmt)
-        last_started = result.scalar()
-
-        model_status = "active" if cameras_active > 0 else "idle"
-
-        models.append(
-            ModelStatusInfo(
-                model_id=model_id,
-                version="1.0.0",
-                status=model_status,
-                health="healthy",
-                cameras_active=cameras_active,
-                last_inference_at=last_started,
-                started_at=last_started,
-            )
-        )
-
     logger.info(
         "Retrieved model statuses",
         count=len(models),

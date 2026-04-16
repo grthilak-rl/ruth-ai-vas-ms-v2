@@ -1,6 +1,6 @@
 /**
  * PPE Detection Service
- * Extracts frames from video element and sends to PPE detection model
+ * Extracts frames from video element and sends to unified AI runtime via backend API
  * Detects: hardhat, vest, gloves, goggles, boots, mask (violation only)
  */
 
@@ -48,7 +48,7 @@ export interface PPEDetectionResult {
   videoHeight?: number;
 }
 
-// Raw API response types (from the PPE detection model)
+// Raw API response types (from the unified AI runtime PPE model)
 interface RawPPEDetection {
   item: string;
   status: 'present' | 'missing';
@@ -59,9 +59,7 @@ interface RawPPEDetection {
   model_source: string;
 }
 
-interface RawPPEAPIResponse {
-  success: boolean;
-  model: string;
+interface RawUnifiedPPEResponse {
   violation_detected: boolean;
   violation_type: string | null;
   severity: string;
@@ -70,12 +68,13 @@ interface RawPPEAPIResponse {
   persons_detected: number;
   violations: string[];
   ppe_present: string[];
-  detection_count: number;
-  model_name: string;
-  model_version: string;
-  mode: string;
-  inference_time_ms: number;
-  timestamp: string;
+  metadata?: {
+    inference_time_ms?: number;
+    model_name?: string;
+    model_version?: string;
+    mode?: string;
+    timestamp?: string;
+  };
 }
 
 export interface PPEDetectionConfig {
@@ -113,14 +112,37 @@ const DEFAULT_CONFIG: PPEDetectionConfig = {
 };
 
 /**
- * Transform raw API response to the expected PPEDetectionResult format
+ * Convert a Blob to a base64-encoded string (without the data URI prefix)
+ */
+function blobToBase64(blob: Blob): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onloadend = () => {
+      const dataUrl = reader.result as string;
+      // Strip the "data:<mime>;base64," prefix
+      const base64 = dataUrl.split(',')[1];
+      if (base64) {
+        resolve(base64);
+      } else {
+        reject(new Error('Failed to convert blob to base64'));
+      }
+    };
+    reader.onerror = () => reject(reader.error);
+    reader.readAsDataURL(blob);
+  });
+}
+
+/**
+ * Transform unified runtime API response to the expected PPEDetectionResult format
  * Groups flat detections into person-centric structure
  */
 function transformAPIResponse(
-  rawResponse: RawPPEAPIResponse,
+  rawResponse: RawUnifiedPPEResponse,
+  mode: 'presence' | 'violation' | 'full',
   videoWidth?: number,
   videoHeight?: number
 ): PPEDetectionResult {
+  const meta = rawResponse.metadata ?? {};
   const personDetections: PPEPersonDetection[] = [];
 
   // Find all person detections first
@@ -249,14 +271,14 @@ function transformAPIResponse(
   }
 
   return {
-    success: rawResponse.success,
-    mode: rawResponse.mode as 'presence' | 'violation' | 'full',
-    model_version: rawResponse.model_version,
-    person_count: rawResponse.persons_detected || personDetections.length,
+    success: true,
+    mode: (meta.mode as 'presence' | 'violation' | 'full') ?? mode,
+    model_version: meta.model_version ?? '1.0.0',
+    person_count: rawResponse.persons_detected ?? personDetections.length,
     violation_detected: rawResponse.violation_detected,
     violations: rawResponse.violations,
     detections: personDetections,
-    inference_time_ms: rawResponse.inference_time_ms,
+    inference_time_ms: meta.inference_time_ms ?? 0,
     timestamp: Date.now(),
     videoWidth,
     videoHeight,
@@ -303,7 +325,7 @@ export function extractFrameFromVideo(
 }
 
 /**
- * Send frame to PPE detection model API
+ * Send frame to unified AI runtime via backend API
  */
 export async function detectPPE(
   frameBlob: Blob,
@@ -312,12 +334,16 @@ export async function detectPPE(
   videoHeight?: number
 ): Promise<PPEDetectionResult | null> {
   try {
-    const formData = new FormData();
-    formData.append('file', frameBlob, 'frame.jpg');
+    const frameBase64 = await blobToBase64(frameBlob);
 
-    const response = await fetch(`/ppe-detection/detect?mode=${mode}`, {
+    const response = await fetch('/api/v1/ai/inference', {
       method: 'POST',
-      body: formData,
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        model_id: 'ppe_detection',
+        frame: frameBase64,
+        config: { detection_mode: mode },
+      }),
     });
 
     if (!response.ok) {
@@ -325,16 +351,10 @@ export async function detectPPE(
       return null;
     }
 
-    const rawResult: RawPPEAPIResponse = await response.json();
-    console.log('[PPEDetection] Raw API response:', rawResult);
-    console.log('[PPEDetection] Raw detections count:', rawResult.detections?.length || 0);
-    console.log('[PPEDetection] Raw detections:', rawResult.detections);
+    const rawResult: RawUnifiedPPEResponse = await response.json();
 
     // Transform the flat API response into person-centric structure
-    const transformedResult = transformAPIResponse(rawResult, videoWidth, videoHeight);
-    console.log('[PPEDetection] Transformed result:', transformedResult);
-    console.log('[PPEDetection] Transformed detections count:', transformedResult.detections?.length || 0);
-    console.log('[PPEDetection] Transformed detections:', transformedResult.detections);
+    const transformedResult = transformAPIResponse(rawResult, mode, videoWidth, videoHeight);
 
     return transformedResult;
   } catch (error) {
@@ -344,14 +364,15 @@ export async function detectPPE(
 }
 
 /**
- * Check if PPE detection model is available
+ * Check if PPE detection model is available via backend health endpoint
  */
 export async function checkPPEModelHealth(): Promise<boolean> {
   try {
-    const response = await fetch('/ppe-detection/health');
+    const response = await fetch('/api/v1/health');
     if (!response.ok) return false;
     const data = await response.json();
-    return data.status === 'healthy';
+    // Backend is healthy — unified runtime manages model availability
+    return data.status === 'healthy' || data.status === 'ok';
   } catch {
     return false;
   }
@@ -368,22 +389,11 @@ export function drawPPEDetections(
   videoWidth?: number,
   videoHeight?: number
 ): void {
-  console.log('[PPEDetection] drawPPEDetections called:', {
-    detectionsCount: detections.length,
-    canvasWidth,
-    canvasHeight,
-    videoWidth,
-    videoHeight,
-    detections: JSON.stringify(detections, null, 2)
-  });
-
   // IMPORTANT: Coordinates from the API are in the VIDEO frame dimensions,
   // NOT in 640x640 model space. We need to scale from video dimensions to canvas dimensions.
   // If videoWidth/Height are not provided, assume they match canvas (no scaling needed)
   const scaleX = videoWidth ? canvasWidth / videoWidth : 1;
   const scaleY = videoHeight ? canvasHeight / videoHeight : 1;
-
-  console.log('[PPEDetection] Scale factors:', { scaleX, scaleY, videoWidth, videoHeight, canvasWidth, canvasHeight });
 
   detections.forEach((detection, personIdx) => {
     const { person_bbox, ppe_items, violations, missing_ppe } = detection;
@@ -511,9 +521,6 @@ export class PPEDetectionManager {
   private async processFrame(): Promise<void> {
     // Skip if already processing or video not ready
     if (this.isProcessing || !this.video || !this.onResult) {
-      if (this.isProcessing) {
-        console.log('[PPEDetection] Skipping frame - previous request still processing');
-      }
       return;
     }
 
@@ -523,8 +530,6 @@ export class PPEDetectionManager {
     }
 
     this.isProcessing = true;
-    console.log('[PPEDetection] Starting frame processing...');
-    const startTime = Date.now();
 
     try {
       // Extract frame
@@ -540,8 +545,6 @@ export class PPEDetectionManager {
         this.video.videoWidth,
         this.video.videoHeight
       );
-      const elapsed = Date.now() - startTime;
-      console.log(`[PPEDetection] Frame processing completed in ${elapsed}ms, detections: ${result?.detections?.length || 0}`);
       if (result && this.onResult) {
         this.onResult(result);
       }

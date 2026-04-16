@@ -37,15 +37,10 @@ class UnifiedRuntimeConfig(BaseSettings):
     # Maps model_id to routing target: "unified" or "container"
     model_routing: Dict[str, Literal["unified", "container"]] = Field(
         default_factory=lambda: {
-            # New models → unified runtime
             "fall_detection": "unified",
             "helmet_detection": "unified",
             "fire_detection": "unified",
             "intrusion_detection": "unified",
-
-            # Demo models → existing containers (protected)
-            "fall_detection_container": "container",
-            "ppe_detection_container": "container",
         },
         description="Model routing configuration"
     )
