@@ -23,6 +23,7 @@ Usage:
 """
 
 from datetime import datetime, timezone
+from typing import Any
 from uuid import UUID
 
 from sqlalchemy import and_, select
@@ -432,6 +433,9 @@ class StreamService:
         - VAS video stream status (is video streaming?)
         - AI inference session status (is detection running?)
 
+        For listing many devices use ``get_combined_status_bulk`` instead —
+        it amortizes the VAS round-trip and the per-session DB query.
+
         Args:
             device_id: Ruth AI device UUID
             vas_device_id: VAS camera ID for this device
@@ -461,24 +465,100 @@ class StreamService:
             )
             # On VAS error, we still return AI session status
 
+        return self._build_status_dict(session, video_live, vas_stream_id)
+
+    async def get_combined_status_bulk(
+        self,
+        devices: list[Device],
+    ) -> dict[UUID, dict]:
+        """Bulk version of ``get_combined_status`` for the list-devices path.
+
+        Replaces N VAS calls + N DB session queries with 1 VAS call + 1 DB
+        query. Returned dict is keyed by Ruth device id. Devices with no
+        active session and no VAS stream still get an entry with safe
+        defaults so callers can treat the lookup as total.
+
+        Args:
+            devices: List of Ruth Device rows to compute status for.
+
+        Returns:
+            ``{device_id: status_dict}`` matching the per-device contract
+            of ``get_combined_status``.
+        """
+        if not devices:
+            return {}
+
+        # 1. Bulk VAS fetch: one unfiltered request gets all live streams.
+        #    Build vas_device_id -> Stream map for O(1) per-device lookup.
+        vas_stream_by_camera: dict[str, Any] = {}
+        try:
+            vas_response = await self._vas.get_streams(limit=100)
+            for stream in vas_response.streams:
+                # camera_id on VAS is a UUID; Ruth stores vas_device_id as str.
+                vas_stream_by_camera[str(stream.camera_id)] = stream
+        except VASError as e:
+            logger.warning(
+                "Bulk VAS stream fetch failed; falling back to no-stream defaults",
+                error=str(e),
+                device_count=len(devices),
+            )
+
+        # 2. Bulk session fetch: one query for all active sessions across
+        #    the requested device ids.
+        device_ids = [d.id for d in devices]
+        active_states = [
+            StreamState.STARTING,
+            StreamState.LIVE,
+            StreamState.STOPPING,
+        ]
+        stmt = (
+            select(StreamSession)
+            .where(
+                and_(
+                    StreamSession.device_id.in_(device_ids),
+                    StreamSession.state.in_(active_states),
+                )
+            )
+            .order_by(StreamSession.started_at.desc())
+        )
+        result = await self._db.execute(stmt)
+        # If multiple active rows exist for the same device (data drift),
+        # keep the most recent one — matches single-device _get_active_session.
+        session_by_device: dict[UUID, StreamSession] = {}
+        for s in result.scalars().all():
+            session_by_device.setdefault(s.device_id, s)
+
+        # 3. Compose per-device status from the two maps.
+        out: dict[UUID, dict] = {}
+        for d in devices:
+            vas_stream = vas_stream_by_camera.get(d.vas_device_id)
+            video_live = bool(vas_stream and vas_stream.state.value == "live")
+            vas_stream_id = str(vas_stream.id) if vas_stream else None
+            session = session_by_device.get(d.id)
+            out[d.id] = self._build_status_dict(session, video_live, vas_stream_id)
+
+        return out
+
+    @staticmethod
+    def _build_status_dict(
+        session: StreamSession | None,
+        video_live: bool,
+        vas_stream_id: str | None,
+    ) -> dict:
+        """Shared shape for both get_combined_status and bulk variant."""
         if session is None:
             return {
-                # VAS video status
                 "video_live": video_live,
                 "stream_id": vas_stream_id,
-                # AI inference status
                 "active": False,
                 "session_id": None,
                 "state": None,
                 "model_id": None,
                 "model_config": None,
             }
-
         return {
-            # VAS video status
             "video_live": video_live,
             "stream_id": vas_stream_id or session.vas_stream_id,
-            # AI inference status
             "active": True,
             "session_id": str(session.id),
             "state": session.state.value,

@@ -14,6 +14,7 @@ export {
 
 export {
   useViolationsQuery,
+  useAlertsBadgeQuery,
   useViolationQuery,
   useUpdateViolationMutation,
   useAcknowledgeViolation,
@@ -30,10 +31,6 @@ export {
 export {
   useModelsStatusQuery,
 } from './useModelsStatusQuery';
-
-export {
-  useAnalyticsQuery,
-} from './useAnalyticsQuery';
 
 export {
   useChatStatusQuery,

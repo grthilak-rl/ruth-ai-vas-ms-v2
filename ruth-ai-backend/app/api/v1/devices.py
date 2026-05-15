@@ -17,6 +17,13 @@ from fastapi.responses import Response
 
 from pydantic import BaseModel, Field
 
+from app.core.cache import (
+    DEVICES_LIST_CACHE_KEY,
+    DEVICES_LIST_CACHE_TTL_SECONDS,
+    cache_delete,
+    cache_get_json,
+    cache_set_json,
+)
 from app.core.logging import get_logger
 from app.deps import DeviceServiceDep, StreamServiceDep, VASClientDep
 from app.integrations.vas import VASError, VASNotFoundError
@@ -76,6 +83,20 @@ async def list_devices(
     Returns:
         List of devices with total count (F6-aligned response)
     """
+    # Short-TTL Redis cache absorbs the burst of identical concurrent
+    # requests this endpoint gets (multiple frontend components mount
+    # useDevicesQuery on the same page render). We cache only the
+    # default shape — that's what the frontend always sends — so a
+    # single cache key suffices; mutations that change the response
+    # (start/stop inference, model-config update, device sync) call
+    # cache_delete on that key.
+    is_cacheable_shape = active_only is True and skip == 0 and limit == 100
+    if is_cacheable_shape:
+        cached = await cache_get_json(DEVICES_LIST_CACHE_KEY)
+        if cached is not None:
+            logger.debug("devices list cache hit")
+            return DeviceListResponse.model_validate(cached)
+
     devices = await device_service.list_devices(
         active_only=active_only,
         skip=skip,
@@ -85,12 +106,13 @@ async def list_devices(
 
     logger.info("Listing devices", total=total, active_only=active_only)
 
-    # Build F6-aligned response with streaming status for each device
+    # Bulk-fetch streaming status: 1 VAS call + 1 DB query for all devices,
+    # instead of N VAS calls + N DB queries.
+    status_by_device = await stream_service.get_combined_status_bulk(devices)
+
     items = []
     for d in devices:
-        # Get combined VAS video + AI inference status
-        stream_status = await stream_service.get_combined_status(d.id, d.vas_device_id)
-
+        stream_status = status_by_device.get(d.id, {})
         items.append(
             Device(
                 id=d.id,
@@ -101,16 +123,24 @@ async def list_devices(
                     video_live=stream_status.get("video_live", False),
                     stream_id=stream_status.get("stream_id"),
                     # AI inference status
-                    active=stream_status["active"],
+                    active=stream_status.get("active", False),
                     state=stream_status.get("state"),
-                    ai_enabled=stream_status["active"] and stream_status.get("model_id") is not None,
+                    ai_enabled=stream_status.get("active", False)
+                    and stream_status.get("model_id") is not None,
                     model_id=stream_status.get("model_id"),
                     ai_model_config=stream_status.get("model_config"),
                 ),
             )
         )
 
-    return DeviceListResponse(items=items, total=total)
+    response = DeviceListResponse(items=items, total=total)
+    if is_cacheable_shape:
+        await cache_set_json(
+            DEVICES_LIST_CACHE_KEY,
+            response.model_dump(mode="json"),
+            DEVICES_LIST_CACHE_TTL_SECONDS,
+        )
+    return response
 
 
 @router.get(
@@ -280,6 +310,10 @@ async def start_inference(
         session_id=str(session.id),
     )
 
+    # Invalidate devices-list cache so the next /devices request reflects
+    # the new session immediately instead of waiting on TTL expiry.
+    await cache_delete(DEVICES_LIST_CACHE_KEY)
+
     return InferenceStartResponse(
         session_id=session.id,
         device_id=session.device_id,
@@ -365,6 +399,8 @@ async def stop_inference(
         session_id=str(session.id),
     )
 
+    await cache_delete(DEVICES_LIST_CACHE_KEY)
+
     return InferenceStopResponse(
         session_id=session.id,
         device_id=session.device_id,
@@ -425,6 +461,8 @@ async def update_model_config(
         session_id=str(session.id),
         model_id=session.model_id,
     )
+
+    await cache_delete(DEVICES_LIST_CACHE_KEY)
 
     return ModelConfigUpdateResponse(
         session_id=session.id,

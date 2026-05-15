@@ -1,51 +1,61 @@
 /**
- * Polling Intervals (F6-Compliant)
+ * Polling Intervals
  *
- * Per F6 §11.1 Polling Intervals:
- * - /health: 30 seconds
- * - /models/status: 30 seconds
- * - /violations (list): 10 seconds
- * - /violations/{id}: On-demand only (no polling)
- * - /analytics/summary: 60 seconds
- * - /devices: 60 seconds
+ * Tuned for backend load (perf/polling-and-bulk-fetch). The base F6 §11.1
+ * intervals over-poll for slow-changing data and over-poll the navbar
+ * alerts badge in particular; the values below relax the slow paths
+ * while keeping alert-list freshness at 10s where it matters.
  */
 
 export const POLLING_INTERVALS = {
   /**
-   * Health endpoint polling interval
-   * F6 §11.1: 30 seconds - Balance freshness with overhead
+   * Health endpoint polling interval.
+   * 60s — component states change on the order of minutes (containers,
+   * VAS, runtime). 30s was over-polling the global health composite.
    */
-  HEALTH: 30 * 1000,
+  HEALTH: 60 * 1000,
 
   /**
-   * Violations list polling interval
-   * F6 §11.1: 10 seconds - Alert timeliness
+   * Violations list polling interval (full alert list page).
+   * 10s — alert timeliness on the page operators are actively reading.
+   * The navbar badge uses ALERTS_BADGE instead.
    */
   VIOLATIONS: 10 * 1000,
 
   /**
-   * Model status polling interval
-   * F6 §11.1: 30 seconds - Same as health
+   * Navbar alerts badge polling interval.
+   * 30s — "are there unread alerts" only needs minute-ish freshness.
+   * Avoids 6 requests/min on every open tab regardless of page.
    */
-  MODELS_STATUS: 30 * 1000,
+  ALERTS_BADGE: 30 * 1000,
 
   /**
-   * Devices list polling interval
-   * F6 §11.1: 60 seconds - Camera status changes rarely
+   * Model status polling interval.
+   * 60s — once models are loaded by the runtime they stay loaded.
    */
-  DEVICES: 60 * 1000,
+  MODELS_STATUS: 60 * 1000,
 
   /**
-   * Analytics summary polling interval
-   * F6 §11.1: 60 seconds - Analytics can be stale
+   * Devices list polling interval.
+   * 120s — this endpoint composes Ruth-DB + VAS state per camera and
+   * is by far the heaviest. Mutations (start/stop inference) invalidate
+   * the query, so the poll only needs to catch out-of-band changes.
+   */
+  DEVICES: 120 * 1000,
+
+  /**
+   * Analytics summary polling interval.
+   * 60s — analytics page bespoke setInterval still uses this cadence
+   * (the useAnalyticsQuery hook itself is unused).
    */
   ANALYTICS: 60 * 1000,
 
   /**
-   * Hardware monitoring polling interval
-   * 5 seconds - Real-time resource monitoring for dashboard
+   * Hardware monitoring polling interval.
+   * 10s — live dashboard feel without burning 12 req/min just to keep
+   * one card current.
    */
-  HARDWARE: 5 * 1000,
+  HARDWARE: 10 * 1000,
 } as const;
 
 /**

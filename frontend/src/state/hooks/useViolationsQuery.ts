@@ -30,6 +30,28 @@ export function useViolationsQuery(filters?: ViolationFilters) {
     queryKey: queryKeys.violations.list(filters),
     queryFn: () => fetchViolations(filters),
     refetchInterval: POLLING_INTERVALS.VIOLATIONS,
+    staleTime: POLLING_INTERVALS.VIOLATIONS / 2,
+    refetchIntervalInBackground: false,
+  });
+}
+
+/**
+ * Navbar Alerts Badge Query Hook
+ *
+ * Variant of useViolationsQuery tuned for the always-mounted navbar badge:
+ * polls at ALERTS_BADGE cadence (30s) instead of VIOLATIONS (10s).
+ *
+ * Same queryKey shape as useViolationsQuery for the same filters, so the
+ * AlertsPage list and the badge dedupe in the React Query cache when their
+ * filters happen to match. The slower refetchInterval applies whenever this
+ * is the active subscriber for the key.
+ */
+export function useAlertsBadgeQuery(filters?: ViolationFilters) {
+  return useQuery({
+    queryKey: queryKeys.violations.list(filters),
+    queryFn: () => fetchViolations(filters),
+    refetchInterval: POLLING_INTERVALS.ALERTS_BADGE,
+    staleTime: POLLING_INTERVALS.ALERTS_BADGE / 2,
     refetchIntervalInBackground: false,
   });
 }

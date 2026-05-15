@@ -15,7 +15,12 @@ import {
   getMaxCameras,
 } from '../../utils/cameraGridPreferences';
 import { fetchModelsStatus, type ModelStatusInfo } from '../../state/api/models.api';
-import { startInference, stopInference, updateModelConfig, type StartInferenceRequest } from '../../state/api/devices.api';
+import { type StartInferenceRequest } from '../../state/api/devices.api';
+import {
+  useStartInferenceMutation,
+  useStopInferenceMutation,
+  useUpdateModelConfigMutation,
+} from '../../state/hooks/useDevicesQuery';
 import './CameraMonitoringDashboard.css';
 
 /**
@@ -150,6 +155,13 @@ export function CameraMonitoringDashboard({
     setSelectedCameraIds(cameraIds);
   };
 
+  // Mutations: each invalidates queryKeys.devices.all on success so the
+  // grid reflects the new ai_enabled / streaming state without waiting
+  // for the 120s devices poll.
+  const startInferenceMutation = useStartInferenceMutation();
+  const stopInferenceMutation = useStopInferenceMutation();
+  const updateModelConfigMutation = useUpdateModelConfigMutation();
+
   // Handle AI model toggle
   const handleModelToggle = useCallback(async (cameraId: string, modelId: string, enabled: boolean, config?: ModelConfig) => {
     try {
@@ -160,7 +172,7 @@ export function CameraMonitoringDashboard({
         if (isAlreadyActive && config) {
           // Model already active - just update the config
           console.log(`[CameraMonitoring] Updating config for active model ${modelId}`);
-          await updateModelConfig(cameraId, config);
+          await updateModelConfigMutation.mutateAsync({ deviceId: cameraId, config });
         } else {
           // Start inference with optional config
           const request: StartInferenceRequest = {
@@ -170,7 +182,7 @@ export function CameraMonitoringDashboard({
             model_config: config,
           };
 
-          await startInference(cameraId, request);
+          await startInferenceMutation.mutateAsync({ deviceId: cameraId, request });
         }
 
         // Update local state on success
@@ -194,7 +206,7 @@ export function CameraMonitoringDashboard({
         }
       } else {
         // Stop inference
-        await stopInference(cameraId);
+        await stopInferenceMutation.mutateAsync({ deviceId: cameraId });
 
         // Update local state on success
         setAiModelToggles((prev: Record<string, Record<string, boolean>>) => ({
@@ -209,7 +221,7 @@ export function CameraMonitoringDashboard({
       console.error(`[CameraMonitoring] Failed to ${enabled ? 'start' : 'stop'} inference:`, error);
       // TODO: Show error toast to user
     }
-  }, [aiModelToggles]);
+  }, [aiModelToggles, startInferenceMutation, stopInferenceMutation, updateModelConfigMutation]);
 
   // Handle fullscreen
   const handleFullscreen = useCallback(
