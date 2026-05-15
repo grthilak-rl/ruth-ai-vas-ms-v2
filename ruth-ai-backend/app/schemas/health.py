@@ -13,7 +13,13 @@ from typing import Any, Literal
 from pydantic import BaseModel, Field
 
 
-HealthStatus = Literal["healthy", "degraded", "unhealthy"]
+# Status values:
+#   healthy   - component is operating normally
+#   degraded  - component is reachable but reporting reduced function
+#   unhealthy - component is failing health checks
+#   disabled  - component is intentionally not part of this deployment;
+#               does NOT contribute to overall status
+HealthStatus = Literal["healthy", "degraded", "unhealthy", "disabled"]
 
 
 class ComponentDetails(BaseModel):

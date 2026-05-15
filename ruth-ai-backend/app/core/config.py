@@ -182,6 +182,15 @@ class Settings(BaseSettings):
     )
 
     # NLP Chat Service Configuration
+    nlp_chat_enabled: bool = Field(
+        default=True,
+        description=(
+            "Whether NLP Chat is part of this deployment. When false, the "
+            "chat client is not started, the chat endpoint returns 503, and "
+            "the health aggregator reports nlp_chat as 'disabled' rather "
+            "than 'unhealthy' (so overall status isn't dragged down)."
+        ),
+    )
     nlp_chat_service_url: str = Field(
         default="http://localhost:8081",
         description="NLP Chat Service base URL",

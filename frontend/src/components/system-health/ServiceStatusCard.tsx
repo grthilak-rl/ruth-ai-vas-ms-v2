@@ -9,7 +9,7 @@ import type {
 } from '../../state';
 import './ServiceStatusCard.css';
 
-export type ServiceHealthStatus = 'healthy' | 'degraded' | 'offline';
+export type ServiceHealthStatus = 'healthy' | 'degraded' | 'offline' | 'disabled';
 
 /**
  * Detail item for expanded view
@@ -371,6 +371,8 @@ function getStatusLabel(status: ServiceHealthStatus): string {
       return 'Degraded';
     case 'offline':
       return 'Offline';
+    case 'disabled':
+      return 'Disabled';
   }
 }
 
@@ -382,6 +384,8 @@ function getStatusIcon(status: ServiceHealthStatus): string {
       return '◐';
     case 'offline':
       return '○';
+    case 'disabled':
+      return '⊘';
   }
 }
 

@@ -35,9 +35,14 @@ export type UUID = string;
 export type HealthStatus = 'healthy' | 'degraded' | 'unhealthy';
 
 /**
- * Component health status
+ * Component health status.
+ *
+ * - healthy / degraded / unhealthy: as reported by backend health checks.
+ * - disabled: component is intentionally not part of this deployment and
+ *   does not contribute to the overall status. Frontend renders this as
+ *   a muted informational state, not an error.
  */
-export type ComponentHealthStatus = 'healthy' | 'degraded' | 'unhealthy';
+export type ComponentHealthStatus = 'healthy' | 'degraded' | 'unhealthy' | 'disabled';
 
 /**
  * Database health details

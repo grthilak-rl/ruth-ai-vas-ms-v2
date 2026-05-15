@@ -233,8 +233,20 @@ function deriveServiceStatus(...components: (string | undefined)[]): ServiceHeal
   const hasDegraded = components.some(c => c === 'degraded');
   if (hasDegraded) return 'degraded';
 
-  const allHealthy = components.every(c => c === 'healthy' || c === undefined);
-  if (allHealthy) return 'healthy';
+  // If every contributing component is intentionally disabled (and nothing
+  // else is reported), surface that — don't claim healthy. This is the
+  // single-component case used for nlp_chat in this deployment.
+  const reported = components.filter((c): c is string => Boolean(c));
+  if (reported.length > 0 && reported.every(c => c === 'disabled')) {
+    return 'disabled';
+  }
+
+  // 'disabled' from one of several backing components doesn't drag the
+  // service down — treat it like undefined for the "all healthy" check.
+  const allHealthyOrDisabled = components.every(
+    c => c === 'healthy' || c === 'disabled' || c === undefined,
+  );
+  if (allHealthyOrDisabled) return 'healthy';
 
   return 'degraded';
 }

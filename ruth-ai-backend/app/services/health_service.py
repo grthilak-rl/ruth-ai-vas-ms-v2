@@ -382,12 +382,24 @@ class HealthService:
         Calls the NLP Chat Service health endpoint to verify connectivity
         and LLM availability.
 
+        If NLP Chat is intentionally disabled in this deployment
+        (``nlp_chat_enabled=False``), the check returns status
+        ``"disabled"`` without performing any network calls. Disabled
+        components do not contribute to the overall health status.
+
         Args:
             timeout_seconds: Maximum time to wait for response
 
         Returns:
             ComponentHealth with status, latency, and service info
         """
+        if not self._settings.nlp_chat_enabled:
+            return ComponentHealth(
+                status="disabled",
+                error=None,
+                details=NLPChatDetails(enabled=False).model_dump(exclude_none=True),
+            )
+
         nlp_chat_url = self._settings.nlp_chat_service_url
         if not nlp_chat_url:
             return ComponentHealth(
@@ -540,7 +552,10 @@ class HealthService:
     ) -> HealthStatus:
         """Determine overall health status from component statuses.
 
-        Priority: unhealthy > degraded > healthy
+        Priority: unhealthy > degraded > healthy.
+
+        Components with status ``"disabled"`` are intentionally not part
+        of this deployment and do not contribute to the overall result.
 
         Args:
             components: Dictionary of component health statuses
@@ -548,7 +563,9 @@ class HealthService:
         Returns:
             Overall health status
         """
-        statuses = [c.status for c in components.values()]
+        statuses = [
+            c.status for c in components.values() if c.status != "disabled"
+        ]
 
         if "unhealthy" in statuses:
             return "unhealthy"
