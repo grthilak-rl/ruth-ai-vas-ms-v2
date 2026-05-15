@@ -106,9 +106,16 @@ class InferenceLoopService:
         self._vas_stream_state[stream_id] = "paused"
         logger.info("VAS stream marked paused", stream_id=stream_id)
 
-    def vas_stream_is_active(self, stream_id: str) -> bool:
-        """True if VAS has reported this stream as currently producing."""
-        return self._vas_stream_state.get(stream_id) == "active"
+    def vas_stream_is_paused(self, stream_id: str) -> bool:
+        """True only when VAS has explicitly reported this stream as paused.
+
+        Returns False when the cache has no entry for the stream (unknown
+        state). This is deliberate: VAS does not publish events on the
+        start-stream reconnect path, so an absent cache entry should not
+        gate inference. If VAS isn't actually producing, the snapshot
+        fetch will fail loudly — more useful than a silent skip.
+        """
+        return self._vas_stream_state.get(stream_id) == "paused"
 
     async def start(self) -> None:
         """Start the inference loop as a background task."""
@@ -249,12 +256,14 @@ class InferenceLoopService:
             try:
                 start_time = asyncio.get_event_loop().time()
 
-                # Skip inference if VAS has reported this stream as stopped/crashed.
+                # Skip inference only when VAS has explicitly reported this
+                # stream as paused/stopped/crashed. Unknown state proceeds —
+                # snapshot fetch will fail loudly if VAS isn't producing.
                 # We use device_id as the key because the VAS supervisor publishes
                 # stream_id == room_id == device_id (the same UUID).
-                if not self.vas_stream_is_active(str(device_id)):
+                if self.vas_stream_is_paused(str(device_id)):
                     logger.debug(
-                        "Skipping inference — VAS stream not active",
+                        "Skipping inference — VAS stream paused",
                         stream_id=str(device_id),
                     )
                     await asyncio.sleep(interval)
