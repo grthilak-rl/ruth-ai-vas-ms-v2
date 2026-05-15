@@ -18,6 +18,7 @@ from fastapi import APIRouter, BackgroundTasks, HTTPException, Query, status
 
 from app.core.logging import get_logger
 from app.deps import DBSession
+from app.integrations.unified_runtime.client import UnifiedRuntimeError
 from app.schemas import ErrorResponse
 from app.schemas.bookmark_analysis import (
     BookmarkAnalysisListItem,
@@ -28,6 +29,10 @@ from app.schemas.bookmark_analysis import (
 from app.services.bookmark_analysis_service import (
     BookmarkAnalysisService,
     run_analysis,
+)
+from app.services.model_availability import (
+    ModelNotAvailableError,
+    assert_model_available,
 )
 
 logger = get_logger(__name__)
@@ -50,7 +55,8 @@ bookmark_subresource_router = APIRouter(prefix="/bookmarks", tags=["Bookmark Ana
         "transitions."
     ),
     responses={
-        400: {"model": ErrorResponse, "description": "Invalid request payload"},
+        400: {"model": ErrorResponse, "description": "Invalid request payload or unknown model"},
+        503: {"model": ErrorResponse, "description": "AI runtime is unreachable; retry"},
     },
 )
 async def submit_analysis(
@@ -58,6 +64,32 @@ async def submit_analysis(
     db: DBSession,
     background_tasks: BackgroundTasks,
 ) -> BookmarkAnalysisResponse:
+    # Fail fast on unknown model_id before we persist anything. The
+    # check is cached for ~30s so a burst of concurrent submits doesn't
+    # fan out to the runtime.
+    try:
+        await assert_model_available(request.model_id)
+    except ModelNotAvailableError as e:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail={
+                "error": "model_not_available",
+                "message": str(e),
+            },
+        ) from e
+    except UnifiedRuntimeError as e:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail={
+                "error": "ai_runtime_unreachable",
+                "message": (
+                    "AI runtime is unreachable. Retry shortly — submitted "
+                    "analyses are not persisted while the runtime is down."
+                ),
+                "details": str(e),
+            },
+        ) from e
+
     service = BookmarkAnalysisService(db=db)
     analysis = await service.submit(request)
     # Schedule the worker only after the row commits. BackgroundTasks

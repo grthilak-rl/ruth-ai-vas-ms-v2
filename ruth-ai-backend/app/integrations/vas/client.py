@@ -897,6 +897,13 @@ class VASClient:
             f"/v2/bookmarks/{bookmark_id}/video",
             headers=self._get_auth_headers(token),
         ) as response:
+            # On a streaming response the body isn't materialized yet;
+            # _raise_for_status calls response.json()/text which would
+            # otherwise blow up with "Attempted to access streaming
+            # response content, without having called read()". Drain
+            # before raising so error messages are clean.
+            if not response.is_success:
+                await response.aread()
             self._raise_for_status(response)
             yield response
 
