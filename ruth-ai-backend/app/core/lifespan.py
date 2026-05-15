@@ -7,6 +7,7 @@ Provides:
 - Startup time tracking for uptime calculation
 """
 
+import asyncio
 import time
 from collections.abc import AsyncGenerator
 from contextlib import asynccontextmanager
@@ -195,6 +196,15 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
             )
             # Inference loop is optional - AI detection will not work
 
+    # Launch VAS stream-event consumer (non-fatal — empty VAS_REDIS_URL
+    # disables it, connection errors are logged and retried).
+    try:
+        from app.services.vas_event_consumer import vas_event_consumer
+        asyncio.create_task(vas_event_consumer.start(), name="vas-event-consumer")
+        logger.info("VAS event consumer task scheduled")
+    except Exception as e:
+        logger.error("Failed to schedule VAS event consumer", error=str(e))
+
     logger.info("Ruth AI Backend startup complete")
 
     yield  # Application runs here
@@ -209,6 +219,14 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
             logger.info("Inference loop stopped")
         except Exception as e:
             logger.error("Error stopping inference loop", error=str(e))
+
+    # Stop VAS event consumer
+    try:
+        from app.services.vas_event_consumer import vas_event_consumer
+        await vas_event_consumer.stop()
+        logger.info("VAS event consumer stopped")
+    except Exception as e:
+        logger.error("Error stopping VAS event consumer", error=str(e))
 
     # Close NLP Chat client
     if _nlp_chat_client:

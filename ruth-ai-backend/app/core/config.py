@@ -84,6 +84,13 @@ class Settings(BaseSettings):
         default="http://10.30.250.245:8085",
         description="VAS Backend API base URL",
     )
+    vas_redis_url: str = Field(
+        default="",
+        description=(
+            "URL of the VAS Redis instance (used to subscribe to "
+            "vas:stream_events). Empty string disables the VAS event consumer."
+        ),
+    )
     vas_client_id: str = Field(
         default="ruth-ai-backend",
         description="VAS API client ID",

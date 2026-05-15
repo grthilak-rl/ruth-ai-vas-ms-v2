@@ -86,6 +86,30 @@ class InferenceLoopService:
         self._violation_state: Dict[UUID, Dict[str, Any]] = {}  # session_id -> state
         self._violation_cooldown_seconds = 30  # Minimum seconds between violations for same zone
 
+        # VAS stream-state cache populated by VASEventConsumer.
+        # Maps stream_id/room_id (string) -> "active" | "paused".
+        self._vas_stream_state: Dict[str, str] = {}
+
+    async def activate(self, stream_id: str) -> None:
+        """Mark a VAS stream as active (called by VASEventConsumer).
+
+        Today this is a notification-only entry point: it records that VAS
+        has started producing frames for `stream_id`. The inference loop
+        still picks up work from StreamSession DB rows; this method does
+        NOT auto-create sessions.
+        """
+        self._vas_stream_state[stream_id] = "active"
+        logger.info("VAS stream marked active", stream_id=stream_id)
+
+    async def pause(self, stream_id: str) -> None:
+        """Mark a VAS stream as paused/stopped (called by VASEventConsumer)."""
+        self._vas_stream_state[stream_id] = "paused"
+        logger.info("VAS stream marked paused", stream_id=stream_id)
+
+    def vas_stream_is_active(self, stream_id: str) -> bool:
+        """True if VAS has reported this stream as currently producing."""
+        return self._vas_stream_state.get(stream_id) == "active"
+
     async def start(self) -> None:
         """Start the inference loop as a background task."""
         if self._running:
@@ -224,6 +248,17 @@ class InferenceLoopService:
         while self._running and session_id in self._session_tasks:
             try:
                 start_time = asyncio.get_event_loop().time()
+
+                # Skip inference if VAS has reported this stream as stopped/crashed.
+                # We use device_id as the key because the VAS supervisor publishes
+                # stream_id == room_id == device_id (the same UUID).
+                if not self.vas_stream_is_active(str(device_id)):
+                    logger.debug(
+                        "Skipping inference — VAS stream not active",
+                        stream_id=str(device_id),
+                    )
+                    await asyncio.sleep(interval)
+                    continue
 
                 # Skip if no VAS stream ID
                 if not vas_stream_id:
