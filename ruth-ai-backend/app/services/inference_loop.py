@@ -34,7 +34,7 @@ from datetime import datetime, timezone
 from typing import Any, AsyncGenerator, Callable, Dict, Optional
 from uuid import UUID
 
-from sqlalchemy import select, and_
+from sqlalchemy import select, and_, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.logging import get_logger
@@ -292,6 +292,10 @@ class InferenceLoopService:
 
                 # Check for violations with debouncing
                 if result.get("status") == "success" and result.get("result"):
+                    # Frame was actually inferenced and we got a usable result —
+                    # count it. (Failed/empty results don't count.)
+                    await self._increment_session_counter(session_id, "frames_processed")
+
                     inference_result = result["result"]
                     violation_detected = inference_result.get("violation_detected", False)
                     confidence = inference_result.get("confidence", 0.0)
@@ -388,6 +392,57 @@ class InferenceLoopService:
                 # Exponential backoff on errors
                 await asyncio.sleep(min(interval * (2 ** consecutive_errors), 30))
 
+    async def _increment_session_counter(
+        self,
+        session_id: UUID,
+        column_name: str,
+    ) -> None:
+        """Atomic +1 on a stream_sessions counter column.
+
+        Uses ``UPDATE ... SET col = col + 1`` so concurrent ticks on the
+        same session can't lose updates. Failures are logged at debug
+        level and swallowed — counters are a monitoring signal, never a
+        reason to break the inference loop.
+
+        Args:
+            session_id: stream_sessions.id to increment.
+            column_name: one of "frames_processed" / "events_count" /
+                "violations_count". The column attribute is resolved on
+                StreamSession so a typo fails fast in tests.
+        """
+        try:
+            column = getattr(StreamSession, column_name)
+        except AttributeError:
+            logger.warning(
+                "Unknown stream_session counter column",
+                column_name=column_name,
+            )
+            return
+
+        try:
+            db_gen = self._db_session_factory()
+            db = await db_gen.__anext__()
+            try:
+                await db.execute(
+                    update(StreamSession)
+                    .where(StreamSession.id == session_id)
+                    .values({column_name: column + 1})
+                )
+                await db.commit()
+            finally:
+                try:
+                    await db_gen.__anext__()
+                except StopAsyncIteration:
+                    pass
+        except Exception as e:
+            # Counter is observational; never break the inference loop for it.
+            logger.debug(
+                "Failed to increment stream_session counter",
+                session_id=str(session_id),
+                column_name=column_name,
+                error=str(e),
+            )
+
     async def _create_violation(
         self,
         session_id: UUID,
@@ -460,6 +515,10 @@ class InferenceLoopService:
                     device_id=str(device_id),
                     model_id=model_id,
                 )
+
+                # Bump the session's running total. Best-effort —
+                # see _increment_session_counter for failure semantics.
+                await self._increment_session_counter(session_id, "violations_count")
 
                 # Capture snapshot evidence asynchronously
                 if vas_stream_id:
