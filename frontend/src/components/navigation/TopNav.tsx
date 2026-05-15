@@ -62,6 +62,16 @@ export function TopNav() {
           Camera Monitoring
         </NavLink>
 
+        {/* Bookmark Analysis - All roles (Phase D.3) */}
+        <NavLink
+          to="/bookmark-analyses"
+          className={({ isActive }) =>
+            `top-nav__link ${isActive ? 'top-nav__link--active' : ''}`
+          }
+        >
+          Bookmark Analysis
+        </NavLink>
+
         {/* Violations - All roles (with badge) */}
         <NavLink
           to="/alerts"

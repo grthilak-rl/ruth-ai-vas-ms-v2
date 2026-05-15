@@ -1,0 +1,105 @@
+.bml-page {
+  padding: 1.5rem 2rem;
+}
+
+.bml-page__header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 1.25rem;
+}
+
+.bml-page__header h1 {
+  font-size: 1.5rem;
+  margin: 0;
+}
+
+.bml-page__cta {
+  background: #1a73e8;
+  color: #fff;
+  border: none;
+  border-radius: 4px;
+  padding: 0.5rem 1rem;
+  font-weight: 500;
+  cursor: pointer;
+}
+
+.bml-page__cta:hover {
+  background: #1557b0;
+}
+
+.bml-table {
+  width: 100%;
+  border-collapse: collapse;
+  background: #fff;
+  border: 1px solid #e0e0e0;
+  border-radius: 6px;
+  overflow: hidden;
+}
+
+.bml-table th,
+.bml-table td {
+  text-align: left;
+  padding: 0.75rem 1rem;
+  border-bottom: 1px solid #ececec;
+  font-size: 0.9rem;
+}
+
+.bml-table th {
+  background: #f5f5f5;
+  font-weight: 600;
+  color: #444;
+  font-size: 0.8rem;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.bml-table tr {
+  cursor: pointer;
+}
+
+.bml-table tr:hover td {
+  background: #f9fafb;
+}
+
+.bml-empty {
+  text-align: center;
+  padding: 3rem 1.5rem;
+  color: #777;
+  background: #fff;
+  border: 1px dashed #d0d7de;
+  border-radius: 6px;
+}
+
+.bml-empty__title {
+  font-weight: 600;
+  margin-bottom: 0.5rem;
+  color: #444;
+}
+
+.bml-state {
+  display: inline-block;
+  padding: 0.15rem 0.55rem;
+  border-radius: 999px;
+  font-size: 0.75rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+}
+
+.bml-state--pending {
+  background: #eef0f3;
+  color: #555;
+}
+.bml-state--running {
+  background: #e7f0ff;
+  color: #1557b0;
+}
+.bml-state--completed {
+  background: #e6f4ea;
+  color: #137333;
+}
+.bml-state--failed {
+  background: #fce8e6;
+  color: #c5221f;
+}

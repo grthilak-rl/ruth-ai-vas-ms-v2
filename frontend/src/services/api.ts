@@ -410,3 +410,39 @@ export async function waitForStreamLive(
 
   throw new Error('Timeout waiting for stream to become LIVE');
 }
+
+// ============================================================================
+// Bookmarks (VAS) — used by the bookmark-analysis form
+// ============================================================================
+
+export interface VasBookmark {
+  id: string;
+  stream_id: string;
+  device_id: string | null;
+  device_name: string | null;
+  start_time: string;
+  end_time: string;
+  duration_seconds: number;
+  label: string | null;
+  source: string;
+  status: string;
+  created_at: string;
+}
+
+interface VasBookmarkListResponse {
+  bookmarks: VasBookmark[];
+  total?: number;
+}
+
+/**
+ * List VAS bookmarks. Direct VAS call via the authenticated /v2 proxy.
+ */
+export async function listBookmarks(limit = 50): Promise<VasBookmark[]> {
+  const response = await authenticatedFetch(`/v2/bookmarks?limit=${limit}`);
+  if (!response.ok) {
+    throw new Error(`Failed to list bookmarks: ${response.status}`);
+  }
+  const data: VasBookmarkListResponse = await response.json();
+  return data.bookmarks ?? [];
+}
+

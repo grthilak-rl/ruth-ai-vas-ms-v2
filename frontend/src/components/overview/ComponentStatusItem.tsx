@@ -28,6 +28,9 @@ const STATUS_CONFIG: Record<ComponentHealthStatus | 'loading', { symbol: string;
   healthy: { symbol: '●', className: 'component-status__dot--healthy', label: 'Healthy' },
   degraded: { symbol: '●', className: 'component-status__dot--degraded', label: 'Degraded' },
   unhealthy: { symbol: '●', className: 'component-status__dot--unhealthy', label: 'Unhealthy' },
+  // Disabled components are intentionally not part of this deployment;
+  // muted neutral styling, no error connotation.
+  disabled: { symbol: '⊘', className: 'component-status__dot--loading', label: 'Disabled' },
   loading: { symbol: '○', className: 'component-status__dot--loading', label: 'Checking...' },
 };
 
