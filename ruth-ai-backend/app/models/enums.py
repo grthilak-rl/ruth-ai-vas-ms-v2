@@ -91,3 +91,17 @@ class EvidenceStatus(str, enum.Enum):
     PROCESSING = "processing"
     READY = "ready"
     FAILED = "failed"
+
+
+class BookmarkAnalysisState(str, enum.Enum):
+    """Bookmark analysis job lifecycle.
+
+    Used by the bookmark_analyses table (Phase D.1+). Each analysis row
+    is an async job submitted against a VAS bookmark; the worker
+    transitions pending → running → completed/failed.
+    """
+
+    PENDING = "pending"
+    RUNNING = "running"
+    COMPLETED = "completed"
+    FAILED = "failed"
