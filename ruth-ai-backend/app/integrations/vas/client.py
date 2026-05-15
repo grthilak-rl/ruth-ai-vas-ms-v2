@@ -907,6 +907,26 @@ class VASClient:
             self._raise_for_status(response)
             yield response
 
+    async def download_bookmark_thumbnail(
+        self,
+        bookmark_id: str,
+    ) -> bytes:
+        """Download bookmark thumbnail JPEG bytes.
+
+        Unlike video/snapshot downloads we don't stream — thumbnails are
+        ~70KB JPEGs, fully buffering is cheap and lets us return bytes
+        directly to the caller.
+        """
+        if not self._client:
+            raise VASConnectionError("Client not connected")
+        token = await self._ensure_valid_token()
+        response = await self._client.get(
+            f"/v2/bookmarks/{bookmark_id}/thumbnail",
+            headers=self._get_auth_headers(token),
+        )
+        self._raise_for_status(response)
+        return response.content
+
     # -------------------------------------------------------------------------
     # Utility Methods
     # -------------------------------------------------------------------------
