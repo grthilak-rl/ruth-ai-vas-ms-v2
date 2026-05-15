@@ -21,6 +21,7 @@ export function useHealthQuery() {
     queryKey: queryKeys.health,
     queryFn: fetchHealthWithFallback,
     refetchInterval: POLLING_INTERVALS.HEALTH,
+    staleTime: POLLING_INTERVALS.HEALTH / 2,
     refetchIntervalInBackground: false, // Pause on tab inactive
   });
 }

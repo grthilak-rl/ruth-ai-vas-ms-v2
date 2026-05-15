@@ -181,6 +181,7 @@ export {
   getGlobalStatusDisplay,
   // Violations
   useViolationsQuery,
+  useAlertsBadgeQuery,
   useViolationQuery,
   useUpdateViolationMutation,
   useAcknowledgeViolation,
@@ -192,8 +193,6 @@ export {
   useDeviceQuery,
   // Models
   useModelsStatusQuery,
-  // Analytics
-  useAnalyticsQuery,
   // Chat
   useChatStatusQuery,
   useChatMutation,

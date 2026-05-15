@@ -22,6 +22,7 @@ export function useModelsStatusQuery() {
     queryKey: queryKeys.models.status,
     queryFn: fetchModelsStatus,
     refetchInterval: POLLING_INTERVALS.MODELS_STATUS,
+    staleTime: POLLING_INTERVALS.MODELS_STATUS / 2,
     refetchIntervalInBackground: false,
   });
 }

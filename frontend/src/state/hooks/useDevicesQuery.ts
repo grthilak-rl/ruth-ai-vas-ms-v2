@@ -1,4 +1,4 @@
-import { useQuery } from '@tanstack/react-query';
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { queryKeys } from '../queryKeys';
 import { POLLING_INTERVALS } from '../pollingIntervals';
 import {
@@ -10,6 +10,13 @@ import {
   getDetectionStatusLabel,
   normalizeStreamState as apiNormalizeStreamState,
 } from '../api';
+import {
+  startInference,
+  stopInference,
+  updateModelConfig,
+  type StartInferenceRequest,
+} from '../api/devices.api';
+import type { ModelConfig } from '../../types/geofencing';
 import type {
   DevicesListResponse,
   Device,
@@ -29,6 +36,9 @@ export function useDevicesQuery() {
     queryKey: queryKeys.devices.list(),
     queryFn: fetchDevices,
     refetchInterval: POLLING_INTERVALS.DEVICES,
+    // Reuse cached response within half-interval so quick page hops
+    // don't re-fire the (expensive) /api/v1/devices fanout.
+    staleTime: POLLING_INTERVALS.DEVICES / 2,
     refetchIntervalInBackground: false,
   });
 }
@@ -45,6 +55,44 @@ export function useDeviceQuery(id: string) {
     queryKey: queryKeys.devices.detail(id),
     queryFn: () => fetchDevice(id),
     enabled: !!id,
+  });
+}
+
+// ============================================================================
+// Inference mutation hooks — invalidate the devices query on success so the
+// camera grid reflects the new streaming/ai state without waiting for the
+// (now 120s) poll.
+// ============================================================================
+
+export function useStartInferenceMutation() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: ({ deviceId, request }: { deviceId: string; request: StartInferenceRequest }) =>
+      startInference(deviceId, request),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: queryKeys.devices.all });
+    },
+  });
+}
+
+export function useStopInferenceMutation() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: ({ deviceId }: { deviceId: string }) => stopInference(deviceId),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: queryKeys.devices.all });
+    },
+  });
+}
+
+export function useUpdateModelConfigMutation() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: ({ deviceId, config }: { deviceId: string; config: ModelConfig }) =>
+      updateModelConfig(deviceId, config),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: queryKeys.devices.all });
+    },
   });
 }
 

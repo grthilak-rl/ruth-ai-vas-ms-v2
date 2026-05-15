@@ -1,4 +1,4 @@
-import { useViolationsQuery } from '../../state';
+import { useAlertsBadgeQuery } from '../../state';
 import './AlertsBadge.css';
 
 /**
@@ -9,7 +9,8 @@ import './AlertsBadge.css';
  * Rules (F6 §10.4):
  * - Shows count of open violations only
  * - Shows "—" if data unavailable (error or loading)
- * - 10s polling interval (via useViolationsQuery)
+ * - 30s polling via useAlertsBadgeQuery (the badge only needs
+ *   minute-ish freshness; the full AlertsList still polls at 10s).
  * - Never shows 0 - badge hidden when no open violations
  *
  * HARD RULES:
@@ -18,7 +19,7 @@ import './AlertsBadge.css';
  */
 export function AlertsBadge() {
   // Query open violations only
-  const { data, isError, isLoading } = useViolationsQuery({
+  const { data, isError, isLoading } = useAlertsBadgeQuery({
     status: 'open',
     limit: 1, // We only need the total count, minimize payload
   });

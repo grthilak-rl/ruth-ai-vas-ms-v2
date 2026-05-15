@@ -1,8 +1,4 @@
-import { useQuery } from '@tanstack/react-query';
-import { queryKeys } from '../queryKeys';
-import { POLLING_INTERVALS } from '../pollingIntervals';
 import {
-  fetchAnalyticsSummary,
   getStalenessLevel as apiGetStalenessLevel,
   getStalenessMessage as apiGetStalenessMessage,
   formatCount as apiFormatCount,
@@ -10,21 +6,10 @@ import {
 } from '../api';
 import type { AnalyticsSummaryResponse, StalenessLevel } from '../api';
 
-/**
- * Analytics Summary Query Hook
- *
- * Fetches analytics summary with 60s polling (F6 §11.1).
- *
- * Uses the centralized API client - no direct fetch calls.
- */
-export function useAnalyticsQuery() {
-  return useQuery({
-    queryKey: queryKeys.analytics.summary,
-    queryFn: fetchAnalyticsSummary,
-    refetchInterval: POLLING_INTERVALS.ANALYTICS,
-    refetchIntervalInBackground: false,
-  });
-}
+// NOTE: useAnalyticsQuery (the React Query hook) was removed in
+// perf/polling-and-bulk-fetch — it had zero callers. AnalyticsPage
+// has its own bespoke setInterval calling getAnalyticsSummary; a
+// follow-up should migrate it to a hook so we get dedup + retry.
 
 /**
  * Calculate staleness level from generated_at timestamp (F6 §6.3)
