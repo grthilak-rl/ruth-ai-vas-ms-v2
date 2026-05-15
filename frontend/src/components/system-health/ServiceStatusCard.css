@@ -45,6 +45,12 @@
   border-left: 3px solid #d93025;
 }
 
+/* Disabled = intentionally not part of this deployment.
+   Muted neutral color so it visually reads as "informational, not a problem". */
+.service-status-card--disabled {
+  border-left: 3px solid #9aa0a6;
+}
+
 .service-status-card__header {
   display: flex;
   justify-content: space-between;
@@ -94,6 +100,10 @@
 
 .service-status-card__indicator--offline {
   color: #c5221f;
+}
+
+.service-status-card__indicator--disabled {
+  color: #5f6368;
 }
 
 .service-status-card__icon {

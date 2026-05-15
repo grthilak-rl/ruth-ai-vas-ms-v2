@@ -181,34 +181,41 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
             _vas_client = None
             break
 
-    # Initialize NLP Chat client (connects to separate microservice)
-    try:
-        _nlp_chat_client = NLPChatClient(
-            base_url=settings.nlp_chat_service_url,
-            timeout_seconds=settings.nlp_chat_timeout_seconds,
-        )
-        set_nlp_chat_client(_nlp_chat_client)
+    # Initialize NLP Chat client (connects to separate microservice).
+    # Skipped entirely when nlp_chat_enabled=False: avoids a pointless
+    # health check during boot and prevents the chat endpoint from
+    # blowing up on a NoneType client. The health aggregator reports
+    # this case as status="disabled".
+    if settings.nlp_chat_enabled:
+        try:
+            _nlp_chat_client = NLPChatClient(
+                base_url=settings.nlp_chat_service_url,
+                timeout_seconds=settings.nlp_chat_timeout_seconds,
+            )
+            set_nlp_chat_client(_nlp_chat_client)
 
-        # Check if NLP Chat Service is available
-        is_healthy = await _nlp_chat_client.is_healthy()
-        if is_healthy:
-            is_enabled = await _nlp_chat_client.is_enabled()
-            logger.info(
-                "NLP Chat client initialized",
-                base_url=settings.nlp_chat_service_url,
-                service_enabled=is_enabled,
-            )
-        else:
+            # Check if NLP Chat Service is available
+            is_healthy = await _nlp_chat_client.is_healthy()
+            if is_healthy:
+                is_enabled = await _nlp_chat_client.is_enabled()
+                logger.info(
+                    "NLP Chat client initialized",
+                    base_url=settings.nlp_chat_service_url,
+                    service_enabled=is_enabled,
+                )
+            else:
+                logger.warning(
+                    "NLP Chat Service not reachable, chat functionality will be unavailable",
+                    base_url=settings.nlp_chat_service_url,
+                )
+        except Exception as e:
             logger.warning(
-                "NLP Chat Service not reachable, chat functionality will be unavailable",
-                base_url=settings.nlp_chat_service_url,
+                "Failed to initialize NLP Chat client, chat functionality will be unavailable",
+                error=str(e),
             )
-    except Exception as e:
-        logger.warning(
-            "Failed to initialize NLP Chat client, chat functionality will be unavailable",
-            error=str(e),
-        )
-        # NLP Chat is optional - chat endpoint will return 502 if unavailable
+            # NLP Chat is optional - chat endpoint will return 502 if unavailable
+    else:
+        logger.info("NLP Chat disabled via config (nlp_chat_enabled=False)")
 
     # Initialize Inference Loop (continuous AI inference)
     if _vas_client:
