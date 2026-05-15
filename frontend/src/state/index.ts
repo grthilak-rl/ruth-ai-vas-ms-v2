@@ -208,6 +208,21 @@ export {
   useHardwareQuery,
   deriveCapacityStatus,
   getCapacityStatusDisplay,
+  // Bookmark analyses (Phase D.3)
+  useBookmarkAnalysesListQuery,
+  useAnalysesForBookmarkQuery,
+  useBookmarkAnalysisQuery,
+  useSubmitBookmarkAnalysisMutation,
+  // Bookmarks (VAS proxy)
+  useBookmarksListQuery,
+} from './hooks';
+
+// Bookmark analysis types
+export type {
+  BookmarkAnalysis,
+  BookmarkAnalysisListResponse,
+  BookmarkAnalysisSubmitRequest,
+  VasBookmark,
 } from './hooks';
 
 // GlobalStatus type from health hook (derived from HealthResponse)

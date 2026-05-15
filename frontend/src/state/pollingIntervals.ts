@@ -56,6 +56,21 @@ export const POLLING_INTERVALS = {
    * one card current.
    */
   HARDWARE: 10 * 1000,
+
+  /**
+   * Bookmark-analyses list polling interval.
+   * 10s — operators on the list page expect new submissions and state
+   * transitions to appear without a manual refresh.
+   */
+  ANALYSIS_LIST: 10 * 1000,
+
+  /**
+   * Bookmark-analysis detail polling interval when the row is still
+   * being worked (state in pending / running). Completed and failed
+   * analyses are immutable — useBookmarkAnalysisQuery stops polling
+   * once it sees a terminal state.
+   */
+  ANALYSIS_DETAIL_RUNNING: 5 * 1000,
 } as const;
 
 /**

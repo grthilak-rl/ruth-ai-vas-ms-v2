@@ -4,6 +4,7 @@ POST   /api/v1/bookmark-analyses                          submit
 GET    /api/v1/bookmark-analyses                          list recent
 GET    /api/v1/bookmark-analyses/{id}                     get one
 GET    /api/v1/bookmarks/{vas_bookmark_id}/analyses       list for bookmark
+GET    /api/v1/bookmarks/{vas_bookmark_id}/preview-frame  thumbnail proxy
 
 Phase D.1 wires the submit/poll/list loop end-to-end with a
 placeholder worker. The worker runs via FastAPI BackgroundTasks —
@@ -15,10 +16,13 @@ from __future__ import annotations
 from uuid import UUID
 
 from fastapi import APIRouter, BackgroundTasks, HTTPException, Query, status
+from fastapi.responses import Response
 
 from app.core.logging import get_logger
 from app.deps import DBSession
+from app.deps.services import get_vas_client_optional
 from app.integrations.unified_runtime.client import UnifiedRuntimeError
+from app.integrations.vas.exceptions import VASError, VASNotFoundError
 from app.schemas import ErrorResponse
 from app.schemas.bookmark_analysis import (
     BookmarkAnalysisListItem,
@@ -154,3 +158,47 @@ async def list_analyses_for_bookmark(
     rows = await service.list_for_bookmark(vas_bookmark_id)
     items = [BookmarkAnalysisListItem.model_validate(r) for r in rows]
     return BookmarkAnalysisListResponse(items=items, total=len(items))
+
+
+@bookmark_subresource_router.get(
+    "/{vas_bookmark_id}/preview-frame",
+    summary="Bookmark preview frame (proxy)",
+    description=(
+        "Server-side proxy for VAS's bookmark thumbnail. VAS requires a "
+        "Bearer token to fetch the thumbnail, which an HTML <img> tag "
+        "can't supply; the frontend hits this endpoint instead, and the "
+        "backend authenticates against VAS using its own client."
+    ),
+    responses={
+        404: {"model": ErrorResponse, "description": "Bookmark not found"},
+        503: {"model": ErrorResponse, "description": "VAS unreachable"},
+    },
+)
+async def get_bookmark_preview_frame(vas_bookmark_id: str) -> Response:
+    vas = get_vas_client_optional()
+    if vas is None:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail={
+                "error": "vas_unavailable",
+                "message": "VAS client not initialized; cannot fetch thumbnail.",
+            },
+        )
+    try:
+        image_bytes = await vas.download_bookmark_thumbnail(vas_bookmark_id)
+    except VASNotFoundError as e:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail={"error": "bookmark_not_found", "message": str(e)},
+        ) from e
+    except VASError as e:
+        raise HTTPException(
+            status_code=status.HTTP_502_BAD_GATEWAY,
+            detail={"error": "vas_error", "message": str(e)},
+        ) from e
+    # 1-hour browser cache: thumbnails are immutable per bookmark.
+    return Response(
+        content=image_bytes,
+        media_type="image/jpeg",
+        headers={"Cache-Control": "public, max-age=3600, immutable"},
+    )

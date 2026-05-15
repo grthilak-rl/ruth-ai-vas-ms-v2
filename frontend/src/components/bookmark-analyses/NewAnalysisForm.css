@@ -1,0 +1,161 @@
+.naf-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(15, 23, 42, 0.5);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 50;
+  padding: 1.5rem;
+}
+
+.naf-modal {
+  background: #fff;
+  border-radius: 8px;
+  width: 100%;
+  max-width: 900px;
+  max-height: calc(100vh - 3rem);
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  box-shadow: 0 20px 50px rgba(0, 0, 0, 0.25);
+}
+
+.naf-modal__header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 1rem 1.25rem;
+  border-bottom: 1px solid #ececec;
+}
+
+.naf-modal__title {
+  font-size: 1.1rem;
+  font-weight: 600;
+  margin: 0;
+}
+
+.naf-modal__close {
+  background: none;
+  border: none;
+  font-size: 1.25rem;
+  cursor: pointer;
+  color: #666;
+  padding: 0.25rem 0.5rem;
+}
+
+.naf-modal__body {
+  padding: 1.25rem;
+  overflow-y: auto;
+}
+
+.naf-field {
+  margin-bottom: 1rem;
+}
+
+.naf-field__label {
+  display: block;
+  font-weight: 500;
+  margin-bottom: 0.4rem;
+  font-size: 0.875rem;
+}
+
+.naf-field__input,
+.naf-field__select {
+  width: 100%;
+  padding: 0.5rem 0.75rem;
+  font-size: 0.9rem;
+  border: 1px solid #d0d7de;
+  border-radius: 4px;
+  background: #fff;
+}
+
+.naf-field__input:focus,
+.naf-field__select:focus {
+  outline: 2px solid #1a73e8;
+  outline-offset: -1px;
+}
+
+.naf-field__row {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 1rem;
+}
+
+.naf-canvas-wrap {
+  position: relative;
+  width: 100%;
+  aspect-ratio: 16 / 9;
+  background: #111;
+  border-radius: 6px;
+  overflow: hidden;
+  margin-bottom: 0.5rem;
+}
+
+.naf-canvas-wrap__hint {
+  font-size: 0.8rem;
+  color: #666;
+  margin-bottom: 0.75rem;
+}
+
+.naf-canvas-wrap__reset {
+  margin-left: 0.5rem;
+  background: #fff;
+  border: 1px solid #d0d7de;
+  border-radius: 4px;
+  padding: 0.15rem 0.55rem;
+  cursor: pointer;
+  font-size: 0.75rem;
+}
+
+.naf-error {
+  background: #fce8e6;
+  border: 1px solid #f5c2c0;
+  border-radius: 4px;
+  padding: 0.5rem 0.75rem;
+  color: #c5221f;
+  font-size: 0.85rem;
+  margin-top: 0.5rem;
+}
+
+.naf-info {
+  background: #e7f0ff;
+  border: 1px solid #c5dcfb;
+  border-radius: 4px;
+  padding: 0.5rem 0.75rem;
+  color: #1557b0;
+  font-size: 0.85rem;
+}
+
+.naf-modal__footer {
+  display: flex;
+  justify-content: flex-end;
+  gap: 0.5rem;
+  padding: 0.75rem 1.25rem;
+  border-top: 1px solid #ececec;
+  background: #fafafa;
+}
+
+.naf-modal__button {
+  padding: 0.5rem 1rem;
+  font-size: 0.9rem;
+  border-radius: 4px;
+  cursor: pointer;
+  border: 1px solid #d0d7de;
+  background: #fff;
+}
+
+.naf-modal__button--primary {
+  background: #1a73e8;
+  color: #fff;
+  border-color: #1a73e8;
+}
+
+.naf-modal__button--primary:hover:not(:disabled) {
+  background: #1557b0;
+}
+
+.naf-modal__button:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}

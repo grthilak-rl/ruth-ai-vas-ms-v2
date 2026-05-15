@@ -8,6 +8,8 @@ import {
   CamerasPage,
   CameraDetailPage,
   CameraFullscreenPageWrapper,
+  BookmarkAnalysesListPage,
+  BookmarkAnalysisDetailPage,
   AnalyticsPage,
   CameraPerformancePage,
   ExportDataPage,
@@ -63,6 +65,16 @@ export const router = createBrowserRouter([
       {
         path: 'cameras/:id',
         element: <CameraDetailPage />,
+      },
+
+      // Bookmark Analysis section - All roles (Phase D.3)
+      {
+        path: 'bookmark-analyses',
+        element: <BookmarkAnalysesListPage />,
+      },
+      {
+        path: 'bookmark-analyses/:id',
+        element: <BookmarkAnalysisDetailPage />,
       },
 
       // Analytics section - Supervisor and Admin only

@@ -51,3 +51,19 @@ export {
   getCapacityStatusDisplay,
   type CapacityStatus,
 } from './useHardwareQuery';
+
+export {
+  useBookmarkAnalysesListQuery,
+  useAnalysesForBookmarkQuery,
+  useBookmarkAnalysisQuery,
+  useSubmitBookmarkAnalysisMutation,
+  type BookmarkAnalysis,
+  type BookmarkAnalysisListItem,
+  type BookmarkAnalysisListResponse,
+  type BookmarkAnalysisSubmitRequest,
+} from './useBookmarkAnalysesQuery';
+
+export {
+  useBookmarksListQuery,
+  type VasBookmark,
+} from './useBookmarksQuery';

@@ -281,6 +281,8 @@ function getBackendDescription(status: ServiceHealthStatus): string {
       return 'Backend services experiencing delays.';
     case 'offline':
       return 'Backend services are not responding.';
+    case 'disabled':
+      return 'Backend services intentionally disabled in this deployment.';
   }
 }
 
@@ -305,6 +307,8 @@ function getVideoDescription(status: ServiceHealthStatus): string {
       return 'Video streaming experiencing issues.';
     case 'offline':
       return 'Video streaming is not available.';
+    case 'disabled':
+      return 'Video streaming intentionally disabled in this deployment.';
   }
 }
 
@@ -316,6 +320,8 @@ function getNLPChatDescription(status: ServiceHealthStatus): string {
       return 'Chat service experiencing issues. Responses may be delayed.';
     case 'offline':
       return 'Chat service is not available.';
+    case 'disabled':
+      return 'Chat service intentionally disabled in this deployment.';
   }
 }
 

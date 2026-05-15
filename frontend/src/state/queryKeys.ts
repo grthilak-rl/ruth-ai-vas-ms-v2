@@ -74,4 +74,21 @@ export const queryKeys = {
 
   // Hardware domain
   hardware: ['hardware'] as const,
+
+  // Bookmark analyses domain
+  bookmarkAnalyses: {
+    all: ['bookmark-analyses'] as const,
+    list: (limit?: number) =>
+      limit !== undefined
+        ? (['bookmark-analyses', 'list', limit] as const)
+        : (['bookmark-analyses', 'list'] as const),
+    detail: (id: string) => ['bookmark-analyses', 'detail', id] as const,
+    forBookmark: (vasBookmarkId: string) =>
+      ['bookmark-analyses', 'for-bookmark', vasBookmarkId] as const,
+  },
+
+  // Bookmarks domain (proxy to VAS)
+  bookmarks: {
+    list: ['bookmarks', 'list'] as const,
+  },
 } as const;
