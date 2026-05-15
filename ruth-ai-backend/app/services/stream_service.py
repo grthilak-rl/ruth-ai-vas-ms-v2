@@ -4,7 +4,6 @@ Responsible for:
 - Starting and stopping streams via VAS
 - Tracking stream state locally
 - Managing StreamSession records
-- Mapping streams to AI Runtime sessions
 
 This service is the single source of truth for:
 - Which streams are active
@@ -67,7 +66,6 @@ class StreamService:
     This service:
     - Orchestrates stream start/stop via VAS
     - Tracks stream sessions in local DB
-    - Maps streams to AI Runtime sessions
     - Enforces valid state transitions
     - Handles partial failures gracefully
     """
@@ -108,7 +106,6 @@ class StreamService:
         3. Creates StreamSession in STARTING state
         4. Calls VAS to start the stream
         5. Transitions to LIVE state
-        6. Registers with AI Runtime (if available)
 
         Args:
             device_id: Local device UUID
@@ -186,10 +183,6 @@ class StreamService:
             await self._mark_session_error(session, f"VAS error: {e}")
             raise StreamStartError(device_id, str(e), cause=e) from e
 
-        # 6. Register with AI Runtime (non-blocking, best-effort)
-        if self._ai_runtime:
-            await self._attach_ai_runtime_session(session)
-
         return session
 
     async def stop_stream(
@@ -203,9 +196,8 @@ class StreamService:
         This operation:
         1. Finds active stream session
         2. Transitions to STOPPING state
-        3. Detaches AI Runtime session
-        4. Calls VAS to stop stream
-        5. Transitions to STOPPED state
+        3. Calls VAS to stop stream
+        4. Transitions to STOPPED state
 
         Args:
             device_id: Local device UUID
@@ -232,11 +224,7 @@ class StreamService:
         if not force:
             await self._transition_state(session, StreamState.STOPPING)
 
-        # 3. Detach AI Runtime session (best-effort)
-        if self._ai_runtime:
-            await self._detach_ai_runtime_session(session)
-
-        # 4. Stop stream via VAS
+        # 3. Stop stream via VAS
         try:
             await self._vas.stop_stream(device.vas_device_id)
         except VASNotFoundError:
@@ -256,7 +244,7 @@ class StreamService:
                 error=str(e),
             )
 
-        # 5. Transition to STOPPED
+        # 4. Transition to STOPPED
         session.state = StreamState.STOPPED
         session.stopped_at = datetime.now(timezone.utc)
 
@@ -667,23 +655,3 @@ class StreamService:
         """
         session.state = StreamState.ERROR
         session.error_message = reason[:1000]  # Truncate to column limit
-
-    async def _attach_ai_runtime_session(
-        self,
-        session: StreamSession,
-    ) -> None:
-        """Attach AI Runtime session to stream.
-
-        No-op: inference is handled by the unified runtime via InferenceLoopService.
-        """
-        return
-
-    async def _detach_ai_runtime_session(
-        self,
-        session: StreamSession,
-    ) -> None:
-        """Detach AI Runtime session from stream.
-
-        No-op: inference is handled by the unified runtime via InferenceLoopService.
-        """
-        return
