@@ -15,6 +15,7 @@ from sqlalchemy.ext.asyncio import async_engine_from_config
 # Import all models to ensure they are registered with Base.metadata
 from app.models import Base  # noqa: F401
 from app.models import (  # noqa: F401
+    BookmarkAnalysis,
     Device,
     Event,
     Evidence,

@@ -5,8 +5,10 @@ Models are designed to match the Ruth AI API Contract Specification exactly.
 """
 
 from app.models.base import Base, TimestampMixin
+from app.models.bookmark_analysis import BookmarkAnalysis
 from app.models.device import Device
 from app.models.enums import (
+    BookmarkAnalysisState,
     EvidenceStatus,
     EvidenceType,
     EventType,
@@ -24,6 +26,7 @@ __all__ = [
     "Base",
     "TimestampMixin",
     # Enums
+    "BookmarkAnalysisState",
     "StreamState",
     "EventType",
     "ViolationType",
@@ -31,6 +34,7 @@ __all__ = [
     "EvidenceType",
     "EvidenceStatus",
     # Models
+    "BookmarkAnalysis",
     "Device",
     "StreamSession",
     "Event",
