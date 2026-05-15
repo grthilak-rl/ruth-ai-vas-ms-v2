@@ -217,6 +217,50 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     else:
         logger.info("NLP Chat disabled via config (nlp_chat_enabled=False)")
 
+    # Auto-sync devices from VAS at startup so the InferenceLoop sees
+    # a populated devices table on its first poll and operators don't
+    # need to remember to call /internal/sync/devices manually after
+    # every restart. Failure is non-fatal — manual sync remains
+    # available via /internal/sync/devices and a Ruth restart with
+    # VAS reachable will retry.
+    if _vas_client is None:
+        logger.info(
+            "Skipping device auto-sync — VAS client not initialized. "
+            "Restart Ruth AI once VAS is reachable, or call "
+            "/internal/sync/devices manually."
+        )
+    else:
+        try:
+            from app.core.cache import DEVICES_LIST_CACHE_KEY, cache_delete
+            from app.services.device_service import DeviceService
+
+            db_gen = get_db_session()
+            db = await db_gen.__anext__()
+            try:
+                device_service = DeviceService(vas_client=_vas_client, db=db)
+                synced = await device_service.sync_devices_from_vas()
+                logger.info(
+                    "Device auto-sync at startup completed",
+                    synced_count=len(synced),
+                )
+            finally:
+                try:
+                    await db_gen.__anext__()
+                except StopAsyncIteration:
+                    pass
+
+            # Device set may have changed; invalidate the cached
+            # /api/v1/devices response so the first frontend poll
+            # after boot sees the fresh data.
+            await cache_delete(DEVICES_LIST_CACHE_KEY)
+        except Exception as e:
+            logger.warning(
+                "Device auto-sync at startup failed — continuing without it. "
+                "Manual sync via /internal/sync/devices remains available.",
+                error=str(e),
+                error_type=type(e).__name__,
+            )
+
     # Initialize Inference Loop (continuous AI inference)
     if _vas_client:
         try:
