@@ -79,46 +79,17 @@ class Settings(BaseSettings):
         description="Ruth AI Unified Runtime endpoint (GPU-enabled service)",
     )
 
-    # AI Runtime (Fall Detection)
-    ai_runtime_url: str = Field(
-        default="http://fall-detection-model:8000",
-        description="AI Runtime (Fall Detection) endpoint",
-    )
-    ai_runtime_timeout_ms: int = Field(
-        default=5000,
-        ge=100,
-        le=60000,
-        description="AI Runtime request timeout in milliseconds",
-    )
-    ai_runtime_retry_count: int = Field(
-        default=3,
-        ge=0,
-        le=10,
-        description="AI Runtime retry attempts",
-    )
-
-    # PPE Detection Service
-    ppe_detection_url: str = Field(
-        default="http://ppe-detection-model:8000",
-        description="PPE Detection model service endpoint",
-    )
-    ppe_detection_timeout_ms: int = Field(
-        default=10000,
-        ge=100,
-        le=60000,
-        description="PPE Detection request timeout in milliseconds",
-    )
-    ppe_detection_retry_count: int = Field(
-        default=3,
-        ge=0,
-        le=10,
-        description="PPE Detection retry attempts",
-    )
-
     # VAS Integration
     vas_base_url: str = Field(
         default="http://10.30.250.245:8085",
         description="VAS Backend API base URL",
+    )
+    vas_redis_url: str = Field(
+        default="",
+        description=(
+            "URL of the VAS Redis instance (used to subscribe to "
+            "vas:stream_events). Empty string disables the VAS event consumer."
+        ),
     )
     vas_client_id: str = Field(
         default="ruth-ai-backend",

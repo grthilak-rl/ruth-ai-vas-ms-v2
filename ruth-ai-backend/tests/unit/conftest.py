@@ -15,18 +15,6 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import pytest
 import pytest_asyncio
 
-from app.integrations.ai_runtime import (
-    AIRuntimeClient,
-    BoundingBox,
-    Detection,
-    InferenceResponse,
-    InferenceStatus,
-    ModelCapability,
-    ModelStatus,
-    RuntimeCapabilities,
-    RuntimeHealth,
-    RuntimeStatus,
-)
 from app.integrations.vas import (
     VASClient,
     Bookmark,
@@ -312,72 +300,6 @@ def mock_vas_client() -> MockVASClient:
 
 
 # -----------------------------------------------------------------------------
-# Mock AI Runtime Client Fixture
-# -----------------------------------------------------------------------------
-
-
-class MockAIRuntimeClient:
-    """Mock AI Runtime client for unit tests."""
-
-    def __init__(self) -> None:
-        self._healthy = True
-        self._capabilities: RuntimeCapabilities | None = None
-        self._should_fail: dict[str, Exception] = {}
-
-    def set_healthy(self, healthy: bool) -> None:
-        """Set health status."""
-        self._healthy = healthy
-
-    def set_capabilities(self, caps: RuntimeCapabilities) -> None:
-        """Set runtime capabilities."""
-        self._capabilities = caps
-
-    def set_failure(self, method: str, error: Exception) -> None:
-        """Make a method raise an exception."""
-        self._should_fail[method] = error
-
-    def _check_failure(self, method: str) -> None:
-        """Raise configured failure if set."""
-        if method in self._should_fail:
-            raise self._should_fail[method]
-
-    async def is_healthy(self) -> bool:
-        """Check if runtime is healthy."""
-        self._check_failure("is_healthy")
-        return self._healthy
-
-    async def get_capabilities(
-        self,
-        force_refresh: bool = False,
-    ) -> RuntimeCapabilities:
-        """Get runtime capabilities."""
-        self._check_failure("get_capabilities")
-        if self._capabilities is None:
-            self._capabilities = RuntimeCapabilities(
-                runtime_id="test-runtime",
-                supported_models=[
-                    ModelCapability(
-                        model_id="fall_detection",
-                        version="1.0.0",
-                        status=ModelStatus.READY,
-                    )
-                ],
-            )
-        return self._capabilities
-
-    def has_model(self, model_id: str) -> bool:
-        """Check if model is available."""
-        if self._capabilities is None:
-            return False
-        return self._capabilities.has_model(model_id)
-
-
-@pytest.fixture
-def mock_ai_runtime_client() -> MockAIRuntimeClient:
-    """Provide a mock AI Runtime client."""
-    return MockAIRuntimeClient()
-
-
 # -----------------------------------------------------------------------------
 # Test Data Factories
 # -----------------------------------------------------------------------------
@@ -569,6 +491,12 @@ def evidence_factory(violation_factory):
 @pytest.fixture
 def inference_response_factory():
     """Factory for creating test InferenceResponse instances."""
+    from app.schemas.inference import (
+        Detection,
+        InferenceResponse,
+        InferenceStatus,
+    )
+
     def _create(
         *,
         request_id: uuid.UUID | None = None,
@@ -600,6 +528,8 @@ def inference_response_factory():
 @pytest.fixture
 def detection_factory():
     """Factory for creating test Detection instances."""
+    from app.schemas.inference import BoundingBox, Detection
+
     def _create(
         *,
         detection_id: str | None = None,

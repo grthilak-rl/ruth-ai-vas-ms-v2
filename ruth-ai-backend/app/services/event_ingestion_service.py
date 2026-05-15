@@ -34,7 +34,7 @@ from uuid import UUID
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.logging import get_logger
-from app.integrations.ai_runtime import (
+from app.schemas.inference import (
     Detection,
     InferenceResponse,
     InferenceStatus,

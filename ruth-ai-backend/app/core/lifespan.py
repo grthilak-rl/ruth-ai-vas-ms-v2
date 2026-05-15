@@ -7,6 +7,7 @@ Provides:
 - Startup time tracking for uptime calculation
 """
 
+import asyncio
 import time
 from collections.abc import AsyncGenerator
 from contextlib import asynccontextmanager
@@ -19,7 +20,12 @@ from app.core.logging import configure_logging, get_logger
 from app.core.redis import close_redis, init_redis
 from app.deps.services import set_nlp_chat_client, set_redis_client, set_vas_client
 from app.integrations.nlp_chat import NLPChatClient
-from app.integrations.vas import VASClient
+from app.integrations.vas import (
+    VASAuthenticationError,
+    VASClient,
+    VASConnectionError,
+    VASTimeoutError,
+)
 from app.integrations.unified_runtime.router import RuntimeRouter
 from app.integrations.unified_runtime.client import UnifiedRuntimeClient
 from app.services.inference_loop import InferenceLoopService, set_inference_loop
@@ -117,23 +123,63 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
         )
         # Redis is optional - health check will show as unhealthy
 
-    # Initialize VAS client
-    try:
-        _vas_client = VASClient(
-            base_url=settings.vas_base_url,
-            client_id=settings.vas_client_id,
-            client_secret=settings.vas_client_secret,
-        )
-        await _vas_client.connect()
-        set_vas_client(_vas_client)
-        logger.info(
-            "VAS client initialized",
-            base_url=settings.vas_base_url,
-        )
-    except Exception as e:
-        logger.error("Failed to initialize VAS client", error=str(e))
-        # VAS is optional for some operations, so we don't raise
-        # but the health check will show VAS as unhealthy
+    # Initialize VAS client with retry on transient failure.
+    # Why: VAS may not be reachable at the exact moment Ruth boots
+    # (compose ordering, slow VAS warmup). Without retry, _vas_client
+    # stays None for the whole process lifetime and the InferenceLoop
+    # (which is gated on _vas_client below) never starts.
+    vas_max_attempts = 3
+    for attempt in range(1, vas_max_attempts + 1):
+        try:
+            _vas_client = VASClient(
+                base_url=settings.vas_base_url,
+                client_id=settings.vas_client_id,
+                client_secret=settings.vas_client_secret,
+            )
+            await _vas_client.connect()
+            set_vas_client(_vas_client)
+            logger.info(
+                "VAS client initialized",
+                base_url=settings.vas_base_url,
+                attempt=attempt,
+            )
+            break
+        except VASAuthenticationError as e:
+            # Credentials problem — retrying won't fix it. Fail fast.
+            logger.error(
+                "Failed to initialize VAS client: bad credentials, not retrying",
+                error=str(e),
+            )
+            _vas_client = None
+            break
+        except (VASConnectionError, VASTimeoutError) as e:
+            if attempt < vas_max_attempts:
+                backoff = 2 ** attempt  # 2s, 4s, 8s
+                logger.warning(
+                    "VAS client init failed (transient), will retry",
+                    error=str(e),
+                    error_type=type(e).__name__,
+                    attempt=attempt,
+                    backoff_sec=backoff,
+                )
+                await asyncio.sleep(backoff)
+            else:
+                logger.error(
+                    "VAS client init failed after all retries; "
+                    "InferenceLoop will not start. Restart Ruth AI once VAS is reachable.",
+                    error=str(e),
+                    attempts=attempt,
+                )
+                _vas_client = None
+        except Exception as e:
+            # Unknown error — log with type for visibility, don't retry.
+            logger.error(
+                "Failed to initialize VAS client (unexpected error type)",
+                error=str(e),
+                error_type=type(e).__name__,
+            )
+            _vas_client = None
+            break
 
     # Initialize NLP Chat client (connects to separate microservice)
     try:
@@ -195,6 +241,15 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
             )
             # Inference loop is optional - AI detection will not work
 
+    # Launch VAS stream-event consumer (non-fatal — empty VAS_REDIS_URL
+    # disables it, connection errors are logged and retried).
+    try:
+        from app.services.vas_event_consumer import vas_event_consumer
+        asyncio.create_task(vas_event_consumer.start(), name="vas-event-consumer")
+        logger.info("VAS event consumer task scheduled")
+    except Exception as e:
+        logger.error("Failed to schedule VAS event consumer", error=str(e))
+
     logger.info("Ruth AI Backend startup complete")
 
     yield  # Application runs here
@@ -209,6 +264,14 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
             logger.info("Inference loop stopped")
         except Exception as e:
             logger.error("Error stopping inference loop", error=str(e))
+
+    # Stop VAS event consumer
+    try:
+        from app.services.vas_event_consumer import vas_event_consumer
+        await vas_event_consumer.stop()
+        logger.info("VAS event consumer stopped")
+    except Exception as e:
+        logger.error("Error stopping VAS event consumer", error=str(e))
 
     # Close NLP Chat client
     if _nlp_chat_client:

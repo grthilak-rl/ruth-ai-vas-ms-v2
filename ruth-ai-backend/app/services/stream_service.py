@@ -4,14 +4,13 @@ Responsible for:
 - Starting and stopping streams via VAS
 - Tracking stream state locally
 - Managing StreamSession records
-- Mapping streams to AI Runtime sessions
 
 This service is the single source of truth for:
 - Which streams are active
 - Which AI sessions are running
 
 Usage:
-    stream_service = StreamService(vas_client, ai_runtime_client, db)
+    stream_service = StreamService(vas_client, db)
 
     # Start a stream
     session = await stream_service.start_stream(device_id, model_id="fall_detection")
@@ -30,11 +29,6 @@ from sqlalchemy import and_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.logging import get_logger
-from app.integrations.ai_runtime import (
-    AIRuntimeClient,
-    AIRuntimeError,
-    AIRuntimeUnavailableError,
-)
 from app.integrations.vas import (
     VASClient,
     VASError,
@@ -72,7 +66,6 @@ class StreamService:
     This service:
     - Orchestrates stream start/stop via VAS
     - Tracks stream sessions in local DB
-    - Maps streams to AI Runtime sessions
     - Enforces valid state transitions
     - Handles partial failures gracefully
     """
@@ -80,18 +73,15 @@ class StreamService:
     def __init__(
         self,
         vas_client: VASClient,
-        ai_runtime_client: AIRuntimeClient | None,
         db: AsyncSession,
     ) -> None:
         """Initialize stream service.
 
         Args:
             vas_client: VAS API client (dependency injected)
-            ai_runtime_client: AI Runtime client (optional, can be None)
             db: Database session (dependency injected)
         """
         self._vas = vas_client
-        self._ai_runtime = ai_runtime_client
         self._db = db
 
     # -------------------------------------------------------------------------
@@ -116,7 +106,6 @@ class StreamService:
         3. Creates StreamSession in STARTING state
         4. Calls VAS to start the stream
         5. Transitions to LIVE state
-        6. Registers with AI Runtime (if available)
 
         Args:
             device_id: Local device UUID
@@ -194,10 +183,6 @@ class StreamService:
             await self._mark_session_error(session, f"VAS error: {e}")
             raise StreamStartError(device_id, str(e), cause=e) from e
 
-        # 6. Register with AI Runtime (non-blocking, best-effort)
-        if self._ai_runtime:
-            await self._attach_ai_runtime_session(session)
-
         return session
 
     async def stop_stream(
@@ -211,9 +196,8 @@ class StreamService:
         This operation:
         1. Finds active stream session
         2. Transitions to STOPPING state
-        3. Detaches AI Runtime session
-        4. Calls VAS to stop stream
-        5. Transitions to STOPPED state
+        3. Calls VAS to stop stream
+        4. Transitions to STOPPED state
 
         Args:
             device_id: Local device UUID
@@ -240,11 +224,7 @@ class StreamService:
         if not force:
             await self._transition_state(session, StreamState.STOPPING)
 
-        # 3. Detach AI Runtime session (best-effort)
-        if self._ai_runtime:
-            await self._detach_ai_runtime_session(session)
-
-        # 4. Stop stream via VAS
+        # 3. Stop stream via VAS
         try:
             await self._vas.stop_stream(device.vas_device_id)
         except VASNotFoundError:
@@ -264,7 +244,7 @@ class StreamService:
                 error=str(e),
             )
 
-        # 5. Transition to STOPPED
+        # 4. Transition to STOPPED
         session.state = StreamState.STOPPED
         session.stopped_at = datetime.now(timezone.utc)
 
@@ -675,73 +655,3 @@ class StreamService:
         """
         session.state = StreamState.ERROR
         session.error_message = reason[:1000]  # Truncate to column limit
-
-    async def _attach_ai_runtime_session(
-        self,
-        session: StreamSession,
-    ) -> None:
-        """Attach AI Runtime session to stream.
-
-        This is best-effort - failures are logged but don't fail the stream.
-        """
-        if not self._ai_runtime:
-            return
-
-        try:
-            # Check if runtime is healthy
-            is_healthy = await self._ai_runtime.is_healthy()
-            if not is_healthy:
-                logger.warning(
-                    "AI Runtime not healthy, skipping attach",
-                    session_id=str(session.id),
-                )
-                return
-
-            # Check if model is available
-            if not self._ai_runtime.has_model(session.model_id):
-                # Try to refresh capabilities
-                await self._ai_runtime.get_capabilities(force_refresh=True)
-
-            logger.info(
-                "AI Runtime session attached",
-                session_id=str(session.id),
-                model_id=session.model_id,
-            )
-
-        except AIRuntimeUnavailableError as e:
-            logger.warning(
-                "AI Runtime unavailable for attach",
-                session_id=str(session.id),
-                error=str(e),
-            )
-        except AIRuntimeError as e:
-            logger.error(
-                "AI Runtime error during attach",
-                session_id=str(session.id),
-                error=str(e),
-            )
-
-    async def _detach_ai_runtime_session(
-        self,
-        session: StreamSession,
-    ) -> None:
-        """Detach AI Runtime session from stream.
-
-        This is best-effort - failures are logged but don't fail the stop.
-        """
-        if not self._ai_runtime:
-            return
-
-        try:
-            # Currently just logging - actual detach depends on AI Runtime contract
-            logger.info(
-                "AI Runtime session detached",
-                session_id=str(session.id),
-            )
-
-        except AIRuntimeError as e:
-            logger.warning(
-                "AI Runtime error during detach",
-                session_id=str(session.id),
-                error=str(e),
-            )

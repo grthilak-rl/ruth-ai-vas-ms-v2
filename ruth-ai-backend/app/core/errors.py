@@ -89,18 +89,6 @@ from app.integrations.vas.exceptions import (
     VASTimeoutError,
     VASValidationError,
 )
-from app.integrations.ai_runtime.exceptions import (
-    AIRuntimeCapabilityError,
-    AIRuntimeConnectionError,
-    AIRuntimeError,
-    AIRuntimeInvalidResponseError,
-    AIRuntimeModelNotFoundError,
-    AIRuntimeOverloadedError,
-    AIRuntimeProtocolError,
-    AIRuntimeTimeoutError,
-    AIRuntimeUnavailableError,
-)
-
 logger = get_logger(__name__)
 
 
@@ -504,70 +492,6 @@ def map_vas_exception(exc: VASError) -> RuthAPIError:
     )
 
 
-def map_ai_runtime_exception(exc: AIRuntimeError) -> RuthAPIError:
-    """Map AI Runtime integration exceptions to API errors.
-
-    Args:
-        exc: AI Runtime client exception
-
-    Returns:
-        Appropriate RuthAPIError subclass
-    """
-    if isinstance(exc, AIRuntimeUnavailableError):
-        return ServiceUnavailableAPIError(
-            message="AI inference service unavailable",
-            details=exc.details,
-        )
-
-    if isinstance(exc, AIRuntimeConnectionError):
-        return ServiceUnavailableAPIError(
-            message="Cannot connect to AI inference service",
-            details=exc.details,
-        )
-
-    if isinstance(exc, AIRuntimeTimeoutError):
-        return TimeoutAPIError(
-            message="AI inference timeout",
-            details=exc.details,
-        )
-
-    if isinstance(exc, AIRuntimeOverloadedError):
-        return ServiceUnavailableAPIError(
-            message="AI inference service overloaded",
-            details=exc.details,
-        )
-
-    if isinstance(exc, AIRuntimeModelNotFoundError):
-        return NotFoundAPIError(
-            message=exc.message,
-            details=exc.details,
-        )
-
-    if isinstance(exc, AIRuntimeCapabilityError):
-        return BadGatewayAPIError(
-            message=exc.message,
-            details=exc.details,
-        )
-
-    if isinstance(exc, AIRuntimeProtocolError):
-        return BadGatewayAPIError(
-            message="AI inference protocol error",
-            details=exc.details,
-        )
-
-    if isinstance(exc, AIRuntimeInvalidResponseError):
-        return BadGatewayAPIError(
-            message="AI inference returned invalid response",
-            details=exc.details,
-        )
-
-    # Generic AI Runtime error
-    return BadGatewayAPIError(
-        message="AI inference service error",
-        details=exc.details,
-    )
-
-
 def map_exception_to_api_error(exc: Exception) -> RuthAPIError:
     """Map any exception to an API error.
 
@@ -590,10 +514,6 @@ def map_exception_to_api_error(exc: Exception) -> RuthAPIError:
     # VAS integration exceptions
     if isinstance(exc, VASError):
         return map_vas_exception(exc)
-
-    # AI Runtime integration exceptions
-    if isinstance(exc, AIRuntimeError):
-        return map_ai_runtime_exception(exc)
 
     # Unknown exceptions → Internal Server Error
     return InternalServerAPIError(
@@ -686,27 +606,6 @@ async def vas_error_handler(
         "VAS integration error",
         exception_type=type(exc).__name__,
         vas_status_code=exc.status_code,
-        error_code=api_error.error_code,
-        status_code=api_error.http_status,
-        message=api_error.message,
-        path=request.url.path,
-    )
-
-    return create_error_response(api_error, request_id)
-
-
-async def ai_runtime_error_handler(
-    request: Request,
-    exc: AIRuntimeError,
-) -> JSONResponse:
-    """Handle AI Runtime integration exceptions."""
-    request_id = get_request_id(request)
-    api_error = map_ai_runtime_exception(exc)
-
-    logger.warning(
-        "AI Runtime integration error",
-        exception_type=type(exc).__name__,
-        runtime_id=exc.runtime_id,
         error_code=api_error.error_code,
         status_code=api_error.http_status,
         message=api_error.message,
@@ -824,7 +723,6 @@ def register_exception_handlers(app: FastAPI) -> None:
 
     # Integration errors
     app.add_exception_handler(VASError, vas_error_handler)
-    app.add_exception_handler(AIRuntimeError, ai_runtime_error_handler)
 
     # Validation errors
     app.add_exception_handler(RequestValidationError, validation_error_handler)

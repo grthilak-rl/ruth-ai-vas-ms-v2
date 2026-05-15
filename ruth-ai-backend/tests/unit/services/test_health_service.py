@@ -138,51 +138,6 @@ class MockVASClient:
         }
 
 
-class MockAIRuntimeClient:
-    """Mock AI Runtime client for testing."""
-
-    def __init__(
-        self,
-        *,
-        should_fail: bool = False,
-        latency: float = 0.0,
-        is_healthy: bool = True,
-    ):
-        self._should_fail = should_fail
-        self._latency = latency
-        self._is_healthy = is_healthy
-
-    async def check_health(self, include_models: bool = True):
-        from app.integrations.ai_runtime.models import (
-            RuntimeHealth,
-            RuntimeStatus,
-            HardwareType,
-            ModelHealth,
-            ModelStatus,
-        )
-
-        if self._latency > 0:
-            await asyncio.sleep(self._latency)
-        if self._should_fail:
-            from app.integrations.ai_runtime.exceptions import AIRuntimeConnectionError
-            raise AIRuntimeConnectionError("AI Runtime connection failed")
-
-        return RuntimeHealth(
-            runtime_id="test-runtime-001",
-            status=RuntimeStatus.READY if self._is_healthy else RuntimeStatus.ERROR,
-            hardware_type=HardwareType.GPU,
-            is_healthy=self._is_healthy,
-            models=[
-                ModelHealth(
-                    model_id="fall_detection",
-                    version="1.0.0",
-                    status=ModelStatus.READY,
-                )
-            ] if include_models else [],
-            error="Runtime error" if not self._is_healthy else None,
-        )
-
-
 class TestHealthServiceDatabase:
     """Tests for database health check."""
 
@@ -343,59 +298,6 @@ class TestHealthServiceVAS:
         assert "degraded" in result.error
 
 
-class TestHealthServiceAIRuntime:
-    """Tests for AI Runtime health check."""
-
-    @pytest.mark.asyncio
-    async def test_check_ai_runtime_healthy(self):
-        """Test AI Runtime health check when runtime is healthy."""
-        ai_runtime = MockAIRuntimeClient()
-        service = HealthService(ai_runtime_client=ai_runtime)
-
-        result = await service.check_ai_runtime(timeout_seconds=10.0)
-
-        assert result.status == "healthy"
-        assert result.latency_ms is not None
-        assert result.error is None
-        assert result.details is not None
-        assert result.details["runtime_id"] == "test-runtime-001"
-        assert result.details["hardware_type"] == "gpu"
-        assert "fall_detection" in result.details["models_loaded"]
-
-    @pytest.mark.asyncio
-    async def test_check_ai_runtime_unhealthy_connection_error(self):
-        """Test AI Runtime health check when connection fails."""
-        ai_runtime = MockAIRuntimeClient(should_fail=True)
-        service = HealthService(ai_runtime_client=ai_runtime)
-
-        result = await service.check_ai_runtime(timeout_seconds=10.0)
-
-        assert result.status == "unhealthy"
-        assert result.error is not None
-        assert "AI Runtime unavailable" in result.error
-
-    @pytest.mark.asyncio
-    async def test_check_ai_runtime_unhealthy_not_initialized(self):
-        """Test AI Runtime health check when client is None."""
-        service = HealthService(ai_runtime_client=None)
-
-        result = await service.check_ai_runtime(timeout_seconds=10.0)
-
-        assert result.status == "unhealthy"
-        assert result.error == "AI Runtime client not initialized"
-
-    @pytest.mark.asyncio
-    async def test_check_ai_runtime_unhealthy_error_state(self):
-        """Test AI Runtime health check when runtime reports error."""
-        ai_runtime = MockAIRuntimeClient(is_healthy=False)
-        service = HealthService(ai_runtime_client=ai_runtime)
-
-        result = await service.check_ai_runtime(timeout_seconds=10.0)
-
-        assert result.status == "unhealthy"
-        assert result.error is not None
-
-
 class TestHealthServiceCheckAll:
     """Tests for check_all concurrent health checks."""
 
@@ -406,16 +308,13 @@ class TestHealthServiceCheckAll:
             engine=MockEngine(),
             redis_client=MockRedisClient(),
             vas_client=MockVASClient(),
-            ai_runtime_client=MockAIRuntimeClient(),
         )
 
         components = await service.check_all()
 
-        assert len(components) == 4
         assert components["database"].status == "healthy"
         assert components["redis"].status == "healthy"
         assert components["vas"].status == "healthy"
-        assert components["ai_runtime"].status == "healthy"
 
     @pytest.mark.asyncio
     async def test_check_all_partial_failure(self):
@@ -424,7 +323,6 @@ class TestHealthServiceCheckAll:
             engine=MockEngine(),
             redis_client=MockRedisClient(should_fail=True),
             vas_client=MockVASClient(),
-            ai_runtime_client=None,  # Not initialized
         )
 
         components = await service.check_all()
@@ -432,7 +330,6 @@ class TestHealthServiceCheckAll:
         assert components["database"].status == "healthy"
         assert components["redis"].status == "unhealthy"
         assert components["vas"].status == "healthy"
-        assert components["ai_runtime"].status == "unhealthy"
 
     @pytest.mark.asyncio
     async def test_check_all_runs_concurrently(self):
@@ -442,7 +339,6 @@ class TestHealthServiceCheckAll:
             engine=MockEngine(latency=0.1),
             redis_client=MockRedisClient(latency=0.1),
             vas_client=MockVASClient(latency=0.1),
-            ai_runtime_client=MockAIRuntimeClient(latency=0.1),
         )
 
         import time

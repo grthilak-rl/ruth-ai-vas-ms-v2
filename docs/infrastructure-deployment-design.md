@@ -1,5 +1,7 @@
 # Ruth AI Infrastructure & Deployment Design
 
+> **Deprecation Notice:** References to `fall-detection-model/` and `ppe-detection-model/` standalone containers in this document are historical. These containers have been replaced by the unified AI runtime (`ai/runtime/`, `ai/server/`, `ai/models/`).
+
 **Version:** 1.0
 **Author:** Platform & Infrastructure Authority Agent
 **Date:** January 2026

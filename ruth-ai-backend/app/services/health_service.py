@@ -22,8 +22,6 @@ from sqlalchemy.ext.asyncio import AsyncEngine
 
 from app.core.config import Settings, get_settings
 from app.core.logging import get_logger
-from app.integrations.ai_runtime import AIRuntimeClient
-from app.integrations.ai_runtime.exceptions import AIRuntimeError
 from app.integrations.vas import VASClient
 from app.integrations.vas.exceptions import VASError
 from app.schemas.health import (
@@ -53,7 +51,6 @@ class HealthService:
         engine: AsyncEngine | None = None,
         redis_client: Redis | None = None,
         vas_client: VASClient | None = None,
-        ai_runtime_client: AIRuntimeClient | None = None,
         settings: Settings | None = None,
     ) -> None:
         """Initialize health service with optional dependencies.
@@ -62,13 +59,11 @@ class HealthService:
             engine: SQLAlchemy async engine for database checks
             redis_client: Redis async client for cache checks
             vas_client: VAS client for video service checks
-            ai_runtime_client: AI Runtime client for inference service checks
             settings: Application settings (uses get_settings() if not provided)
         """
         self._engine = engine
         self._redis = redis_client
         self._vas_client = vas_client
-        self._ai_runtime_client = ai_runtime_client
         self._settings = settings or get_settings()
 
     async def check_database(

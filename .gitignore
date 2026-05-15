@@ -19,19 +19,8 @@ __pycache__/
 *.weights
 *.h5
 
-# Weight directories inside model services
-fall-detection-model/weights/
-ppe-detection-model/weights/
+# Weight directories inside model plugins
 ai/models/*/weights/
-
-# Legacy PPE detection directory (R-CNN models, not used in production)
-ppe-detection/
-
-# Virtual environments inside model directories
-fall-detection-model/venv/
-fall-detection-model/.venv/
-ppe-detection-model/venv/
-ppe-detection-model/.venv/
 
 # Node modules
 node_modules/

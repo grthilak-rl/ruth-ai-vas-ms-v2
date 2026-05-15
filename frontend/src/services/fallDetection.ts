@@ -1,6 +1,6 @@
 /**
  * Fall Detection Service
- * Extracts frames from video element and sends to fall detection model
+ * Extracts frames from video element and sends to unified AI runtime via backend API
  */
 
 export interface Keypoint {
@@ -55,6 +55,27 @@ const DEFAULT_CONFIG: FallDetectionConfig = {
 };
 
 /**
+ * Convert a Blob to a base64-encoded string (without the data URI prefix)
+ */
+function blobToBase64(blob: Blob): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onloadend = () => {
+      const dataUrl = reader.result as string;
+      // Strip the "data:<mime>;base64," prefix
+      const base64 = dataUrl.split(',')[1];
+      if (base64) {
+        resolve(base64);
+      } else {
+        reject(new Error('Failed to convert blob to base64'));
+      }
+    };
+    reader.onerror = () => reject(reader.error);
+    reader.readAsDataURL(blob);
+  });
+}
+
+/**
  * Extract a single frame from video element as JPEG blob
  */
 export function extractFrameFromVideo(
@@ -94,7 +115,7 @@ export function extractFrameFromVideo(
 }
 
 /**
- * Send frame to fall detection model API
+ * Send frame to unified AI runtime via backend API
  */
 export async function detectFall(
   frameBlob: Blob,
@@ -102,12 +123,15 @@ export async function detectFall(
   videoHeight?: number
 ): Promise<FallDetectionResult | null> {
   try {
-    const formData = new FormData();
-    formData.append('file', frameBlob, 'frame.jpg');
+    const frameBase64 = await blobToBase64(frameBlob);
 
-    const response = await fetch('/fall-detection/detect', {
+    const response = await fetch('/api/v1/ai/inference', {
       method: 'POST',
-      body: formData,
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        model_id: 'fall_detection',
+        frame: frameBase64,
+      }),
     });
 
     if (!response.ok) {
@@ -117,7 +141,13 @@ export async function detectFall(
 
     const result = await response.json();
     return {
-      ...result,
+      success: true,
+      model: 'fall_detection',
+      violation_detected: result.violation_detected ?? false,
+      violation_type: result.violation_type ?? null,
+      severity: result.severity,
+      confidence: result.confidence ?? 0,
+      detection_count: result.detection_count ?? (result.detections?.length ?? 0),
       detections: result.detections || [],
       timestamp: Date.now(),
       videoWidth,
@@ -130,14 +160,15 @@ export async function detectFall(
 }
 
 /**
- * Check if fall detection model is available
+ * Check if fall detection model is available via backend health endpoint
  */
 export async function checkModelHealth(): Promise<boolean> {
   try {
-    const response = await fetch('/fall-detection/health');
+    const response = await fetch('/api/v1/health');
     if (!response.ok) return false;
     const data = await response.json();
-    return data.status === 'healthy';
+    // Backend is healthy — unified runtime manages model availability
+    return data.status === 'healthy' || data.status === 'ok';
   } catch {
     return false;
   }

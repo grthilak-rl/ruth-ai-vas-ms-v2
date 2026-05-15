@@ -389,46 +389,13 @@ class HardwareService:
     async def get_models_metrics(self) -> ModelsMetrics:
         """Get AI model service metrics.
 
-        Queries fall-detection and ppe-detection services for their status.
-
         Returns:
-            ModelsMetrics with loaded model counts and service statuses
+            ModelsMetrics with loaded model counts and service statuses.
+            Model status is managed by the unified AI runtime.
         """
-        # Define model services to query
-        services_config = [
-            ("fall-detection", self._settings.ai_runtime_url),
-            ("ppe-detection", self._settings.ppe_detection_url),
-        ]
-
-        # Query all services concurrently with configured timeout
-        timeout = self._settings.hardware_model_service_timeout
-        tasks = [
-            self._query_model_service(name, url, timeout_seconds=timeout)
-            for name, url in services_config
-        ]
-        results = await asyncio.gather(*tasks, return_exceptions=True)
-
-        services: list[ModelServiceStatus] = []
-        total_models = 0
-
-        for i, result in enumerate(results):
-            service_name = services_config[i][0]
-            if isinstance(result, Exception):
-                logger.warning(
-                    f"Failed to query model service {service_name}",
-                    error=str(result),
-                )
-                services.append(
-                    ModelServiceStatus(name=service_name, models=0, status="unknown")
-                )
-            else:
-                services.append(result)
-                if result.status == "healthy":
-                    total_models += result.models
-
         return ModelsMetrics(
-            loaded_count=total_models,
-            services=services,
+            loaded_count=0,
+            services=[],
         )
 
     async def get_capacity_metrics(

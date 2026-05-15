@@ -14,7 +14,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
-from app.integrations.ai_runtime import (
+from app.schemas.inference import (
     BoundingBox,
     Detection,
     InferenceResponse,

@@ -158,8 +158,7 @@ async def get_stream_service(
         Configured StreamService instance
     """
     vas_client = get_vas_client()
-    # AI Runtime client is optional for stream management
-    yield StreamService(vas_client, None, db)
+    yield StreamService(vas_client, db)
 
 
 async def get_violation_service(
@@ -206,7 +205,7 @@ async def get_event_ingestion_service(
     """
     vas_client = get_vas_client()
     device_service = DeviceService(vas_client, db)
-    stream_service = StreamService(vas_client, None, db)
+    stream_service = StreamService(vas_client, db)
     evidence_service = EvidenceService(vas_client, db)
     violation_service = ViolationService(db, evidence_service=evidence_service)
     yield EventIngestionService(
