@@ -29,6 +29,7 @@ RUN pip install --no-cache-dir .
 FROM python:3.11-slim-bookworm
 
 WORKDIR /app
+ENV PYTHONPATH=/app
 
 # Install runtime dependencies
 RUN apt-get update && apt-get install -y --no-install-recommends \
@@ -44,7 +45,7 @@ COPY --from=builder /usr/local/bin /usr/local/bin
 
 # Copy application code
 COPY --chown=appuser:appuser app/ ./app/
-COPY --chown=appuser:appuser alembic/ ./alembic/
+COPY --chown=appuser:appuser migrations/ ./migrations/
 COPY --chown=appuser:appuser alembic.ini ./
 
 # Switch to non-root user
@@ -57,5 +58,5 @@ EXPOSE 8080
 HEALTHCHECK --interval=30s --timeout=10s --start-period=30s --retries=3 \
     CMD curl -f http://localhost:8080/api/v1/health || exit 1
 
-# Start the application
-CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8080"]
+# Start the application: run migrations, then exec uvicorn so it becomes PID 1
+CMD ["bash", "-c", "alembic upgrade head && exec uvicorn app.main:app --host 0.0.0.0 --port 8080"]

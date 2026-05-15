@@ -11,7 +11,7 @@ import sqlalchemy as sa
 
 # revision identifiers, used by Alembic.
 revision = '2026_01_18_0002'
-down_revision = '2026_01_13_0001'
+down_revision = '001'
 branch_labels = None
 depends_on = None
 
@@ -19,12 +19,12 @@ depends_on = None
 def upgrade() -> None:
     """Add PPE detection event and violation types to enums."""
 
-    # Add new event types to eventtype enum
-    op.execute("ALTER TYPE eventtype ADD VALUE IF NOT EXISTS 'ppe_violation'")
-    op.execute("ALTER TYPE eventtype ADD VALUE IF NOT EXISTS 'ppe_compliant'")
+    # Add new event types to event_type enum
+    op.execute("ALTER TYPE event_type ADD VALUE IF NOT EXISTS 'ppe_violation'")
+    op.execute("ALTER TYPE event_type ADD VALUE IF NOT EXISTS 'ppe_compliant'")
 
-    # Add new violation type to violationtype enum
-    op.execute("ALTER TYPE violationtype ADD VALUE IF NOT EXISTS 'ppe_violation'")
+    # Add new violation type to violation_type enum
+    op.execute("ALTER TYPE violation_type ADD VALUE IF NOT EXISTS 'ppe_violation'")
 
 
 def downgrade() -> None:

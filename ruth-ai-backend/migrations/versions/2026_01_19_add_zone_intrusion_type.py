@@ -13,7 +13,7 @@ import sqlalchemy as sa
 
 # revision identifiers, used by Alembic.
 revision: str = 'add_zone_intrusion_type'
-down_revision: Union[str, None] = '2026_01_18_0003_add_model_config'
+down_revision: Union[str, None] = '2026_01_18_0003'
 branch_labels: Union[str, Sequence[str], None] = None
 depends_on: Union[str, Sequence[str], None] = None
 
