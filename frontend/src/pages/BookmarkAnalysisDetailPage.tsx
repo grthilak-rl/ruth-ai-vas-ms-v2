@@ -6,8 +6,9 @@
  *
  * Body renders by state:
  *   - pending / running:  spinner + message
- *   - completed:          JSON pretty-print of summary (D.4 will
- *                         replace this with the tank visualization)
+ *   - completed:          dispatches by model_id — TankOverflowSummary
+ *                         for tank_overflow_monitoring, RawJsonSummary
+ *                         fallback otherwise
  *   - failed:             error_message in an error box
  *
  * "Re-run" pre-fills the NewAnalysisForm with this analysis's params.
@@ -17,8 +18,13 @@ import { useCallback, useState } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
 
 import { useBookmarkAnalysisQuery } from '../state';
-import type { BookmarkAnalysis } from '../state/hooks/useBookmarkAnalysesQuery';
+import type {
+  BookmarkAnalysis,
+  TankOverflowSummary as TankSummary,
+} from '../state/api/bookmarkAnalyses.api';
 import { NewAnalysisForm } from '../components/bookmark-analyses/NewAnalysisForm';
+import { RawJsonSummary } from '../components/bookmark-analyses/RawJsonSummary';
+import { TankOverflowSummary } from '../components/bookmark-analyses/TankOverflowSummary';
 import './BookmarkAnalysesListPage.css'; // shares the bml-state--* classes
 import './BookmarkAnalysisDetailPage.css';
 
@@ -143,15 +149,11 @@ export function BookmarkAnalysisDetailPage() {
         )}
 
         {data.state === 'completed' && (
-          <>
-            <p style={{ color: '#666', marginTop: 0 }}>
-              Tank-specific visualization is coming in a later phase
-              (D.4). Raw summary below:
-            </p>
-            <pre className="bma-json">
-              {JSON.stringify(data.summary ?? {}, null, 2)}
-            </pre>
-          </>
+          data.model_id === 'tank_overflow_monitoring' && data.summary ? (
+            <TankOverflowSummary summary={data.summary as TankSummary} />
+          ) : (
+            <RawJsonSummary summary={data.summary as Record<string, unknown> | null} />
+          )
         )}
       </div>
 
