@@ -1,8 +1,13 @@
 # Ruth AI Frontend Dockerfile
-# React application built with Vite, served via nginx
+# React application built with Vite, served via nginx.
+#
+# nginx.conf.template is processed by nginx:alpine's built-in
+# envsubst entrypoint at container start, substituting
+# ${VAS_PROXY_URL} from the env. The integration compose injects
+# VAS_PROXY_URL=http://host.docker.internal:${VAS_BACKEND_PORT}.
 #
 # Build: docker build -t ruth-ai-frontend .
-# Run:   docker run -p 3300:80 -e VAS_PROXY_URL=http://10.30.250.99:8085 ruth-ai-frontend
+# Run:   docker run -p 80:80 -e VAS_PROXY_URL=http://<vas-host>:<port> ruth-ai-frontend
 #
 # Environment Variables:
 #   VAS_PROXY_URL - VAS backend URL for /v2/ proxy (default: http://localhost:8085)
