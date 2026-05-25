@@ -1,0 +1,16 @@
+.raw-json-summary__note {
+  color: #5f6368;
+  margin: 0 0 0.5rem 0;
+  font-size: 0.875rem;
+}
+
+.raw-json-summary__pre {
+  font-family: ui-monospace, SFMono-Regular, monospace;
+  background: #f6f8fa;
+  padding: 1rem;
+  border-radius: 4px;
+  max-height: 600px;
+  overflow: auto;
+  font-size: 0.85rem;
+  margin: 0;
+}

@@ -14,7 +14,8 @@
     "mediasoup-client": "^3.18.3",
     "react": "^19.2.0",
     "react-dom": "^19.2.0",
-    "react-router-dom": "^7.12.0"
+    "react-router-dom": "^7.12.0",
+    "recharts": "^2.13.0"
   },
   "devDependencies": {
     "@eslint/js": "^9.39.1",
