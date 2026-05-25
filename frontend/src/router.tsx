@@ -8,8 +8,7 @@ import {
   CamerasPage,
   CameraDetailPage,
   CameraFullscreenPageWrapper,
-  BookmarkAnalysesListPage,
-  BookmarkAnalysisDetailPage,
+  BookmarkMonitoringPage,
   AnalyticsPage,
   CameraPerformancePage,
   ExportDataPage,
@@ -67,14 +66,13 @@ export const router = createBrowserRouter([
         element: <CameraDetailPage />,
       },
 
-      // Bookmark Analysis section - All roles (Phase D.3)
+      // Bookmark Monitoring - All roles (D.6)
+      // Replaces the prior /bookmark-analyses pages; those page
+      // components are dead code (file kept, route removed) and
+      // a follow-up cleanup pass deletes the backend job machinery.
       {
-        path: 'bookmark-analyses',
-        element: <BookmarkAnalysesListPage />,
-      },
-      {
-        path: 'bookmark-analyses/:id',
-        element: <BookmarkAnalysisDetailPage />,
+        path: 'bookmark-monitoring',
+        element: <BookmarkMonitoringPage />,
       },
 
       // Analytics section - Supervisor and Admin only

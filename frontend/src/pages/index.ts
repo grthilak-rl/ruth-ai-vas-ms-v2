@@ -7,6 +7,7 @@ export { CameraDetailPage } from './CameraDetailPage';
 export { CameraFullscreenPageWrapper } from './CameraFullscreenPageWrapper';
 export { BookmarkAnalysesListPage } from './BookmarkAnalysesListPage';
 export { BookmarkAnalysisDetailPage } from './BookmarkAnalysisDetailPage';
+export { BookmarkMonitoringPage } from './BookmarkMonitoringPage';
 export { AnalyticsPage } from './AnalyticsPage';
 export { CameraPerformancePage } from './CameraPerformancePage';
 export { ExportDataPage } from './ExportDataPage';

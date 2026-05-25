@@ -1,0 +1,160 @@
+.bmp {
+  padding: 1.5rem 2rem;
+  display: flex;
+  flex-direction: column;
+  gap: 1.25rem;
+}
+
+.bmp__header {
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+}
+
+.bmp__title {
+  font-size: 1.4rem;
+  margin: 0;
+  color: #202124;
+}
+
+.bmp__subtitle {
+  margin: 0;
+  font-size: 0.875rem;
+  color: #5f6368;
+}
+
+/* Controls row — fixed-width controls grouped left, gap between
+   them, empty space to the right. No flex-grow on either child
+   so neither one stretches with the row.
+   align-items: stretch makes each column the same height so the
+   labels share a baseline at the top and the controls share a
+   baseline at the bottom (both columns are flex containers with
+   identical structure: label on top, control on bottom). */
+.bmp__controls {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 1.25rem;
+  background: #ffffff;
+  border: 1px solid #e0e0e0;
+  border-radius: 6px;
+  padding: 0.875rem 1rem;
+  align-items: stretch;
+}
+
+.bmp__control {
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+  /* Fixed-width column; do NOT flex-grow. The <select> below caps
+     to this column's width and ellipsizes long option text. */
+  flex: 0 0 auto;
+  width: 460px;
+  max-width: 100%;
+  /* min-width: 0 still needed so the <select>'s content can shrink
+     and ellipsize on narrower viewports. */
+  min-width: 0;
+  /* Anchor the inner control to the column's bottom edge — pairs
+     with the row's align-items: stretch so the two controls sit at
+     the same vertical position regardless of column content. */
+  justify-content: flex-end;
+}
+
+.bmp__control--model {
+  /* The AI Model control sits to the right of the bookmark select
+     at its natural width. No flex-grow, no fixed width — the
+     AIModelSelector trigger button's intrinsic width is what we
+     want, identical to live monitoring. */
+  width: auto;
+}
+
+.bmp__control-label {
+  font-size: 0.75rem;
+  color: #5f6368;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  /* Same line-height in both columns so the labels' baselines
+     coincide exactly. */
+  line-height: 1.2;
+}
+
+/* Shared height for the bookmark <select> and the AI-model trigger
+   button, so the two controls line up. The AIModelSelector trigger
+   uses smaller font + tighter padding than our default <select>;
+   matching here is purely cosmetic. */
+.bmp__select,
+.bmp__control--model .ai-model-selector__trigger {
+  height: 36px;
+  box-sizing: border-box;
+}
+
+.bmp__select {
+  background: #ffffff;
+  border: 1px solid #dadce0;
+  border-radius: 4px;
+  padding: 0 0.6rem;
+  font-size: 0.875rem;
+  color: #202124;
+  cursor: pointer;
+  /* Fill the fixed-width parent column and ellipsize long
+     selected-option text so a bookmark label like "device •
+     timestamp • 21m 18s — Clip…" stays inside 460px. */
+  width: 100%;
+  max-width: 100%;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.bmp__select:hover {
+  border-color: #1a73e8;
+}
+
+.bmp__select:disabled {
+  background: #f1f3f4;
+  color: #9aa0a6;
+  cursor: not-allowed;
+}
+
+.bmp__hint {
+  font-size: 0.85rem;
+  color: #5f6368;
+  font-style: italic;
+}
+
+.bmp__error {
+  font-size: 0.8125rem;
+  color: #c5221f;
+}
+
+/* View area */
+.bmp__view {
+  background: #ffffff;
+  border: 1px solid #e0e0e0;
+  border-radius: 6px;
+  padding: 1rem;
+  min-height: 280px;
+}
+
+.bmp__empty {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  text-align: center;
+  padding: 3rem 1rem;
+  color: #5f6368;
+  gap: 0.5rem;
+}
+
+.bmp__empty-title {
+  margin: 0;
+  font-size: 1rem;
+  font-weight: 600;
+  color: #202124;
+}
+
+.bmp__empty-hint {
+  margin: 0;
+  font-size: 0.875rem;
+  max-width: 460px;
+}

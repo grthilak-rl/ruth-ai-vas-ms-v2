@@ -41,6 +41,12 @@ interface AIModelSelectorProps {
   models: AIModel[];
   onModelToggle: (modelId: string, enabled: boolean, config?: ModelConfig) => void;
   modelConfigs?: Record<string, ModelConfig>;
+  /** Optional. When true, the trigger button is disabled and the
+   *  panel cannot be opened. Defaults to false — live Camera
+   *  Monitoring's call sites omit it and behave exactly as before.
+   *  Used by Bookmark Monitoring to gate the model picker until a
+   *  bookmark is selected. */
+  disabled?: boolean;
 }
 
 export function AIModelSelector({
@@ -49,7 +55,8 @@ export function AIModelSelector({
   videoUrl,
   models,
   onModelToggle,
-  modelConfigs = {}
+  modelConfigs = {},
+  disabled = false,
 }: AIModelSelectorProps) {
   const [isOpen, setIsOpen] = useState(false);
   const [geofenceModalOpen, setGeofenceModalOpen] = useState(false);
@@ -150,10 +157,14 @@ export function AIModelSelector({
       <button
         type="button"
         className="ai-model-selector__trigger"
-        onClick={() => setIsOpen(!isOpen)}
-        aria-expanded={isOpen}
+        onClick={() => {
+          if (disabled) return;
+          setIsOpen(!isOpen);
+        }}
+        aria-expanded={disabled ? false : isOpen}
         aria-haspopup="true"
         aria-label="AI detection models"
+        disabled={disabled}
       >
         AI Models ▼
       </button>

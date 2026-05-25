@@ -927,6 +927,32 @@ class VASClient:
         self._raise_for_status(response)
         return response.content
 
+    async def download_bookmark_video_bytes(
+        self,
+        bookmark_id: str,
+    ) -> tuple[bytes, str]:
+        """Buffered download of a bookmark video.
+
+        Returns the full body and the upstream content-type. Used by
+        the Ruth proxy that fronts the browser <video> element — VAS
+        requires a Bearer token an <img>/<video> tag can't supply, and
+        it doesn't honor Range, so the proxy slices the bytes itself.
+
+        Bookmark clips range from ~50KB (10s) to ~46MB (21-min), so
+        full-buffer is acceptable. Switch to a streaming slice if larger
+        clips show up.
+        """
+        if not self._client:
+            raise VASConnectionError("Client not connected")
+        token = await self._ensure_valid_token()
+        response = await self._client.get(
+            f"/v2/bookmarks/{bookmark_id}/video",
+            headers=self._get_auth_headers(token),
+        )
+        self._raise_for_status(response)
+        content_type = response.headers.get("content-type", "video/mp4")
+        return response.content, content_type
+
     # -------------------------------------------------------------------------
     # Utility Methods
     # -------------------------------------------------------------------------
