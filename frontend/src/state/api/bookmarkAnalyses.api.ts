@@ -132,3 +132,9 @@ export async function listAnalysesForBookmark(
 export function getBookmarkPreviewFrameUrl(vasBookmarkId: string): string {
   return `/api/v1/bookmarks/${vasBookmarkId}/preview-frame`;
 }
+
+/** URL the <video> element points at. The proxy honors HTTP Range
+ *  so browser scrubbing works. */
+export function getBookmarkVideoUrl(vasBookmarkId: string): string {
+  return `/api/v1/bookmarks/${vasBookmarkId}/video`;
+}

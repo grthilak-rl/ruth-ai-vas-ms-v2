@@ -1,0 +1,67 @@
+/* Container — flex column, items left-aligned so the wrap sits at
+   the left edge of the available space (not centered). The wrap's
+   measured pixel width is what determines the rendered size. */
+.bm-view {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 0.5rem;
+  width: 100%;
+}
+
+/* The wrap's exact pixel width and height are applied INLINE by the
+   component, computed from the source aspect ratio + the available
+   container width capped at 75vh. The wrap IS the video's shape —
+   no letterboxing is possible because there is no extra width.
+   The defaults below only apply for the initial render before
+   measurement; the inline style overrides them. */
+.bm-view__wrap {
+  position: relative;
+  background: #000000;
+  border: 1px solid #e0e0e0;
+  border-radius: 6px;
+  overflow: hidden;
+  width: 100%;
+  /* Initial-render fallback: avoid a zero-height collapsed div
+     before the first measurement lands. */
+  aspect-ratio: 16 / 9;
+}
+
+/* Video fills the wrap exactly. No object-fit acrobatics — the wrap
+   matches the video's aspect ratio so the frame and the box coincide. */
+.bm-view__video {
+  display: block;
+  width: 100%;
+  height: 100%;
+  background: #000000;
+}
+
+/* Overlay canvas matches the wrap (= the video) edge-to-edge. */
+.bm-view__overlay {
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 100%;
+  pointer-events: none;
+}
+
+.bm-view__error {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  background: rgba(217, 48, 37, 0.92);
+  color: #ffffff;
+  padding: 0.75rem 1rem;
+  border-radius: 4px;
+  font-size: 0.9rem;
+  max-width: 80%;
+  text-align: center;
+}
+
+.bm-view__caption {
+  font-size: 0.8125rem;
+  color: #5f6368;
+  font-style: italic;
+}

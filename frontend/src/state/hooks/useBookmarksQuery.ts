@@ -14,9 +14,11 @@ export function useBookmarksListQuery(limit = 50) {
   return useQuery({
     queryKey: queryKeys.bookmarks.list,
     queryFn: () => listBookmarks(limit),
-    // Bookmarks are created by operator action (rare). One minute of
-    // freshness is plenty for a picker dropdown.
-    staleTime: 60 * 1000,
+    // Bookmarks are operator-created and change rarely; 5 minutes
+    // of freshness is plenty for a picker dropdown. This keeps
+    // navigating back to the page within 5 minutes instant — no
+    // refetch on remount.
+    staleTime: 5 * 60 * 1000,
   });
 }
 

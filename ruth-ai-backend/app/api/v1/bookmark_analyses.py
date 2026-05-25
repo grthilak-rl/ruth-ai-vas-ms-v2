@@ -15,7 +15,7 @@ from __future__ import annotations
 
 from uuid import UUID
 
-from fastapi import APIRouter, BackgroundTasks, HTTPException, Query, status
+from fastapi import APIRouter, BackgroundTasks, Header, HTTPException, Query, status
 from fastapi.responses import Response
 
 from app.core.logging import get_logger
@@ -201,4 +201,118 @@ async def get_bookmark_preview_frame(vas_bookmark_id: str) -> Response:
         content=image_bytes,
         media_type="image/jpeg",
         headers={"Cache-Control": "public, max-age=3600, immutable"},
+    )
+
+
+def _parse_range(
+    range_header: str | None, total: int
+) -> tuple[int, int] | None:
+    """Parse a single ``bytes=start-end`` Range header.
+
+    Returns ``(start, end_inclusive)`` clamped to ``[0, total-1]``, or
+    ``None`` for malformed/unsupported requests (multipart, suffix
+    forms, non-byte units). Callers should fall back to a full 200.
+    """
+    if not range_header:
+        return None
+    if not range_header.startswith("bytes="):
+        return None
+    spec = range_header[len("bytes=") :]
+    # Multi-range (``a-b,c-d``) is allowed by RFC but rarely used by
+    # browsers for <video>. Fall back to a full response.
+    if "," in spec:
+        return None
+    if "-" not in spec:
+        return None
+    start_str, end_str = spec.split("-", 1)
+    try:
+        if start_str == "":
+            # Suffix form ``bytes=-N`` — last N bytes.
+            if end_str == "":
+                return None
+            length = int(end_str)
+            if length <= 0:
+                return None
+            start = max(0, total - length)
+            end = total - 1
+        else:
+            start = int(start_str)
+            end = int(end_str) if end_str else total - 1
+    except ValueError:
+        return None
+    if start < 0 or start >= total:
+        return None
+    end = min(end, total - 1)
+    if end < start:
+        return None
+    return start, end
+
+
+@bookmark_subresource_router.get(
+    "/{vas_bookmark_id}/video",
+    summary="Bookmark video (proxy with Range support)",
+    description=(
+        "Server-side proxy for VAS's bookmark video. VAS requires a "
+        "Bearer token which a browser <video src> can't supply, and "
+        "doesn't honor Range, so this endpoint fetches the full file "
+        "from VAS and serves the requested byte range. Returns 206 "
+        "Partial Content for Range requests and 200 OK otherwise."
+    ),
+    responses={
+        404: {"model": ErrorResponse, "description": "Bookmark not found"},
+        503: {"model": ErrorResponse, "description": "VAS unreachable"},
+    },
+)
+async def get_bookmark_video(
+    vas_bookmark_id: str,
+    range_header: str | None = Header(default=None, alias="Range"),
+) -> Response:
+    vas = get_vas_client_optional()
+    if vas is None:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail={
+                "error": "vas_unavailable",
+                "message": "VAS client not initialized; cannot fetch video.",
+            },
+        )
+    try:
+        video_bytes, content_type = await vas.download_bookmark_video_bytes(
+            vas_bookmark_id
+        )
+    except VASNotFoundError as e:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail={"error": "bookmark_not_found", "message": str(e)},
+        ) from e
+    except VASError as e:
+        raise HTTPException(
+            status_code=status.HTTP_502_BAD_GATEWAY,
+            detail={"error": "vas_error", "message": str(e)},
+        ) from e
+
+    total = len(video_bytes)
+    rng = _parse_range(range_header, total)
+    common_headers = {
+        "Accept-Ranges": "bytes",
+        # Bookmark videos are immutable per id — short browser cache is safe.
+        "Cache-Control": "private, max-age=300",
+    }
+    if rng is None:
+        return Response(
+            content=video_bytes,
+            media_type=content_type,
+            headers={**common_headers, "Content-Length": str(total)},
+        )
+    start, end = rng
+    chunk = video_bytes[start : end + 1]
+    return Response(
+        content=chunk,
+        media_type=content_type,
+        status_code=status.HTTP_206_PARTIAL_CONTENT,
+        headers={
+            **common_headers,
+            "Content-Range": f"bytes {start}-{end}/{total}",
+            "Content-Length": str(end - start + 1),
+        },
     )

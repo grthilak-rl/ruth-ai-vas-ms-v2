@@ -18,7 +18,7 @@
   transition: all 0.2s ease;
 }
 
-.ai-model-selector__trigger:hover {
+.ai-model-selector__trigger:hover:not(:disabled) {
   background: var(--color-bg-secondary, #f3f4f6);
   border-color: var(--color-border-hover, #9ca3af);
 }
@@ -26,6 +26,17 @@
 .ai-model-selector__trigger:focus {
   outline: 2px solid var(--color-primary, #3b82f6);
   outline-offset: 1px;
+}
+
+/* Visually-disabled state. Only applies when the optional `disabled`
+   prop is set (default false). Live Camera Monitoring's call sites
+   omit the prop, so the trigger never receives the `disabled`
+   attribute and this rule never matches there. */
+.ai-model-selector__trigger:disabled {
+  background: #f1f3f4;
+  color: #9aa0a6;
+  border-color: #e0e0e0;
+  cursor: not-allowed;
 }
 
 .ai-model-selector__panel {

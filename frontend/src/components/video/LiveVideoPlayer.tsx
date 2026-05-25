@@ -1,14 +1,17 @@
 import { useState, useRef, useCallback, useEffect } from 'react';
 import { VideoErrorBoundary } from './VideoErrorBoundary';
 import { connectToStream, disconnectStream, type WebRTCConnection } from '../../services/webrtc';
-import { FallDetectionManager, type FallDetectionResult, type Detection, SKELETON_CONNECTIONS } from '../../services/fallDetection';
+import {
+  FallDetectionManager,
+  type FallDetectionResult,
+  type Detection,
+  drawFallDetections,
+  isPersonFallen,
+} from '../../services/fallDetection';
 import { PPEDetectionManager, type PPEDetectionResult, type PPEPersonDetection, drawPPEDetections } from '../../services/ppeDetection';
 import { TankDetectionManager, type TankDetectionResult, drawTankDetections } from '../../services/tankDetection';
 import { reportFallEvent, reportPPEEvent, type BoundingBox, type PPEViolationDetail } from '../../services/api';
 import './LiveVideoPlayer.css';
-
-// Model outputs coordinates in 640x640 space (matching POC)
-const MODEL_SIZE = 640;
 
 type PlayerState =
   | 'idle'
@@ -39,138 +42,6 @@ interface LiveVideoPlayerProps {
   isGeofencingEnabled?: boolean;
   tankCorners?: number[][];
   geofenceZones?: GeofenceZone[];
-}
-
-/**
- * Check if a detection represents a fallen person based on pose
- * Uses keypoint positions to determine if person is horizontal/fallen
- */
-function isPersonFallen(detection: Detection): boolean {
-  if (!detection.keypoints || detection.keypoints.length < 17) {
-    return false;
-  }
-
-  const keypoints = detection.keypoints;
-
-  // Get key body points (COCO format)
-  const leftShoulder = keypoints[5];
-  const rightShoulder = keypoints[6];
-  const leftHip = keypoints[11];
-  const rightHip = keypoints[12];
-  const leftAnkle = keypoints[15];
-  const rightAnkle = keypoints[16];
-
-  // Calculate average positions
-  const shoulderY = (leftShoulder.confidence > 0.3 && rightShoulder.confidence > 0.3)
-    ? (leftShoulder.y + rightShoulder.y) / 2
-    : null;
-  const hipY = (leftHip.confidence > 0.3 && rightHip.confidence > 0.3)
-    ? (leftHip.y + rightHip.y) / 2
-    : null;
-  const ankleY = (leftAnkle.confidence > 0.3 && rightAnkle.confidence > 0.3)
-    ? (leftAnkle.y + rightAnkle.y) / 2
-    : null;
-
-  // If we have shoulder and hip, check if person is roughly horizontal
-  if (shoulderY !== null && hipY !== null) {
-    const verticalDiff = Math.abs(shoulderY - hipY);
-    // If shoulders and hips are at similar Y level (horizontal), person may be fallen
-    // Normal standing: hip Y > shoulder Y by significant amount
-    // Fallen: hip Y ≈ shoulder Y (person is horizontal)
-    if (verticalDiff < 50) { // Threshold for "approximately same level"
-      return true;
-    }
-  }
-
-  // Alternative check: if ankles are at same level as hips/shoulders
-  if (ankleY !== null && hipY !== null) {
-    const ankleHipDiff = Math.abs(ankleY - hipY);
-    if (ankleHipDiff < 80) { // Person lying down
-      return true;
-    }
-  }
-
-  return false;
-}
-
-/**
- * Draw detection overlays (bounding boxes and skeletons) on canvas
- * Each detection is colored based on its own fall state
- */
-function drawDetections(
-  ctx: CanvasRenderingContext2D,
-  detections: Detection[],
-  canvasWidth: number,
-  canvasHeight: number,
-  _globalFallDetected: boolean // Kept for API compat, but we check per-detection
-): void {
-  // Scale factors from model coordinates (640x640) to canvas size
-  const scaleX = canvasWidth / MODEL_SIZE;
-  const scaleY = canvasHeight / MODEL_SIZE;
-
-  detections.forEach((detection, idx) => {
-    const [x1, y1, x2, y2] = detection.bbox;
-
-    // Check if THIS specific person is fallen
-    const isFallen = isPersonFallen(detection);
-
-    // Scale bounding box coordinates
-    const sx1 = x1 * scaleX;
-    const sy1 = y1 * scaleY;
-    const sx2 = x2 * scaleX;
-    const sy2 = y2 * scaleY;
-
-    // Draw bounding box - color based on individual detection state
-    ctx.strokeStyle = isFallen ? '#ef4444' : '#22c55e';
-    ctx.lineWidth = 3;
-    ctx.strokeRect(sx1, sy1, sx2 - sx1, sy2 - sy1);
-
-    // Draw label background
-    const label = isFallen ? `Person ${idx + 1} - FALL` : `Person ${idx + 1}`;
-    ctx.font = 'bold 14px sans-serif';
-    const textWidth = ctx.measureText(label).width;
-    ctx.fillStyle = isFallen ? '#ef4444' : '#22c55e';
-    ctx.fillRect(sx1, sy1 - 22, textWidth + 10, 22);
-
-    // Draw label text
-    ctx.fillStyle = '#ffffff';
-    ctx.fillText(label, sx1 + 5, sy1 - 6);
-
-    // Draw skeleton if keypoints exist
-    if (detection.keypoints && detection.keypoints.length >= 17) {
-      const keypoints = detection.keypoints;
-
-      // Draw skeleton connections
-      ctx.strokeStyle = isFallen ? '#fca5a5' : '#86efac';
-      ctx.lineWidth = 2;
-
-      SKELETON_CONNECTIONS.forEach(([i, j]) => {
-        const kp1 = keypoints[i];
-        const kp2 = keypoints[j];
-
-        // Only draw if both keypoints have sufficient confidence
-        if (kp1.confidence > 0.3 && kp2.confidence > 0.3) {
-          ctx.beginPath();
-          ctx.moveTo(kp1.x * scaleX, kp1.y * scaleY);
-          ctx.lineTo(kp2.x * scaleX, kp2.y * scaleY);
-          ctx.stroke();
-        }
-      });
-
-      // Draw keypoints
-      keypoints.forEach((kp) => {
-        if (kp.confidence > 0.3) {
-          ctx.beginPath();
-          ctx.arc(kp.x * scaleX, kp.y * scaleY, 4, 0, 2 * Math.PI);
-          ctx.fillStyle = isFallen ? '#ef4444' : '#22c55e';
-          ctx.fill();
-          ctx.strokeStyle = '#ffffff';
-          ctx.lineWidth = 1;
-          ctx.stroke();
-        }
-      });
-    }
-  });
 }
 
 export function LiveVideoPlayer({
@@ -367,12 +238,11 @@ export function LiveVideoPlayer({
 
     // Draw fall detections if enabled and available
     if (hasFallDetection && fallDetection.detections && fallDetection.detections.length > 0) {
-      drawDetections(
+      drawFallDetections(
         ctx,
         fallDetection.detections,
         canvas.width,
         canvas.height,
-        fallDetection.violation_detected
       );
     }
 
