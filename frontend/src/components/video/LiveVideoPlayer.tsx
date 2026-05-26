@@ -42,6 +42,21 @@ interface LiveVideoPlayerProps {
   isGeofencingEnabled?: boolean;
   tankCorners?: number[][];
   geofenceZones?: GeofenceZone[];
+  /**
+   * When true, connect to the live stream automatically on mount /
+   * when this prop flips on, instead of waiting for the user to
+   * click "Play Live Video". Off by default — only the monitoring
+   * grid opts in, so other callers (camera detail, fullscreen tab)
+   * keep their manual-play behaviour.
+   */
+  shouldAutoConnect?: boolean;
+  /**
+   * Delay before auto-connecting, in milliseconds. Lets the
+   * monitoring grid stagger N cameras so they don't all open
+   * WebRTC peers in the same tick. Ignored when shouldAutoConnect
+   * is false.
+   */
+  autoConnectDelayMs?: number;
 }
 
 export function LiveVideoPlayer({
@@ -57,6 +72,8 @@ export function LiveVideoPlayer({
   isGeofencingEnabled = false,
   tankCorners,
   geofenceZones,
+  shouldAutoConnect = false,
+  autoConnectDelayMs = 0,
 }: LiveVideoPlayerProps) {
   const [playerState, setPlayerState] = useState<PlayerState>(
     isAvailable ? 'idle' : 'offline'
@@ -578,6 +595,30 @@ export function LiveVideoPlayer({
       cleanup();
     };
   }, [cleanup]);
+
+  // Auto-connect on mount / when caller flips shouldAutoConnect on.
+  // Mirrors what a user clicking "Play Live Video" would do, but only
+  // when the consumer opts in (the monitoring grid does; detail and
+  // fullscreen don't). Strictly gated on playerState === 'idle' so
+  // this can't double-fire while already connecting/playing/reconnecting.
+  useEffect(() => {
+    if (!shouldAutoConnect) return;
+    if (!isAvailable) return;
+    if (playerState !== 'idle') return;
+
+    if (autoConnectDelayMs <= 0) {
+      handleConnect();
+      return;
+    }
+
+    const timeoutId = setTimeout(() => {
+      handleConnect();
+    }, autoConnectDelayMs);
+
+    return () => {
+      clearTimeout(timeoutId);
+    };
+  }, [shouldAutoConnect, autoConnectDelayMs, isAvailable, playerState, handleConnect]);
 
   // Render offline state
   if (playerState === 'offline' || !isAvailable) {

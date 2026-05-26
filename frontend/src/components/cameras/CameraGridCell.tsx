@@ -35,6 +35,10 @@ interface CameraGridCellProps {
   onModelToggle: (cameraId: string, modelId: string, enabled: boolean, config?: ModelConfig) => void;
   modelConfigs?: Record<string, ModelConfig>;
   onFullscreen: (cameraId: string) => void;
+  /** When true, the underlying player connects automatically on mount. */
+  shouldAutoConnect?: boolean;
+  /** Stagger delay so N cells don't open WebRTC peers simultaneously. */
+  autoConnectDelayMs?: number;
 }
 
 export function CameraGridCell({
@@ -46,6 +50,8 @@ export function CameraGridCell({
   onModelToggle,
   modelConfigs = {},
   onFullscreen,
+  shouldAutoConnect = false,
+  autoConnectDelayMs = 0,
 }: CameraGridCellProps) {
   const statusIndicator = useMemo(() => {
     switch (status) {
@@ -114,6 +120,8 @@ export function CameraGridCell({
           isGeofencingEnabled={isGeofencingActive}
           tankCorners={tankCorners}
           geofenceZones={geofenceZones}
+          shouldAutoConnect={shouldAutoConnect}
+          autoConnectDelayMs={autoConnectDelayMs}
         />
       </div>
 

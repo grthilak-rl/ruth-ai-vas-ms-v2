@@ -417,8 +417,28 @@ export function CameraMonitoringDashboard({
       <div
         className={`camera-monitoring-dashboard__grid camera-monitoring-dashboard__grid--${gridSize}x${gridSize}`}
       >
-        {gridCells.map((cell, index) =>
-          cell.type === 'camera' ? (
+        {gridCells.map((cell, index) => {
+          if (cell.type !== 'camera') {
+            return (
+              <div key={`empty-${index}`} className="camera-monitoring-dashboard__empty-cell">
+                <div className="camera-monitoring-dashboard__empty-cell-icon">+</div>
+                <p className="camera-monitoring-dashboard__empty-cell-text">Add Camera</p>
+                <p className="camera-monitoring-dashboard__empty-cell-subtext">
+                  Click to select from available cameras
+                </p>
+              </div>
+            );
+          }
+
+          // Auto-connect only cameras the backend reports as live.
+          // Stagger by the camera's position among selected cameras (not
+          // the grid index, so empty slots don't add gaps): mirrors VAS's
+          // ~500ms per-camera spacing to avoid an N-camera WebRTC burst.
+          const cameraIndex = selectedCameras.findIndex(c => c.id === cell.camera.id);
+          const shouldAutoConnect = cell.camera.streaming.video_live === true;
+          const autoConnectDelayMs = cameraIndex >= 0 ? cameraIndex * 500 : 0;
+
+          return (
             <CameraGridCell
               key={cell.camera.id}
               camera={cell.camera}
@@ -429,17 +449,11 @@ export function CameraMonitoringDashboard({
               onModelToggle={handleModelToggle}
               modelConfigs={modelConfigs[cell.camera.id]}
               onFullscreen={handleFullscreen}
+              shouldAutoConnect={shouldAutoConnect}
+              autoConnectDelayMs={autoConnectDelayMs}
             />
-          ) : (
-            <div key={`empty-${index}`} className="camera-monitoring-dashboard__empty-cell">
-              <div className="camera-monitoring-dashboard__empty-cell-icon">+</div>
-              <p className="camera-monitoring-dashboard__empty-cell-text">Add Camera</p>
-              <p className="camera-monitoring-dashboard__empty-cell-subtext">
-                Click to select from available cameras
-              </p>
-            </div>
-          )
-        )}
+          );
+        })}
       </div>
     </div>
   );
