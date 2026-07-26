@@ -65,3 +65,46 @@
   color: #5f6368;
   font-style: italic;
 }
+
+/* chane_tank_monitor click-to-set-ROI toolbar */
+.bm-view__roi-toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.5rem;
+  margin-top: 0.5rem;
+  padding: 0.5rem 0.75rem;
+  background: #f1f3f4;
+  border: 1px solid #dadce0;
+  border-radius: 6px;
+}
+
+.bm-view__roi-info {
+  font-size: 0.8125rem;
+  color: #3c4043;
+  margin-right: auto;
+}
+
+.bm-view__roi-toolbar button {
+  font-size: 0.8125rem;
+  padding: 0.3rem 0.7rem;
+  border: 1px solid #dadce0;
+  border-radius: 4px;
+  background: #ffffff;
+  cursor: pointer;
+}
+
+.bm-view__roi-toolbar button:hover {
+  background: #f8f9fa;
+}
+
+.bm-view__roi-confirm {
+  background: #1a73e8 !important;
+  color: #ffffff;
+  border-color: #1a73e8 !important;
+  font-weight: 600;
+}
+
+.bm-view__roi-confirm:hover {
+  background: #1765cc !important;
+}

@@ -1,4 +1,5 @@
 import { useState, useRef, useCallback, useEffect } from 'react';
+import type { MouseEvent as ReactMouseEvent } from 'react';
 import { VideoErrorBoundary } from './VideoErrorBoundary';
 import { connectToStream, disconnectStream, type WebRTCConnection } from '../../services/webrtc';
 import {
@@ -10,6 +11,8 @@ import {
 } from '../../services/fallDetection';
 import { PPEDetectionManager, type PPEDetectionResult, type PPEPersonDetection, drawPPEDetections } from '../../services/ppeDetection';
 import { TankDetectionManager, type TankDetectionResult, drawTankDetections } from '../../services/tankDetection';
+import { ChaneTankMonitorManager, type ChaneTankResult, drawChaneTankMonitor } from '../../services/chaneTankMonitor';
+import { estimateRadiusFromClick } from '../../services/roiRayCast';
 import { reportFallEvent, reportPPEEvent, type BoundingBox, type PPEViolationDetail } from '../../services/api';
 import './LiveVideoPlayer.css';
 
@@ -39,8 +42,12 @@ interface LiveVideoPlayerProps {
   isFallDetectionEnabled?: boolean;
   isPPEDetectionEnabled?: boolean;
   isTankOverflowEnabled?: boolean;
+  isChaneTankEnabled?: boolean;
   isGeofencingEnabled?: boolean;
   tankCorners?: number[][];
+  chaneTankRoiCircle?: { cx: number; cy: number; r: number };
+  /** chane_tank_monitor: commit an operator-clicked ROI circle (intrinsic px). */
+  onChaneRoiConfirm?: (roi: { cx: number; cy: number; r: number }) => void;
   geofenceZones?: GeofenceZone[];
   /**
    * When true, connect to the live stream automatically on mount /
@@ -69,8 +76,11 @@ export function LiveVideoPlayer({
   isFallDetectionEnabled = true,
   isPPEDetectionEnabled = false,
   isTankOverflowEnabled = false,
+  isChaneTankEnabled = false,
   isGeofencingEnabled = false,
   tankCorners,
+  chaneTankRoiCircle,
+  onChaneRoiConfirm,
   geofenceZones,
   shouldAutoConnect = false,
   autoConnectDelayMs = 0,
@@ -82,6 +92,25 @@ export function LiveVideoPlayer({
   const [fallDetection, setFallDetection] = useState<FallDetectionResult | null>(null);
   const [ppeDetection, setPPEDetection] = useState<PPEDetectionResult | null>(null);
   const [tankDetection, setTankDetection] = useState<TankDetectionResult | null>(null);
+  const [chaneTankDetection, setChaneTankDetection] = useState<ChaneTankResult | null>(null);
+  // chane_tank_monitor click-to-set-ROI: provisional circle (intrinsic px),
+  // not committed until the operator confirms.
+  const [provisionalRoi, setProvisionalRoi] = useState<{ cx: number; cy: number; r: number } | null>(null);
+  // Explicit ROI selection state. true => overlay captures clicks. Confirm /
+  // Cancel exits; the player controls then work. Only "Re-select ROI" re-enters.
+  const [roiSelecting, setRoiSelecting] = useState<boolean>(false);
+
+  // Auto-enter ROI selection when chane is enabled with no confirmed ROI yet;
+  // exit whenever chane is disabled. A confirmed ROI keeps us OUT of selection
+  // (player controls live) until the operator clicks "Re-select ROI".
+  useEffect(() => {
+    if (isChaneTankEnabled && !!onChaneRoiConfirm && !chaneTankRoiCircle) {
+      setRoiSelecting(true);
+    } else if (!isChaneTankEnabled) {
+      setRoiSelecting(false);
+      setProvisionalRoi(null);
+    }
+  }, [isChaneTankEnabled, onChaneRoiConfirm, chaneTankRoiCircle]);
 
   const videoRef = useRef<HTMLVideoElement>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
@@ -90,6 +119,7 @@ export function LiveVideoPlayer({
   const fallDetectionRef = useRef<FallDetectionManager | null>(null);
   const ppeDetectionRef = useRef<PPEDetectionManager | null>(null);
   const tankDetectionRef = useRef<TankDetectionManager | null>(null);
+  const chaneTankDetectionRef = useRef<ChaneTankMonitorManager | null>(null);
   const lastFallReportTimeRef = useRef<number>(0);
   const lastPPEReportTimeRef = useRef<number>(0);
   const streamIdRef = useRef<string | null>(null);  // Use ref for immediate access in callbacks
@@ -214,6 +244,7 @@ export function LiveVideoPlayer({
     const hasFallDetection = fallDetection && isFallDetectionEnabled;
     const hasPPEDetection = ppeDetection && isPPEDetectionEnabled;
     const hasTankDetection = tankDetection && isTankOverflowEnabled && tankDetection.level_percent !== undefined;
+    const hasChaneTankDetection = chaneTankDetection && isChaneTankEnabled && chaneTankDetection.fill_percentage !== undefined;
     const hasGeofenceZones = isGeofencingEnabled && geofenceZones && geofenceZones.length > 0;
 
     // Debug logging
@@ -229,7 +260,12 @@ export function LiveVideoPlayer({
       });
     }
 
-    if (!canvas || !video || (!hasFallDetection && !hasPPEDetection && !hasTankDetection && !hasGeofenceZones) || !showOverlays || !isDetectionActive) {
+    // The provisional ROI must render even before any inference result and
+    // regardless of showOverlays/isDetectionActive, so the operator can place
+    // it while paused. It's handled as a separate concern below.
+    const onlyProvisional = !!provisionalRoi && video?.videoWidth ? true : false;
+
+    if (!canvas || !video || ((!hasFallDetection && !hasPPEDetection && !hasTankDetection && !hasChaneTankDetection && !hasGeofenceZones) && !onlyProvisional) || (!onlyProvisional && (!showOverlays || !isDetectionActive))) {
       // Clear canvas if detection is disabled
       if (canvas) {
         const ctx = canvas.getContext('2d');
@@ -290,6 +326,40 @@ export function LiveVideoPlayer({
         canvas.height,
         tankCorners
       );
+    }
+
+    // Draw chane tank monitor overlay if enabled and available
+    if (hasChaneTankDetection) {
+      drawChaneTankMonitor(
+        ctx,
+        chaneTankDetection!,
+        canvas.width,
+        canvas.height,
+      );
+    }
+
+    // Provisional ROI circle (chane_tank_monitor click-to-set, pre-confirm).
+    if (provisionalRoi && video.videoWidth > 0) {
+      const sx = canvas.width / video.videoWidth;
+      const sy = canvas.height / video.videoHeight;
+      const px = provisionalRoi.cx * sx;
+      const py = provisionalRoi.cy * sy;
+      const pr = provisionalRoi.r * ((sx + sy) / 2);
+      ctx.save();
+      ctx.strokeStyle = '#f59e0b';
+      ctx.lineWidth = 2;
+      ctx.setLineDash([6, 4]);
+      ctx.beginPath();
+      ctx.arc(px, py, pr, 0, Math.PI * 2);
+      ctx.stroke();
+      ctx.setLineDash([]);
+      ctx.beginPath();
+      ctx.arc(px, py, 4, 0, Math.PI * 2);
+      ctx.fillStyle = '#f59e0b';
+      ctx.fill();
+      ctx.font = 'bold 13px sans-serif';
+      ctx.fillText('provisional ROI — Confirm to apply', px - pr, py - pr - 6);
+      ctx.restore();
     }
 
     // Draw geofence zones if enabled and available
@@ -354,7 +424,7 @@ export function LiveVideoPlayer({
         ctx.restore();
       }
     }
-  }, [fallDetection, ppeDetection, tankDetection, showOverlays, isDetectionActive, isFallDetectionEnabled, isPPEDetectionEnabled, isTankOverflowEnabled, isGeofencingEnabled, tankCorners, geofenceZones]);
+  }, [fallDetection, ppeDetection, tankDetection, chaneTankDetection, provisionalRoi, showOverlays, isDetectionActive, isFallDetectionEnabled, isPPEDetectionEnabled, isTankOverflowEnabled, isChaneTankEnabled, isGeofencingEnabled, tankCorners, geofenceZones]);
 
   // Cleanup function
   const cleanup = useCallback(async () => {
@@ -378,6 +448,11 @@ export function LiveVideoPlayer({
       tankDetectionRef.current = null;
     }
 
+    if (chaneTankDetectionRef.current) {
+      chaneTankDetectionRef.current.stop();
+      chaneTankDetectionRef.current = null;
+    }
+
     if (connectionRef.current) {
       await disconnectStream(connectionRef.current);
       connectionRef.current = null;
@@ -389,6 +464,8 @@ export function LiveVideoPlayer({
 
     setFallDetection(null);
     setPPEDetection(null);
+    setTankDetection(null);
+    setChaneTankDetection(null);
     streamIdRef.current = null;
   }, []);
 
@@ -464,6 +541,19 @@ export function LiveVideoPlayer({
             });
             console.log('[LiveVideoPlayer] Tank overflow detection started');
           }
+
+          // Start chane tank monitor if enabled
+          if (isChaneTankEnabled) {
+            chaneTankDetectionRef.current = new ChaneTankMonitorManager({
+              fps: 2,
+              roiCircle: chaneTankRoiCircle,
+            });
+            chaneTankDetectionRef.current.start(video, (result) => {
+              console.log('[LiveVideoPlayer] Got chane tank result:', result.fill_percentage.toFixed(1) + '%', 'roi:', result.roi?.source);
+              setChaneTankDetection(result);
+            });
+            console.log('[LiveVideoPlayer] Chane tank monitor started');
+          }
         }
       } else {
         console.error('[LiveVideoPlayer] Video element not found');
@@ -475,7 +565,7 @@ export function LiveVideoPlayer({
       setPlayerState('error');
       setConnectionStatus('Connection failed');
     }
-  }, [deviceId, isDetectionActive, isFallDetectionEnabled, isPPEDetectionEnabled, isTankOverflowEnabled, tankCorners, reportFallToBackend, reportPPEToBackend]);
+  }, [deviceId, isDetectionActive, isFallDetectionEnabled, isPPEDetectionEnabled, isTankOverflowEnabled, isChaneTankEnabled, tankCorners, chaneTankRoiCircle, reportFallToBackend, reportPPEToBackend]);
 
   // Handle retry
   const handleRetry = useCallback(async () => {
@@ -660,6 +750,38 @@ export function LiveVideoPlayer({
     );
   }
 
+  // chane_tank_monitor click-to-set-ROI handlers (live view).
+  const roiSelectable = isChaneTankEnabled && !!onChaneRoiConfirm;
+  const handleRoiClick = (e: ReactMouseEvent<HTMLCanvasElement>) => {
+    // Only react while actively selecting; outside selection the overlay is
+    // click-through (pointer-events: none) and this never fires.
+    if (!roiSelectable || !roiSelecting) return;
+    const video = videoRef.current;
+    const canvas = canvasRef.current;
+    if (!video || !canvas || video.videoWidth === 0) return;
+    const rect = canvas.getBoundingClientRect();
+    const cx = Math.round(((e.clientX - rect.left) / rect.width) * video.videoWidth);
+    const cy = Math.round(((e.clientY - rect.top) / rect.height) * video.videoHeight);
+    const r = estimateRadiusFromClick(video, cx, cy);
+    setProvisionalRoi({ cx, cy, r });
+  };
+  const nudgeRoiRadius = (delta: number) =>
+    setProvisionalRoi((prev) => (prev ? { ...prev, r: Math.max(5, prev.r + delta) } : prev));
+  const confirmRoiLive = () => {
+    if (provisionalRoi && onChaneRoiConfirm) onChaneRoiConfirm({ ...provisionalRoi });
+    setProvisionalRoi(null);
+    // EXIT selection mode so the player controls become live again.
+    setRoiSelecting(false);
+  };
+  const cancelRoiLive = () => {
+    setProvisionalRoi(null);
+    setRoiSelecting(false);
+  };
+  const reselectRoiLive = () => {
+    setProvisionalRoi(null);
+    setRoiSelecting(true);
+  };
+
   return (
     <VideoErrorBoundary deviceName={deviceName}>
       <div className={`live-video-player live-video-player--${playerState}`}>
@@ -676,7 +798,36 @@ export function LiveVideoPlayer({
         <canvas
           ref={canvasRef}
           className="live-video-player__detection-canvas"
+          onClick={handleRoiClick}
+          // Capture clicks only while picking an ROI for chane_tank_monitor.
+          style={{ pointerEvents: roiSelecting ? 'auto' : 'none' }}
         />
+
+        {/* chane_tank_monitor ROI toolbar (live view) */}
+        {roiSelectable && (
+          <div className="live-video-player__roi-toolbar">
+            {roiSelecting ? (
+              provisionalRoi ? (
+                <>
+                  <span>
+                    ROI ({provisionalRoi.cx}, {provisionalRoi.cy}) r {provisionalRoi.r}
+                  </span>
+                  <button type="button" onClick={() => nudgeRoiRadius(-5)}>r −</button>
+                  <button type="button" onClick={() => nudgeRoiRadius(5)}>r +</button>
+                  <button type="button" onClick={confirmRoiLive}>Confirm ROI</button>
+                  <button type="button" onClick={cancelRoiLive}>Cancel</button>
+                </>
+              ) : (
+                <span>Click the tank-opening center, then Confirm.</span>
+              )
+            ) : (
+              <>
+                <span>{chaneTankRoiCircle ? 'ROI set — controls live' : 'No ROI set'}</span>
+                <button type="button" onClick={reselectRoiLive}>Re-select ROI</button>
+              </>
+            )}
+          </div>
+        )}
 
         {/* Idle state overlay */}
         {playerState === 'idle' && (

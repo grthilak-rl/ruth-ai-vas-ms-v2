@@ -44,6 +44,9 @@ export interface ModelConfig {
   // Geo-fencing fields
   zones?: ZoneConfig[];
 
+  // Chane tank monitor: optional manual circular ROI (else auto-detect/center)
+  roi_circle?: { cx: number; cy: number; r: number };
+
   // Allow additional fields for future models
   [key: string]: any;
 }

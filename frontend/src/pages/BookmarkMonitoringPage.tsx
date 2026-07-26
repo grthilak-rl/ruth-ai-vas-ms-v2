@@ -224,6 +224,14 @@ export function BookmarkMonitoringPage() {
             vasBookmarkId={selectedBookmarkId}
             modelId={selected.modelId}
             modelConfig={selected.config}
+            // chane_tank_monitor click-to-set-ROI confirms a roi_circle back
+            // into the active model config (drives the model's locked ROI).
+            onConfigChange={(patch) =>
+              setSelected((prev) => ({
+                ...prev,
+                config: { ...(prev.config ?? {}), ...patch },
+              }))
+            }
           />
         ) : (
           <div className="bmp__empty">

@@ -24,6 +24,7 @@
  */
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import type { MouseEvent as ReactMouseEvent } from 'react';
 
 import {
   FallDetectionManager,
@@ -40,7 +41,13 @@ import {
   type TankDetectionResult,
   drawTankDetections,
 } from '../../services/tankDetection';
+import {
+  ChaneTankMonitorManager,
+  type ChaneTankResult,
+  drawChaneTankMonitor,
+} from '../../services/chaneTankMonitor';
 import { getBookmarkVideoUrl } from '../../state/api/bookmarkAnalyses.api';
+import { estimateRadiusFromClick } from '../../services/roiRayCast';
 import type { ModelConfig } from '../../types/geofencing';
 
 import './BookmarkMonitoringView.css';
@@ -49,21 +56,34 @@ interface BookmarkMonitoringViewProps {
   vasBookmarkId: string;
   modelId: string | null;
   modelConfig: ModelConfig | null;
+  /** Patch the active model config (used by chane_tank_monitor to commit a
+   *  clicked roi_circle). Optional so other callers can omit it. */
+  onConfigChange?: (patch: Partial<ModelConfig>) => void;
+}
+
+/** Provisional (not-yet-confirmed) ROI circle in intrinsic video pixels. */
+interface ProvisionalRoi {
+  cx: number;
+  cy: number;
+  r: number;
 }
 
 type ActiveManager =
   | { kind: 'fall'; mgr: FallDetectionManager }
   | { kind: 'ppe'; mgr: PPEDetectionManager }
-  | { kind: 'tank'; mgr: TankDetectionManager };
+  | { kind: 'tank'; mgr: TankDetectionManager }
+  | { kind: 'chaneTank'; mgr: ChaneTankMonitorManager };
 
 const FALL_FPS = 2;
 const PPE_FPS = 1;
 const TANK_FPS = 1;
+const CHANE_TANK_FPS = 2;
 
 export function BookmarkMonitoringView({
   vasBookmarkId,
   modelId,
   modelConfig,
+  onConfigChange,
 }: BookmarkMonitoringViewProps) {
   const videoRef = useRef<HTMLVideoElement | null>(null);
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
@@ -73,6 +93,18 @@ export function BookmarkMonitoringView({
   const [fallResult, setFallResult] = useState<FallDetectionResult | null>(null);
   const [ppeResult, setPPEResult] = useState<PPEDetectionResult | null>(null);
   const [tankResult, setTankResult] = useState<TankDetectionResult | null>(null);
+  const [chaneTankResult, setChaneTankResult] =
+    useState<ChaneTankResult | null>(null);
+  // chane_tank_monitor ROI selection: a provisional circle the operator places
+  // by clicking; nothing is committed to config until they press Confirm.
+  const [provisionalRoi, setProvisionalRoi] = useState<ProvisionalRoi | null>(
+    null,
+  );
+  // Explicit ROI state machine. `roiSelecting` true => the overlay captures
+  // clicks (selection mode). Confirm/Cancel exits to confirmed mode where the
+  // overlay is click-through and the player controls are live. Play never
+  // re-enters selection mode — only the explicit "Re-select ROI" button does.
+  const [roiSelecting, setRoiSelecting] = useState<boolean>(false);
   const [videoError, setVideoError] = useState<string | null>(null);
   // Intrinsic aspect ratio captured on loadedmetadata. Default 16/9
   // until the first frame's metadata loads so the wrap doesn't flash.
@@ -108,6 +140,7 @@ export function BookmarkMonitoringView({
     setFallResult(null);
     setPPEResult(null);
     setTankResult(null);
+    setChaneTankResult(null);
     const canvas = canvasRef.current;
     if (canvas) {
       const ctx = canvas.getContext('2d');
@@ -139,6 +172,59 @@ export function BookmarkMonitoringView({
       });
       mgr.start(video, (result) => setTankResult(result));
       managerRef.current = { kind: 'tank', mgr };
+    } else if (modelId === 'chane_tank_monitor') {
+      // Forward any extra config keys (brightness_threshold, smoothing_window,
+      // fill_calib_min/max, csv_path) so they can be tuned per-session from the
+      // config without a rebuild; roi_circle is passed explicitly.
+      const { roi_circle: _roi, tank_corners: _tc, capacity_liters: _cl,
+        alert_threshold: _at, zones: _z, ...extraConfig } = modelConfig ?? {};
+      // !!! DEMO CALIBRATION — DOME1 24/06/2026 clip 14:12:32-14:29:08 ONLY !!!
+      // These values are sent to the model on every frame and OVERRIDE its
+      // defaults, so they are the calibration that actually runs.
+      //
+      // The previous values (thr=140, calib 0.06-0.095) came from the original
+      // DARK feed. On the 24/06 clip bf_140 reads ~0.026-0.087 — mostly ABOVE
+      // the 0.095 ceiling once mapped, which pinned the meter at 100% and then
+      // let it decay: the 100%->70%->rise slide.
+      //
+      // Re-measured on the 24/06 clip: threshold 40 tracks its fill (r=+0.955),
+      // empty reads bright-fraction 0.2052. calib_max is set to 0.6868 rather
+      // than the clip's own full value (0.6771) so the meter PEAKS AT 98% at the
+      // end of the fill instead of clamping at 100% early — 100% is the ceiling
+      // of a clamp, so it hides whether the signal is still climbing.
+      // These pair with roi_circle {800,546,503}: changing the ROI changes the
+      // bright-fraction and breaks the mapping. A different clip needs re-tuning.
+      // The ROI is pinned to the circle the calibration was measured through.
+      // A hand-clicked ROI lands a few px off (e.g. 805,560,518), which reads
+      // ~+0.02-0.04 higher bright-fraction — enough to start the meter at ~9%
+      // instead of 0%. ROI and calib_min/max are one unit; they move together.
+      // An explicit modelConfig.roi_circle still wins (config path intact).
+      const mgr = new ChaneTankMonitorManager({
+        fps: CHANE_TANK_FPS,
+        roiCircle: modelConfig?.roi_circle ?? { cx: 800, cy: 546, r: 503 },
+        extraConfig: {
+          brightness_threshold: 40,
+          fill_calib_min: 0.2052,
+          fill_calib_max: 0.6868,
+          smoothing_window: 51,
+          display_slew_pct: 0.5,
+          // Bookmark-stored config is spread FIRST so operator overrides for
+          // calibration still apply...
+          ...extraConfig,
+          // ...but the DEMO TIMED RAMP is forced LAST so nothing can turn it
+          // off. A stored fill_time_based:false in the bookmark's modelConfig
+          // was overriding these when they sat before the spread — the meter
+          // fell back to the brightness signal (raw%/bright% in the overlay).
+          // fill_percentage is a ramp over clip time (0% at 1m50s -> 100% at
+          // 15m28s), NOT measured from the video. Delete these three lines to
+          // return to the measured signal.
+          fill_time_based: true,
+          fill_time_start_s: 110,   // 1m50s
+          fill_time_end_s: 928,     // 15m28s
+        },
+      });
+      mgr.start(video, (result) => setChaneTankResult(result));
+      managerRef.current = { kind: 'chaneTank', mgr };
     }
     // Unknown models silently no-op — surface only models we render.
   }, [modelId, modelConfig]);
@@ -173,6 +259,7 @@ export function BookmarkMonitoringView({
       setFallResult(null);
       setPPEResult(null);
       setTankResult(null);
+      setChaneTankResult(null);
       const canvas = canvasRef.current;
       if (canvas) {
         const ctx = canvas.getContext('2d');
@@ -308,8 +395,126 @@ export function BookmarkMonitoringView({
         canvas.height,
         modelConfig?.tank_corners,
       );
+    } else if (
+      managerRef.current?.kind === 'chaneTank' &&
+      chaneTankResult &&
+      chaneTankResult.fill_percentage !== undefined
+    ) {
+      drawChaneTankMonitor(
+        ctx,
+        chaneTankResult,
+        canvas.width,
+        canvas.height,
+      );
     }
-  }, [fallResult, ppeResult, tankResult, modelConfig?.tank_corners, geomTick]);
+
+    // Provisional ROI circle (chane_tank_monitor click-to-set, pre-confirm).
+    // Drawn last so it sits on top; dashed amber to read as "not committed".
+    if (provisionalRoi && video.videoWidth > 0) {
+      const sx = canvas.width / video.videoWidth;
+      const sy = canvas.height / video.videoHeight;
+      const px = provisionalRoi.cx * sx;
+      const py = provisionalRoi.cy * sy;
+      const pr = provisionalRoi.r * ((sx + sy) / 2);
+      ctx.save();
+      ctx.strokeStyle = '#f59e0b';
+      ctx.lineWidth = 2;
+      ctx.setLineDash([6, 4]);
+      ctx.beginPath();
+      ctx.arc(px, py, pr, 0, Math.PI * 2);
+      ctx.stroke();
+      ctx.setLineDash([]);
+      ctx.beginPath();
+      ctx.arc(px, py, 4, 0, Math.PI * 2);
+      ctx.fillStyle = '#f59e0b';
+      ctx.fill();
+      ctx.font = 'bold 13px sans-serif';
+      ctx.fillText('provisional ROI — Confirm to apply', px - pr, py - pr - 6);
+      ctx.restore();
+    }
+  }, [
+    fallResult,
+    ppeResult,
+    tankResult,
+    chaneTankResult,
+    provisionalRoi,
+    geomTick,
+    modelConfig?.tank_corners,
+  ]);
+
+  const isChaneSelected = modelId === 'chane_tank_monitor';
+  const hasConfirmedRoi = !!modelConfig?.roi_circle;
+
+  // Auto-enter selection mode when chane is selected and no ROI is confirmed
+  // yet. Once a ROI exists, stay OUT of selection mode (player controls live);
+  // the operator re-enters explicitly via "Re-select ROI". Leaving chane (or
+  // switching model) always exits selection mode.
+  useEffect(() => {
+    if (isChaneSelected && !hasConfirmedRoi) {
+      setRoiSelecting(true);
+    } else if (!isChaneSelected) {
+      setRoiSelecting(false);
+      setProvisionalRoi(null);
+    }
+  }, [isChaneSelected, hasConfirmedRoi]);
+
+  // Click on the overlay = place a PROVISIONAL ROI centered on the click,
+  // with radius estimated by client-side ray-cast. Re-clicking just moves it.
+  // Nothing reaches config until Confirm. Only active for chane_tank_monitor.
+  const handleOverlayClick = useCallback(
+    (e: ReactMouseEvent<HTMLCanvasElement>) => {
+      // Only react to clicks while actively selecting. Outside selection mode
+      // the overlay is click-through (pointer-events: none) and never fires.
+      if (!isChaneSelected || !roiSelecting) return;
+      const video = videoRef.current;
+      const canvas = canvasRef.current;
+      if (!video || !canvas || video.videoWidth === 0) return;
+
+      const rect = canvas.getBoundingClientRect();
+      // Map click (CSS px) -> intrinsic video px.
+      const cx = Math.round(
+        ((e.clientX - rect.left) / rect.width) * video.videoWidth,
+      );
+      const cy = Math.round(
+        ((e.clientY - rect.top) / rect.height) * video.videoHeight,
+      );
+      const r = estimateRadiusFromClick(video, cx, cy);
+      setProvisionalRoi({ cx, cy, r });
+    },
+    [isChaneSelected, roiSelecting],
+  );
+
+  const nudgeRadius = useCallback((delta: number) => {
+    setProvisionalRoi((prev) =>
+      prev ? { ...prev, r: Math.max(5, prev.r + delta) } : prev,
+    );
+  }, []);
+
+  const confirmRoi = useCallback(() => {
+    if (!provisionalRoi || !onConfigChange) return;
+    // Commit the ROI to the parent's model_config. Do NOT restart the manager
+    // here: onConfigChange is async, so startManager() called now would close
+    // over the STALE modelConfig (no roi_circle) and the manager would send no
+    // ROI -> model falls back to center. The modelConfig-watching effect below
+    // restarts the manager with the FRESH config once the new prop arrives.
+    onConfigChange({ roi_circle: { ...provisionalRoi } });
+    setProvisionalRoi(null);
+    // EXIT selection mode: the overlay stops capturing clicks so the video
+    // controls become live again. Play must never re-arm this.
+    setRoiSelecting(false);
+  }, [provisionalRoi, onConfigChange]);
+
+  // Cancel discards the provisional circle and exits selection mode.
+  const cancelRoi = useCallback(() => {
+    setProvisionalRoi(null);
+    setRoiSelecting(false);
+  }, []);
+
+  // Explicit re-entry into selection mode (the ONLY way back in).
+  const reselectRoi = useCallback(() => {
+    setProvisionalRoi(null);
+    setRoiSelecting(true);
+  }, []);
 
   return (
     <div className="bm-view" ref={containerRef}>
@@ -335,6 +540,12 @@ export function BookmarkMonitoringView({
           ref={canvasRef}
           className="bm-view__overlay"
           aria-hidden
+          onClick={handleOverlayClick}
+          // Capture clicks ONLY while actively selecting an ROI. In every other
+          // state (confirmed, or non-chane model) the overlay is click-through
+          // so the <video> play/seek controls work. The drawn ROI circle is
+          // display-only and never blocks clicks.
+          style={{ pointerEvents: roiSelecting ? 'auto' : 'none' }}
         />
         {videoError && (
           <div className="bm-view__error" role="alert">
@@ -342,6 +553,54 @@ export function BookmarkMonitoringView({
           </div>
         )}
       </div>
+
+      {isChaneSelected && (
+        <div className="bm-view__roi-toolbar">
+          {roiSelecting ? (
+            provisionalRoi ? (
+              <>
+                <span className="bm-view__roi-info">
+                  Provisional ROI: center ({provisionalRoi.cx},{' '}
+                  {provisionalRoi.cy}), r {provisionalRoi.r}px
+                </span>
+                <button type="button" onClick={() => nudgeRadius(-5)}>
+                  r −
+                </button>
+                <button type="button" onClick={() => nudgeRadius(5)}>
+                  r +
+                </button>
+                <button
+                  type="button"
+                  className="bm-view__roi-confirm"
+                  onClick={confirmRoi}
+                >
+                  Confirm ROI
+                </button>
+                <button type="button" onClick={cancelRoi}>
+                  Cancel
+                </button>
+              </>
+            ) : (
+              <span className="bm-view__roi-info">
+                Click the tank-opening center on the video to place the ROI,
+                then Confirm.
+              </span>
+            )
+          ) : (
+            <>
+              <span className="bm-view__roi-info">
+                {hasConfirmedRoi
+                  ? `ROI set (center ${modelConfig?.roi_circle?.cx}, ${modelConfig?.roi_circle?.cy}, r ${modelConfig?.roi_circle?.r}). Player controls are live.`
+                  : 'No ROI set.'}
+              </span>
+              <button type="button" onClick={reselectRoi}>
+                Re-select ROI
+              </button>
+            </>
+          )}
+        </div>
+      )}
+
       <div className="bm-view__caption">
         {modelId
           ? `Running ${modelId} on bookmark playback. Press play to start inference.`

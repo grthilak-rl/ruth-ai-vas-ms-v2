@@ -1,0 +1,124 @@
+# Chane Tank Monitor Model Contract
+# Version: 1.0.0
+# Temporal tank-fill monitoring using a blend of frame-difference,
+# optical-flow, and background-residual signals inside a circular ROI.
+
+# Contract schema version (required)
+contract_schema_version: "1.0.0"
+
+# Model identity (required)
+model_id: "chane_tank_monitor"
+version: "1.0.0"
+display_name: "Chane Tank Monitor"
+description: "Temporal tank-fill monitoring: blends frame-difference, optical-flow, and background residual inside a circular ROI to estimate fill level and flag anomalies."
+author: "Ruth AI Team"
+
+# Input specification (required)
+# NOTE: type is "frame" (one frame per call) not "temporal": the runtime feeds
+# single frames and "temporal" would require an input.temporal clip reference.
+# Cross-frame temporal state (blend history, MOG2, prev frame) is kept inside
+# the model session itself, not assembled by the runtime.
+input:
+  type: "frame"
+  format: "raw_bgr"
+  min_width: 320
+  min_height: 240
+  max_width: 4096
+  max_height: 4096
+  channels: 3
+
+# Output specification (required)
+output:
+  schema_version: "1.0"
+  schema:
+    fill_percentage:
+      type: "number"
+      min: 0.0
+      max: 100.0
+      description: "Monotonic fill level for display (0-100), bright-area based; never decreases during a session"
+    fill_raw:
+      type: "number"
+      min: 0.0
+      max: 100.0
+      description: "Unclamped (non-monotonic) mapped fill from smoothed bright fraction — the true signal, for analysis"
+    bright_fraction:
+      type: "number"
+      min: 0.0
+      max: 1.0
+      description: "Raw fraction of bright (reflective surface) pixels inside the ROI this frame"
+    bright_fraction_smoothed:
+      type: "number"
+      min: 0.0
+      max: 1.0
+      description: "Temporally smoothed bright fraction over the smoothing window"
+    mean_brightness:
+      type: "number"
+      description: "Mean grayscale brightness inside the ROI this frame"
+    motion_blend:
+      type: "number"
+      description: "Frame-diff motion signal inside ROI (instrumentation only — NOT used for fill)"
+    confidence:
+      type: "number"
+      min: 0.0
+      max: 1.0
+      description: "Detection confidence"
+    roi:
+      type: "object"
+      description: "The circular ROI used this session"
+      properties:
+        cx:
+          type: "number"
+          description: "ROI center x"
+        cy:
+          type: "number"
+          description: "ROI center y"
+        r:
+          type: "number"
+          description: "ROI radius"
+        source:
+          type: "string"
+          enum:
+            - "config"
+            - "demo_default"
+            - "fallback"
+          description: "How the ROI was resolved: config (operator click / manual), demo_default (hardcoded manhole ROI for the DOME1 24/06 demo clip, applied only at 1920x1080 while no config channel exists), or fallback (center of frame)"
+    metadata:
+      type: "object"
+      description: "Additional monitoring metadata"
+
+# Hardware compatibility (required) — classical CV, CPU only.
+hardware:
+  supports_cpu: true
+  supports_gpu: false
+  supports_jetson: true
+  min_ram_mb: 512
+  min_gpu_memory_mb: 0
+
+# Performance hints (required)
+performance:
+  inference_time_hint_ms: 80
+  recommended_fps: 2
+  max_fps: 5
+  recommended_batch_size: 1
+  warmup_iterations: 1
+
+# Resource limits (optional but recommended)
+limits:
+  max_memory_mb: 1024
+  inference_timeout_ms: 3000
+  preprocessing_timeout_ms: 500
+  postprocessing_timeout_ms: 500
+  max_concurrent_inferences: 1
+
+# Model capabilities (optional)
+capabilities:
+  supports_batching: false
+  supports_async: false
+  provides_tracking: false
+  confidence_calibrated: false
+  provides_bounding_boxes: false
+  provides_keypoints: false
+
+# Entry points (optional, defaults shown)
+entry_points:
+  inference: "inference.py"

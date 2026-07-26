@@ -388,3 +388,29 @@
 .video-error-fallback__retry:hover {
   background-color: #f0f0f0;
 }
+
+/* chane_tank_monitor ROI toolbar (live view) */
+.live-video-player__roi-toolbar {
+  position: absolute;
+  left: 8px;
+  bottom: 8px;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 8px;
+  background: rgba(0, 0, 0, 0.7);
+  border: 1px solid #f59e0b;
+  border-radius: 6px;
+  color: #fff;
+  font-size: 12px;
+  z-index: 5;
+}
+.live-video-player__roi-toolbar button {
+  font-size: 12px;
+  padding: 2px 8px;
+  border: 1px solid #888;
+  border-radius: 4px;
+  background: #fff;
+  color: #111;
+  cursor: pointer;
+}

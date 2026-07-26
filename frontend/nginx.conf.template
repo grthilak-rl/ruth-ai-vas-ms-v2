@@ -106,9 +106,16 @@ server {
         try_files $uri =404;
     }
 
-    # SPA fallback - serve index.html for all routes not matched
+    # SPA fallback - serve index.html for all routes not matched.
+    # index.html must NEVER be cached: it names the hashed /assets/*.js bundle,
+    # and /assets/ is served immutable/1y. If the HTML is cached too, the browser
+    # keeps pointing at an OLD bundle name after a deploy and never fetches the
+    # new one — a rebuilt frontend silently does nothing until a hard refresh.
+    # no-store forces a re-fetch of the HTML every load so new bundles are seen.
     location / {
         try_files $uri $uri/ /index.html;
+        add_header Cache-Control "no-store, no-cache, must-revalidate" always;
+        expires -1;
     }
 
     # Health check endpoint for container orchestration

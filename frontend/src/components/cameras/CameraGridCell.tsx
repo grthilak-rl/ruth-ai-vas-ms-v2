@@ -33,6 +33,8 @@ interface CameraGridCellProps {
   aiModels: AIModel[];
   violationCount?: number;
   onModelToggle: (cameraId: string, modelId: string, enabled: boolean, config?: ModelConfig) => void;
+  /** chane_tank_monitor: commit an operator-clicked ROI circle for this camera. */
+  onRoiConfirm?: (cameraId: string, modelId: string, roiCircle: { cx: number; cy: number; r: number }) => void;
   modelConfigs?: Record<string, ModelConfig>;
   onFullscreen: (cameraId: string) => void;
   /** When true, the underlying player connects automatically on mount. */
@@ -48,6 +50,7 @@ export function CameraGridCell({
   aiModels,
   violationCount,
   onModelToggle,
+  onRoiConfirm,
   modelConfigs = {},
   onFullscreen,
   shouldAutoConnect = false,
@@ -86,11 +89,16 @@ export function CameraGridCell({
   const isFallDetectionActive = aiModels.find(m => m.id === 'fall_detection')?.state === 'active';
   const isPPEDetectionActive = aiModels.find(m => m.id === 'ppe_detection')?.state === 'active';
   const isTankOverflowActive = aiModels.find(m => m.id === 'tank_overflow_monitoring')?.state === 'active';
+  const isChaneTankActive = aiModels.find(m => m.id === 'chane_tank_monitor')?.state === 'active';
   const isGeofencingActive = aiModels.find(m => m.id === 'geo_fencing')?.state === 'active';
 
   // Get tank overflow configuration (corners)
   const tankOverflowConfig = modelConfigs['tank_overflow_monitoring'];
   const tankCorners = tankOverflowConfig?.tank_corners;
+
+  // Get chane tank monitor configuration (optional manual circular ROI)
+  const chaneTankConfig = modelConfigs['chane_tank_monitor'];
+  const chaneTankRoiCircle = chaneTankConfig?.roi_circle;
 
   // Get geo_fencing configuration (zones)
   const geofencingConfig = modelConfigs['geo_fencing'];
@@ -117,8 +125,15 @@ export function CameraGridCell({
           isFallDetectionEnabled={isFallDetectionActive}
           isPPEDetectionEnabled={isPPEDetectionActive}
           isTankOverflowEnabled={isTankOverflowActive}
+          isChaneTankEnabled={isChaneTankActive}
           isGeofencingEnabled={isGeofencingActive}
           tankCorners={tankCorners}
+          chaneTankRoiCircle={chaneTankRoiCircle}
+          onChaneRoiConfirm={
+            onRoiConfirm
+              ? (roi) => onRoiConfirm(camera.id, 'chane_tank_monitor', roi)
+              : undefined
+          }
           geofenceZones={geofenceZones}
           shouldAutoConnect={shouldAutoConnect}
           autoConnectDelayMs={autoConnectDelayMs}

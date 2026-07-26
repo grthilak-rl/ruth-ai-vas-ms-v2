@@ -223,6 +223,29 @@ export function CameraMonitoringDashboard({
     }
   }, [aiModelToggles, startInferenceMutation, stopInferenceMutation, updateModelConfigMutation]);
 
+  // chane_tank_monitor: operator confirmed a clicked ROI circle. Merge it into
+  // the model config, persist to the backend (so the headless inference loop
+  // picks it up), and update local state so the overlay scaler uses it too.
+  const handleRoiConfirm = useCallback(async (
+    cameraId: string,
+    modelId: string,
+    roiCircle: { cx: number; cy: number; r: number },
+  ) => {
+    const merged: ModelConfig = {
+      ...(modelConfigs[cameraId]?.[modelId] || {}),
+      roi_circle: roiCircle,
+    };
+    setModelConfigs((prev) => ({
+      ...prev,
+      [cameraId]: { ...(prev[cameraId] || {}), [modelId]: merged },
+    }));
+    try {
+      await updateModelConfigMutation.mutateAsync({ deviceId: cameraId, config: merged });
+    } catch (error) {
+      console.error('[CameraMonitoring] Failed to persist ROI config:', error);
+    }
+  }, [modelConfigs, updateModelConfigMutation]);
+
   // Handle fullscreen
   const handleFullscreen = useCallback(
     (cameraId: string) => {
@@ -447,6 +470,7 @@ export function CameraMonitoringDashboard({
               aiModels={getAIModelsForCamera(cell.camera.id)}
               violationCount={0} // TODO: Wire up actual violation count
               onModelToggle={handleModelToggle}
+              onRoiConfirm={handleRoiConfirm}
               modelConfigs={modelConfigs[cell.camera.id]}
               onFullscreen={handleFullscreen}
               shouldAutoConnect={shouldAutoConnect}
