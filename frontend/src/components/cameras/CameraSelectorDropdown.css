@@ -58,6 +58,75 @@
   margin: 0;
 }
 
+.camera-selector-dropdown__header-actions {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.camera-selector-dropdown__refresh {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.25rem;
+  padding: 0.25rem 0.5rem;
+  border: 1px solid var(--color-border, #d1d5db);
+  border-radius: 0.25rem;
+  background: var(--color-bg-primary, #ffffff);
+  color: var(--color-text-secondary, #6b7280);
+  font-size: 0.75rem;
+  font-weight: 500;
+  cursor: pointer;
+  transition: all 0.2s ease;
+}
+
+.camera-selector-dropdown__refresh:hover:not(:disabled) {
+  background: var(--color-bg-secondary, #f3f4f6);
+  color: var(--color-text-primary, #1f2937);
+  border-color: var(--color-border-hover, #9ca3af);
+}
+
+.camera-selector-dropdown__refresh:disabled {
+  opacity: 0.6;
+  cursor: default;
+}
+
+.camera-selector-dropdown__refresh-icon {
+  display: inline-block;
+  font-size: 0.875rem;
+  line-height: 1;
+}
+
+.camera-selector-dropdown__refresh-icon--spinning {
+  animation: camera-selector-dropdown-spin 1s linear infinite;
+}
+
+@keyframes camera-selector-dropdown-spin {
+  from {
+    transform: rotate(0deg);
+  }
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+/* Respect reduced-motion: keep the spinner readable, drop the rotation. */
+@media (prefers-reduced-motion: reduce) {
+  .camera-selector-dropdown__refresh-icon--spinning {
+    animation: none;
+  }
+}
+
+.camera-selector-dropdown__sync-status {
+  font-weight: 500;
+  text-transform: none;
+  letter-spacing: normal;
+  color: var(--color-text-secondary, #6b7280);
+}
+
+.camera-selector-dropdown__sync-status--failed {
+  color: var(--color-warning, #b45309);
+}
+
 .camera-selector-dropdown__close {
   border: none;
   background: none;
@@ -79,6 +148,10 @@
 }
 
 .camera-selector-dropdown__section-title {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 0.5rem;
   font-size: 0.75rem;
   font-weight: 600;
   color: var(--color-text-secondary, #6b7280);

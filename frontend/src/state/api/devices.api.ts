@@ -8,6 +8,7 @@
  * - GET  /api/v1/devices/{id}
  * - POST /api/v1/devices/{id}/start-inference
  * - POST /api/v1/devices/{id}/stop-inference
+ * - POST /internal/sync/devices
  *
  * HARD RULES:
  * - F6 §8.1: MUST NOT infer camera online status from recent violations
@@ -24,6 +25,15 @@ import type { ModelConfig } from '../../types/geofencing';
 const DEVICES_PATH = '/api/v1/devices';
 
 /**
+ * API path for the VAS device-sync trigger.
+ *
+ * Ruth's device table is a cache of VAS's; it is only written by the
+ * startup sync and by this endpoint. Served on the same origin — the
+ * Ruth frontend nginx proxies /internal/ to the backend.
+ */
+const DEVICE_SYNC_PATH = '/internal/sync/devices';
+
+/**
  * Fetch devices list
  *
  * Returns all registered cameras/devices.
@@ -31,6 +41,34 @@ const DEVICES_PATH = '/api/v1/devices';
 export async function fetchDevices(): Promise<DevicesListResponse> {
   const response = await apiGet<unknown>(DEVICES_PATH);
   return assertResponse(response, isDevicesListResponse, 'DevicesListResponse');
+}
+
+/**
+ * Response from the device-sync trigger
+ */
+export interface DeviceSyncResponse {
+  /** Human-readable summary, e.g. "Synced 8 devices from VAS" */
+  message: string;
+  /** How many VAS devices were upserted into Ruth's table */
+  devices_synced: number;
+}
+
+/**
+ * Trigger a device sync from VAS into Ruth's local devices table.
+ *
+ * POST /internal/sync/devices
+ *
+ * Callers should treat failure as non-fatal: the last-known device list
+ * stays on screen. Retries are skipped deliberately — a failure here means
+ * VAS is unreachable, and the client's default 502 policy would keep a
+ * refresh spinner up for ~45s before giving the same answer.
+ */
+export async function syncDevicesFromVas(): Promise<DeviceSyncResponse> {
+  return apiPost<DeviceSyncResponse>(
+    DEVICE_SYNC_PATH,
+    {},
+    { skipRetry: true, timeout: 15_000 }
+  );
 }
 
 /**

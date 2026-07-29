@@ -21,6 +21,7 @@ import {
   useStopInferenceMutation,
   useUpdateModelConfigMutation,
 } from '../../state/hooks/useDevicesQuery';
+import { useDeviceSync } from '../../state/hooks/useDeviceSync';
 import './CameraMonitoringDashboard.css';
 
 /**
@@ -73,6 +74,17 @@ export function CameraMonitoringDashboard({
   // Available AI models from backend
   const [availableModels, setAvailableModels] = useState<ModelStatusInfo[]>([]);
   const [modelsLoading, setModelsLoading] = useState(true);
+
+  // Pull any cameras added in VAS since Ruth's backend last synced, so the
+  // grid and Camera Selector reflect the VAS devices page without a
+  // ruth-ai-backend restart. Non-blocking — the dashboard renders from the
+  // cached device list and updates in place when the sync lands. syncNow is
+  // throttled and deduplicated, so a remount (or the selector opening right
+  // after) is a no-op rather than a second VAS round-trip.
+  const { syncNow } = useDeviceSync();
+  useEffect(() => {
+    void syncNow();
+  }, [syncNow]);
 
   // Fetch available models from backend
   useEffect(() => {

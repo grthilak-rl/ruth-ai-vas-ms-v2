@@ -29,6 +29,14 @@ export {
 } from './useDevicesQuery';
 
 export {
+  useDeviceSync,
+  requestDeviceSync,
+  DEVICE_SYNC_THROTTLE_MS,
+  type DeviceSyncOutcome,
+  type UseDeviceSyncResult,
+} from './useDeviceSync';
+
+export {
   useModelsStatusQuery,
 } from './useModelsStatusQuery';
 
