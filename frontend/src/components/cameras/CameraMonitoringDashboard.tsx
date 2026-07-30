@@ -135,7 +135,11 @@ export function CameraMonitoringDashboard({
     }
   }, [cameras]);
 
-  // Auto-select cameras when cameras list or grid size changes
+  // Seed the selection on first run. autoSelectCameras leaves an existing
+  // selection alone (beyond trimming to grid capacity), so this can no longer
+  // drop a saved camera that happens to be missing from the current list —
+  // which is what silently erased selections on refresh, since the result is
+  // persisted. Availability is handled at render time by `selectedCameras`.
   useEffect(() => {
     if (cameras.length > 0) {
       const cameraIds = cameras.map((c) => c.id);

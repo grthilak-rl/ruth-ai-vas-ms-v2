@@ -19,7 +19,19 @@ function generateClientId(): string {
 
 export async function connectToStream(
   deviceId: string,
-  onConnectionStateChange?: (state: string) => void
+  onConnectionStateChange?: (state: string) => void,
+  /**
+   * Fired when this consumer's producer goes away — the stream was restarted
+   * (disable/enable, Streams-page Stop+Start, ffmpeg auto-heal, camera
+   * reconnect) and a NEW producer id now serves the room.
+   *
+   * The old track is dead but the DTLS transport stays healthy, so nothing
+   * else surfaces the failure: without this the <video> element just holds
+   * its last frame forever and only a page refresh or a remount recovers it.
+   * Callers should tear down and re-run connectToStream, which fetches the
+   * current producer via start-stream.
+   */
+  onProducerGone?: (reason: string) => void
 ): Promise<WebRTCConnection> {
   const clientId = generateClientId();
   console.log(`[WebRTC] Connecting to device ${deviceId} as client ${clientId}`);
@@ -119,6 +131,27 @@ export async function connectToStream(
   });
 
   console.log('[WebRTC] Consumer created, track:', consumer.track);
+
+  // Producer-death detection. Fire at most once per connection — several of
+  // these can trigger together for the same underlying event, and the caller
+  // must not be pushed into overlapping reconnects.
+  let goneReported = false;
+  const reportGone = (reason: string) => {
+    if (goneReported) return;
+    goneReported = true;
+    console.warn(`[WebRTC] Producer gone for ${deviceId}: ${reason}`);
+    onProducerGone?.(reason);
+  };
+
+  // When the server closes the producer, mediasoup-client closes this
+  // consumer and surfaces it as 'trackended' (this version has no
+  // 'producerclose' on Consumer — the RTP track simply dies).
+  consumer.on('trackended', () => reportGone('trackended'));
+  consumer.on('transportclose', () => reportGone('transportclose'));
+  // Belt and braces: the underlying MediaStreamTrack can end on teardown
+  // paths that don't surface a consumer event.
+  consumer.track.addEventListener('ended', () => reportGone('track ended'));
+
   await consumer.resume();
   console.log('[WebRTC] Consumer resumed');
 

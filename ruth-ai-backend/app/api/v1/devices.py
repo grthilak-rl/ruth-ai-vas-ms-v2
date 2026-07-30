@@ -46,7 +46,6 @@ from app.services import (
     StreamAlreadyActiveError,
     StreamNotActiveError,
     StreamStartError,
-    StreamStopError,
     StreamSessionNotFoundError,
 )
 
@@ -328,11 +327,12 @@ async def start_inference(
     response_model=InferenceStopResponse,
     status_code=status.HTTP_200_OK,
     summary="Stop inference",
-    description="Stop AI inference on a device stream. Idempotent - succeeds even if not active.",
+    description=(
+        "Stop AI inference on a device. Idempotent - succeeds even if not "
+        "active. The VAS video stream is left running."
+    ),
     responses={
         404: {"model": ErrorResponse, "description": "Device not found"},
-        500: {"model": ErrorResponse, "description": "Failed to stop stream"},
-        502: {"model": ErrorResponse, "description": "VAS error"},
     },
 )
 async def stop_inference(
@@ -341,7 +341,12 @@ async def stop_inference(
 ) -> InferenceStopResponse:
     """Stop AI inference on a device.
 
-    This endpoint is idempotent. If no stream is active for the device,
+    Inference only: the VAS stream keeps running for other consumers and for
+    this operator's own WebRTC video, per the contract spec. No VAS call is
+    made and no device state is touched, so nothing here can flip
+    ``Device.is_active`` or close a producer.
+
+    This endpoint is idempotent. If no session is active for the device,
     it returns success with null session information.
 
     Args:
@@ -350,9 +355,6 @@ async def stop_inference(
 
     Returns:
         Stopped session information
-
-    Raises:
-        HTTPException: 500 on VAS failure
     """
     # Check for existing active session (idempotency)
     existing_session = await stream_service.get_active_session_for_device(device_id)
@@ -370,11 +372,11 @@ async def stop_inference(
         )
 
     try:
-        session = await stream_service.stop_stream(device_id)
+        session = await stream_service.stop_inference(device_id)
     except StreamNotActiveError:
         # Idempotent - already stopped
         logger.info(
-            "Stream already stopped (idempotent)",
+            "Inference already stopped (idempotent)",
             device_id=str(device_id),
         )
         return InferenceStopResponse(
@@ -383,15 +385,6 @@ async def stop_inference(
             state="stopped",
             stopped_at=existing_session.stopped_at,
         )
-    except StreamStopError as e:
-        raise HTTPException(
-            status_code=status.HTTP_502_BAD_GATEWAY,
-            detail={
-                "error": "stream_stop_failed",
-                "message": str(e),
-                "details": e.details,
-            },
-        ) from e
 
     logger.info(
         "Stopped inference",

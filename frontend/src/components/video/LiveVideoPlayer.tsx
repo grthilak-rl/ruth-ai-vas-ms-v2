@@ -16,6 +16,14 @@ import { estimateRadiusFromClick } from '../../services/roiRayCast';
 import { reportFallEvent, reportPPEEvent, type BoundingBox, type PPEViolationDetail } from '../../services/api';
 import './LiveVideoPlayer.css';
 
+/**
+ * How many times to chase a restarted stream before surfacing an error.
+ * With 1s-doubling backoff capped at 10s this spans ~1 minute, comfortably
+ * longer than a normal restart (~2-5s) without spinning forever on a camera
+ * that is genuinely gone.
+ */
+const MAX_PRODUCER_RECONNECT_ATTEMPTS = 8;
+
 type PlayerState =
   | 'idle'
   | 'connecting'
@@ -116,6 +124,11 @@ export function LiveVideoPlayer({
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const connectionRef = useRef<WebRTCConnection | null>(null);
   const reconnectTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  // Producer-death recovery: attempt counter for backoff, and a ref to the
+  // latest handleConnect so scheduleReconnect can invoke it without a
+  // circular useCallback dependency.
+  const reconnectAttemptsRef = useRef(0);
+  const handleConnectRef = useRef<(() => Promise<void>) | null>(null);
   const fallDetectionRef = useRef<FallDetectionManager | null>(null);
   const ppeDetectionRef = useRef<PPEDetectionManager | null>(null);
   const tankDetectionRef = useRef<TankDetectionManager | null>(null);
@@ -470,19 +483,68 @@ export function LiveVideoPlayer({
   }, []);
 
   // Handle WebRTC connection
+  /**
+   * Re-establish the stream after its producer died.
+   *
+   * A stream restart (disable/enable, Streams-page Stop+Start, ffmpeg
+   * auto-heal, camera reconnect) mints a NEW mediasoup producer id. Our
+   * consumer is bound to the old one and is now dead, but the transport stays
+   * healthy — so without this the video silently holds its last frame until
+   * the user refreshes or unselects/reselects the camera.
+   *
+   * Reconnecting is exactly what a remount does: tear down, then
+   * connectToStream, whose start-stream call returns the current producer.
+   * Backoff because the new producer may not be live the instant the old one
+   * closes. Goes through a ref so this doesn't have to depend on
+   * handleConnect, which would be circular.
+   */
+  const scheduleReconnect = useCallback((reason: string) => {
+    if (reconnectTimeoutRef.current) {
+      return; // one reconnect in flight is enough
+    }
+
+    const attempt = reconnectAttemptsRef.current + 1;
+    reconnectAttemptsRef.current = attempt;
+
+    if (attempt > MAX_PRODUCER_RECONNECT_ATTEMPTS) {
+      console.error(`[LiveVideoPlayer] Giving up reconnect for ${deviceId} after ${attempt - 1} attempts`);
+      setPlayerState('error');
+      setConnectionStatus('Stream unavailable');
+      return;
+    }
+
+    const delay = Math.min(1000 * 2 ** (attempt - 1), 10000);
+    console.log(`[LiveVideoPlayer] ${reason} on ${deviceId} — reconnecting in ${delay}ms (attempt ${attempt})`);
+    setPlayerState('reconnecting');
+    setConnectionStatus('Stream restarted — reconnecting...');
+
+    reconnectTimeoutRef.current = setTimeout(async () => {
+      reconnectTimeoutRef.current = null;
+      await cleanup();
+      await handleConnectRef.current?.();
+    }, delay);
+  }, [deviceId, cleanup]);
+
   const handleConnect = useCallback(async () => {
     console.log('[LiveVideoPlayer] Starting WebRTC connection for device:', deviceId);
     setPlayerState('connecting');
     setConnectionStatus('Starting stream...');
 
     try {
-      const connection = await connectToStream(deviceId, (state) => {
-        console.log('[LiveVideoPlayer] Connection state:', state);
-        setConnectionStatus(state);
-        if (state === 'connected') {
-          setPlayerState('playing');
-        }
-      });
+      const connection = await connectToStream(
+        deviceId,
+        (state) => {
+          console.log('[LiveVideoPlayer] Connection state:', state);
+          setConnectionStatus(state);
+          if (state === 'connected') {
+            setPlayerState('playing');
+          }
+        },
+        scheduleReconnect
+      );
+
+      // Reached a live producer, so the previous failure streak is over.
+      reconnectAttemptsRef.current = 0;
 
       connectionRef.current = connection;
       streamIdRef.current = connection.streamId;  // Store in ref for immediate access in callbacks
@@ -565,10 +627,17 @@ export function LiveVideoPlayer({
       setPlayerState('error');
       setConnectionStatus('Connection failed');
     }
-  }, [deviceId, isDetectionActive, isFallDetectionEnabled, isPPEDetectionEnabled, isTankOverflowEnabled, isChaneTankEnabled, tankCorners, chaneTankRoiCircle, reportFallToBackend, reportPPEToBackend]);
+  }, [deviceId, isDetectionActive, isFallDetectionEnabled, isPPEDetectionEnabled, isTankOverflowEnabled, isChaneTankEnabled, tankCorners, chaneTankRoiCircle, reportFallToBackend, reportPPEToBackend, scheduleReconnect]);
+
+  // Keep the ref pointing at the current handleConnect so scheduleReconnect
+  // can call it without taking a dependency on it.
+  useEffect(() => {
+    handleConnectRef.current = handleConnect;
+  }, [handleConnect]);
 
   // Handle retry
   const handleRetry = useCallback(async () => {
+    reconnectAttemptsRef.current = 0;
     await cleanup();
     handleConnect();
   }, [cleanup, handleConnect]);

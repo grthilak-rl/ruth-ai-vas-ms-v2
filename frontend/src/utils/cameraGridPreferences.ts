@@ -83,8 +83,16 @@ export function setSelectedCameraIds(ids: string[]): void {
 }
 
 /**
- * Auto-select cameras based on grid size
- * If no cameras are selected or grid size changed, auto-select the first N cameras
+ * Seed the camera selection when the operator hasn't made one yet.
+ *
+ * A saved selection is operator intent and is NEVER reconciled against the
+ * currently-visible camera list. A camera can drop out of that list for
+ * reasons that have nothing to do with the operator's choice — its stream is
+ * down, VAS restarted (which resets every device's active flag), a sync
+ * landed mid-flight — and pruning on that signal silently and permanently
+ * forgets the selection, since the pruned result gets written back to
+ * localStorage. Cameras that aren't currently available are filtered at
+ * render time instead, so they return to the grid when they come back.
  */
 export function autoSelectCameras(
   availableCameraIds: string[],
@@ -93,15 +101,11 @@ export function autoSelectCameras(
 ): string[] {
   const maxCameras = getMaxCameras(currentGridSize);
 
-  // If we have selected cameras and they fit, keep them
-  if (currentSelectedIds.length > 0 && currentSelectedIds.length <= maxCameras) {
-    // Filter out any that are no longer available
-    const validIds = currentSelectedIds.filter((id) => availableCameraIds.includes(id));
-    if (validIds.length > 0) {
-      return validIds;
-    }
+  // Existing selection: honour it as-is, trimmed only to what the grid holds.
+  if (currentSelectedIds.length > 0) {
+    return currentSelectedIds.slice(0, maxCameras);
   }
 
-  // Otherwise, auto-select first N available cameras
+  // First run, or the operator cleared the selection: seed from what's available.
   return availableCameraIds.slice(0, maxCameras);
 }

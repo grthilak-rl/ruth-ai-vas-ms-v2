@@ -447,6 +447,45 @@ POST /api/v1/devices/550e8400-e29b-41d4-a716-446655440000/stop-stream
 
 ---
 
+#### PATCH /api/v1/devices/{device_id}/enabled
+**Enable or disable a device (operator policy)**
+
+Disabling stops VAS starting, restarting or auto-resuming the camera, and
+stops any running stream. Use it for a camera that is physically
+disconnected — without it the health monitor re-queues a restart forever.
+
+The device is **not** deleted and keeps its row: disabling is reversible.
+Idempotent — setting the current value returns 200 and changes nothing.
+
+```http
+PATCH /api/v1/devices/550e8400-e29b-41d4-a716-446655440000/enabled
+Content-Type: application/json
+
+{ "enabled": false }
+```
+
+**Response (200 OK):** the updated device (`DeviceResponse`), including
+`"enabled": false`.
+
+**Errors:** `404` device not found.
+
+##### `enabled` vs `is_active` vs `desired_state`
+
+Three orthogonal fields — do not conflate them:
+
+| Field | Meaning | Who writes it | Survives restart |
+|---|---|---|---|
+| `is_active` | stream is live right now | health monitor, supervisor | No — reset to `false` on every VAS boot |
+| `desired_state` | should this stream be running | start-stream / stop-stream | Yes, but any start-stream flips it back to `ACTIVE` |
+| `enabled` | may this camera run at all | **only** this endpoint | Yes — outranks the other two |
+
+Consumers (including Ruth AI's device sync) should treat `enabled: false` as
+*deliberately off* and surface it as "Disabled", never as failed or
+reconnecting. `enabled` is returned by `GET /api/v1/devices`, so it
+propagates through the existing device sync with no extra call.
+
+---
+
 #### GET /api/v1/devices/{device_id}/status
 **Get device status including streaming state**
 

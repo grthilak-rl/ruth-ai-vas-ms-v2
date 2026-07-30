@@ -186,6 +186,54 @@ class StreamService:
 
         return session
 
+    async def stop_inference(self, device_id: UUID) -> StreamSession:
+        """Stop AI inference for a device, leaving the video stream running.
+
+        Per the API contract (``docs/RUTH_AI_API_CONTRACT_SPECIFICATION.md``,
+        ``POST /devices/{id}/stop-inference``): "The VAS stream continues
+        running (for other consumers or UI viewing)." Disabling inference is
+        therefore a purely local operation — it must NOT call VAS, must NOT
+        touch ``Device.is_active``, and must NOT disturb the RTSP pipeline or
+        any WebRTC producer/consumer built on it.
+
+        Ending the session is sufficient to stop inference: InferenceLoopService
+        only runs tasks for sessions in LIVE state and cancels a session's task
+        as soon as it leaves that set.
+
+        Video stream lifecycle is owned by the player, via the separate
+        start-stream / stop-stream endpoints.
+
+        Args:
+            device_id: Local device UUID
+
+        Returns:
+            The stopped StreamSession
+
+        Raises:
+            StreamNotActiveError: No active session for device
+        """
+        logger.info("Stopping inference", device_id=str(device_id))
+
+        session = await self._get_active_session(device_id)
+        if not session:
+            raise StreamNotActiveError(device_id)
+
+        # No VAS round-trip here, so there is no window in which an
+        # intermediate STOPPING state could be observed. Assign STOPPED
+        # directly — as stop_stream does for its own final step — rather than
+        # routing through _transition_state, whose map has no LIVE -> STOPPED
+        # edge precisely because it assumes a VAS call in between.
+        session.state = StreamState.STOPPED
+        session.stopped_at = datetime.now(timezone.utc)
+
+        logger.info(
+            "Inference stopped; video stream left running",
+            session_id=str(session.id),
+            device_id=str(device_id),
+        )
+
+        return session
+
     async def stop_stream(
         self,
         device_id: UUID,
@@ -193,6 +241,10 @@ class StreamService:
         force: bool = False,
     ) -> StreamSession:
         """Stop a stream for a device.
+
+        This tears down the VAS RTSP pipeline, which closes the producer and
+        freezes video for EVERY consumer of that camera — not just this
+        caller. It is not the way to disable AI: use stop_inference for that.
 
         This operation:
         1. Finds active stream session
