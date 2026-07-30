@@ -48,6 +48,7 @@ export type {
   ViolationStatus,
   EvidenceStatus,
   ViolationEvidence,
+  DetectionBoundingBox,
   Violation,
   ViolationsListResponse,
   ViolationsQueryParams,

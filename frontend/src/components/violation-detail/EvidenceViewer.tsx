@@ -1,5 +1,6 @@
 import { useState, useCallback } from 'react';
-import type { ViolationEvidence } from '../../state/api';
+import type { DetectionBoundingBox, ViolationEvidence } from '../../state/api';
+import { SnapshotOverlay } from './SnapshotOverlay';
 import './EvidenceViewer.css';
 
 // Default evidence when backend doesn't provide one
@@ -16,6 +17,13 @@ interface EvidenceViewerProps {
   evidence?: ViolationEvidence;
   cameraName: string;
   timestamp: string;
+  /** Violation UUID - used to name the annotated export */
+  violationId: string;
+  /**
+   * Detection geometry drawn over the snapshot at display time.
+   * The stored snapshot is never annotated (it is training data).
+   */
+  boundingBoxes?: DetectionBoundingBox[] | null;
 }
 
 /**
@@ -58,6 +66,8 @@ export function EvidenceViewer({
   evidence: evidenceProp,
   cameraName,
   timestamp,
+  violationId,
+  boundingBoxes,
 }: EvidenceViewerProps) {
   const [isVideoPlaying, setIsVideoPlaying] = useState(false);
   const [videoError, setVideoError] = useState(false);
@@ -144,10 +154,11 @@ export function EvidenceViewer({
       {/* Snapshot display */}
       <div className="evidence-viewer__snapshot">
         {isSnapshotReady && evidence.snapshot_url ? (
-          <img
-            src={evidence.snapshot_url}
+          <SnapshotOverlay
+            snapshotUrl={evidence.snapshot_url}
+            boundingBoxes={boundingBoxes}
             alt={`Detection snapshot from ${cameraName}`}
-            className="evidence-viewer__image"
+            violationId={violationId}
           />
         ) : isSnapshotPreparing ? (
           <div className="evidence-viewer__placeholder evidence-viewer__placeholder--preparing">

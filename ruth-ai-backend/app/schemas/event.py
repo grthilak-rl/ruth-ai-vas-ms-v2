@@ -13,14 +13,43 @@ class BoundingBoxInput(BaseModel):
     """Bounding box from AI inference.
 
     Note: Input uses 'w' and 'h' for width/height as per payload spec.
+
+    Coordinates are pixels in the space of the frame inference ran on. That
+    space is NOT necessarily the resolution of the stored snapshot, so
+    ``EventIngestRequest.frame_width``/``frame_height`` must accompany the
+    boxes for reviewers to map them onto the snapshot correctly.
     """
 
     x: int = Field(..., description="X coordinate of top-left corner")
     y: int = Field(..., description="Y coordinate of top-left corner")
     w: int = Field(..., alias="w", description="Width of bounding box")
     h: int = Field(..., alias="h", description="Height of bounding box")
+    label: str | None = Field(
+        None, description="Detection label (e.g. 'No Hard Hat')"
+    )
+    confidence: float | None = Field(
+        None, ge=0.0, le=1.0, description="Per-box detection confidence"
+    )
 
     model_config = {"populate_by_name": True}
+
+
+class PPEViolationDetailInput(BaseModel):
+    """A single person's PPE violation, as reported by the detection client.
+
+    The PPE model reports per-person: which PPE items are missing, and where
+    that person is in the frame. Persisted so the review overlay can point at
+    the specific person who is out of compliance.
+    """
+
+    person_index: int = Field(..., description="Index of the person in the frame")
+    missing_ppe: list[str] = Field(
+        default_factory=list,
+        description="PPE item keys that are missing (e.g. ['hardhat', 'vest'])",
+    )
+    bounding_box: BoundingBoxInput | None = Field(
+        None, description="Where this person is in the inference frame"
+    )
 
 
 class BoundingBoxResponse(BaseModel):
@@ -54,6 +83,25 @@ class EventIngestRequest(BaseModel):
     model_version: str = Field(..., description="AI model version")
     bounding_boxes: list[BoundingBoxInput] | None = Field(
         None, description="Detected object bounding boxes"
+    )
+    ppe_violations: list[PPEViolationDetailInput] | None = Field(
+        None,
+        description=(
+            "Per-person PPE violations. Used to derive bounding_boxes when "
+            "the caller does not supply them directly."
+        ),
+    )
+    frame_width: int | None = Field(
+        None,
+        gt=0,
+        description=(
+            "Width in pixels of the frame the bounding boxes were computed "
+            "against. Required for correct overlay mapping when the stored "
+            "snapshot resolution differs from the inference frame."
+        ),
+    )
+    frame_height: int | None = Field(
+        None, gt=0, description="Height in pixels of the inference frame"
     )
 
 

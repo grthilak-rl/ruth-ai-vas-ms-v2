@@ -1,0 +1,74 @@
+/**
+ * Snapshot Overlay Styles
+ *
+ * The canvas is a sibling layer stacked over the snapshot image — the image
+ * element itself is never drawn into, so the displayed snapshot is always the
+ * unmodified stored frame.
+ */
+
+.snapshot-overlay {
+  width: 100%;
+}
+
+.snapshot-overlay__stage {
+  position: relative;
+  display: block;
+  line-height: 0;
+}
+
+.snapshot-overlay__canvas {
+  position: absolute;
+  top: 0;
+  left: 0;
+  pointer-events: none;
+}
+
+.snapshot-overlay__controls {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 8px 12px;
+  background-color: rgba(0, 0, 0, 0.6);
+  color: #e5e7eb;
+  font-size: 13px;
+  line-height: 1.4;
+}
+
+.snapshot-overlay__toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  cursor: pointer;
+  user-select: none;
+}
+
+.snapshot-overlay__toggle input {
+  cursor: pointer;
+}
+
+.snapshot-overlay__no-boxes {
+  color: #9ca3af;
+  font-style: italic;
+}
+
+.snapshot-overlay__download {
+  background-color: transparent;
+  border: 1px solid #6b7280;
+  border-radius: 4px;
+  color: #e5e7eb;
+  cursor: pointer;
+  font-size: 13px;
+  padding: 4px 10px;
+  white-space: nowrap;
+}
+
+.snapshot-overlay__download:hover:not(:disabled) {
+  background-color: rgba(255, 255, 255, 0.1);
+  border-color: #9ca3af;
+}
+
+.snapshot-overlay__download:disabled {
+  cursor: not-allowed;
+  opacity: 0.5;
+}

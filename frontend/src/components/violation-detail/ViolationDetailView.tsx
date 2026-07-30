@@ -184,6 +184,8 @@ export function ViolationDetailView({
               evidence={violation.evidence}
               cameraName={violation.camera_name}
               timestamp={violation.timestamp}
+              violationId={violation.id}
+              boundingBoxes={violation.bounding_boxes}
             />
           </section>
 

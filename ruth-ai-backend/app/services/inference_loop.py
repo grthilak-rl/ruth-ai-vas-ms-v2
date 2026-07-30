@@ -45,6 +45,51 @@ from app.integrations.vas import VASClient
 logger = get_logger(__name__)
 
 
+def _normalize_bbox(bbox: Any) -> Optional[Dict[str, int]]:
+    """Normalize a model bbox into the documented {x, y, width, height} shape.
+
+    Models report corner coordinates as ``[x1, y1, x2, y2]`` in the pixel
+    space of the inferenced frame. The API contract (and the review overlay)
+    expect top-left plus extent, so convert once here at persistence time
+    rather than teaching every consumer both shapes.
+
+    Args:
+        bbox: Raw bbox from the model. Accepts ``[x1, y1, x2, y2]`` or an
+            already-normalized dict.
+
+    Returns:
+        Dict with int x/y/width/height, or None if the input is unusable.
+    """
+    if isinstance(bbox, dict):
+        if {"x", "y", "width", "height"} <= bbox.keys():
+            return {
+                "x": int(bbox["x"]),
+                "y": int(bbox["y"]),
+                "width": int(bbox["width"]),
+                "height": int(bbox["height"]),
+            }
+        return None
+
+    if not isinstance(bbox, (list, tuple)) or len(bbox) != 4:
+        return None
+
+    try:
+        x1, y1, x2, y2 = (float(v) for v in bbox)
+    except (TypeError, ValueError):
+        return None
+
+    # Corners may arrive in either order; normalize so extents stay positive.
+    left, right = sorted((x1, x2))
+    top, bottom = sorted((y1, y2))
+
+    return {
+        "x": int(round(left)),
+        "y": int(round(top)),
+        "width": int(round(right - left)),
+        "height": int(round(bottom - top)),
+    }
+
+
 class InferenceLoopService:
     """
     Background service that runs inference on active streams.
@@ -345,6 +390,8 @@ class InferenceLoopService:
                                 model_version=result.get("model_version", "1.0.0"),
                                 inference_result=inference_result,
                                 vas_stream_id=vas_stream_id,
+                                frame_width=result.get("frame_width"),
+                                frame_height=result.get("frame_height"),
                             )
                             state["last_violation_time"] = now
 
@@ -451,6 +498,8 @@ class InferenceLoopService:
         model_version: str,
         inference_result: Dict[str, Any],
         vas_stream_id: Optional[str] = None,
+        frame_width: Optional[int] = None,
+        frame_height: Optional[int] = None,
     ) -> None:
         """
         Create a violation record from inference result with evidence capture.
@@ -462,6 +511,8 @@ class InferenceLoopService:
             model_version: Model version
             inference_result: Full inference result
             vas_stream_id: VAS stream ID for snapshot capture
+            frame_width: Width of the inferenced frame (for overlay mapping)
+            frame_height: Height of the inferenced frame (for overlay mapping)
         """
         try:
             # Get DB session from async generator
@@ -479,15 +530,26 @@ class InferenceLoopService:
                 confidence = inference_result.get("confidence", 0.0)
                 detections = inference_result.get("detections", [])
 
-                # Extract bounding boxes from detections
+                # Extract bounding boxes from detections.
+                #
+                # Stored as {x, y, width, height, label, confidence} plus the
+                # dimensions of the frame they were computed against — the
+                # shape the violation detail overlay renders. The snapshot
+                # image is left untouched (clean raw frame for training).
                 bounding_boxes = []
                 for det in detections:
                     if det.get("in_zone", False) or det.get("bbox"):
-                        bounding_boxes.append({
-                            "bbox": det.get("bbox", []),
+                        box = _normalize_bbox(det.get("bbox"))
+                        if box is None:
+                            continue
+                        box.update({
                             "confidence": det.get("confidence", 0.0),
                             "label": det.get("zone_id") or violation_type,
                         })
+                        if frame_width and frame_height:
+                            box["frame_width"] = frame_width
+                            box["frame_height"] = frame_height
+                        bounding_boxes.append(box)
 
                 # Create violation
                 violation = Violation(

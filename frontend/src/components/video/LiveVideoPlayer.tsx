@@ -211,7 +211,9 @@ export function LiveVideoPlayer({
       return;
     }
 
-    // Convert detections to violation details for the API
+    // Convert detections to violation details for the API.
+    // Per-box confidence is carried through so the violation detail overlay
+    // can render "No Hard Hat 0.62" over the stored snapshot.
     const violations: PPEViolationDetail[] = detections
       .filter(d => d.violations.length > 0)
       .map((d, idx) => ({
@@ -222,6 +224,7 @@ export function LiveVideoPlayer({
           y: Math.round(d.person_bbox.y1),
           w: Math.round(d.person_bbox.x2 - d.person_bbox.x1),
           h: Math.round(d.person_bbox.y2 - d.person_bbox.y1),
+          confidence: d.person_bbox.confidence,
         },
       }));
 
@@ -232,11 +235,24 @@ export function LiveVideoPlayer({
     try {
       const streamId = streamIdRef.current;
       console.log('[LiveVideoPlayer] Reporting PPE violation to backend for device:', deviceId, 'stream:', streamId);
+
+      // The boxes above are in the inference frame's pixel space, which is the
+      // native size of the <video> element we extracted the frame from. Send
+      // those dimensions so the review overlay can scale onto the snapshot.
+      const video = videoRef.current;
+      const frameDimensions =
+        video?.videoWidth && video?.videoHeight
+          ? { width: video.videoWidth, height: video.videoHeight }
+          : undefined;
+
       const response = await reportPPEEvent(
         deviceId,
         confidence,
         violations,
-        streamId || undefined
+        streamId || undefined,
+        undefined,
+        undefined,
+        frameDimensions
       );
       lastPPEReportTimeRef.current = now;
       console.log('[LiveVideoPlayer] PPE violation reported successfully:', response);

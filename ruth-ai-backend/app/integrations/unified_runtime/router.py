@@ -214,6 +214,11 @@ class RuntimeRouter:
         )
 
         # Step 3: Convert response to dict and return
+        #
+        # frame_width/frame_height are the dimensions of the frame the model
+        # actually saw. Callers persist them alongside any bounding boxes so
+        # the review overlay can map box coordinates onto a snapshot even when
+        # the snapshot was captured at a different resolution.
         return {
             "request_id": str(response.request_id),
             "status": response.status,
@@ -222,4 +227,6 @@ class RuntimeRouter:
             "inference_time_ms": response.inference_time_ms,
             "result": response.result,
             "error": response.error,
+            "frame_width": frame_data.width,
+            "frame_height": frame_data.height,
         }

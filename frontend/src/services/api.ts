@@ -245,6 +245,10 @@ export interface BoundingBox {
   y: number;
   w: number;
   h: number;
+  /** Detection label shown on the review overlay (e.g. "No Hard Hat") */
+  label?: string;
+  /** Per-box confidence 0.0-1.0, shown alongside the label */
+  confidence?: number;
 }
 
 export interface EventIngestRequest {
@@ -336,6 +340,13 @@ export interface PPEEventIngestRequest {
   model_id: string;
   model_version: string;
   ppe_violations?: PPEViolationDetail[];
+  /**
+   * Dimensions of the frame the bounding boxes were computed against.
+   * Persisted with the boxes so the violation detail overlay can map them
+   * onto the stored snapshot even when the snapshot resolution differs.
+   */
+  frame_width?: number;
+  frame_height?: number;
 }
 
 /**
@@ -349,7 +360,8 @@ export async function reportPPEEvent(
   violations: PPEViolationDetail[],
   vasStreamId?: string,
   modelId: string = 'ppe-detection-yolov8',
-  modelVersion: string = '1.0.0'
+  modelVersion: string = '1.0.0',
+  frameDimensions?: { width: number; height: number }
 ): Promise<EventResponse> {
   const payload: PPEEventIngestRequest = {
     device_id: deviceId,
@@ -364,6 +376,13 @@ export async function reportPPEEvent(
   // Only include vas_stream_id if it has a value
   if (vasStreamId) {
     payload.vas_stream_id = vasStreamId;
+  }
+
+  // Frame dimensions let the review overlay scale boxes correctly. Omitted
+  // when unknown, in which case the overlay assumes snapshot-native coords.
+  if (frameDimensions?.width && frameDimensions?.height) {
+    payload.frame_width = frameDimensions.width;
+    payload.frame_height = frameDimensions.height;
   }
 
   const response = await fetch('/internal/events', {

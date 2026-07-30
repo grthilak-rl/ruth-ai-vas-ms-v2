@@ -159,12 +159,7 @@ async def ingest_event(
         )
 
     # 4. Convert bounding boxes to storage format
-    bounding_boxes = None
-    if request.bounding_boxes:
-        bounding_boxes = [
-            {"x": bb.x, "y": bb.y, "width": bb.w, "height": bb.h}
-            for bb in request.bounding_boxes
-        ]
+    bounding_boxes = _build_bounding_boxes(request)
 
     # 5. Create Event
     event = Event(
@@ -265,6 +260,115 @@ async def ingest_event(
         violation_id=event.violation_id,
         created_at=event.created_at,
     )
+
+
+# Display names for PPE item keys, mirroring PPE_LABELS in the frontend
+# detection service so the review overlay reads the same as the live view.
+PPE_ITEM_LABELS: dict[str, str] = {
+    "hardhat": "Hard Hat",
+    "vest": "Safety Vest",
+    "gloves": "Gloves",
+    "goggles": "Safety Goggles",
+    "boots": "Safety Boots",
+    "mask": "Face Mask",
+}
+
+
+def _build_bounding_boxes(request: EventIngestRequest) -> list[dict] | None:
+    """Build the stored bounding-box metadata for an event/violation.
+
+    This metadata is what the violation detail page draws over the snapshot,
+    so it must carry everything a reviewer needs to identify the offender in
+    a crowded scene: geometry, label, confidence, and the frame dimensions
+    the geometry is relative to.
+
+    The snapshot image itself is never modified — it stays the clean raw
+    frame for the training-data pipeline.
+
+    Two input shapes are accepted:
+    - ``bounding_boxes``: generic detections, used as-is.
+    - ``ppe_violations``: per-person PPE reports, from which a labelled box
+      is derived per person (e.g. "No Hard Hat, No Safety Vest").
+
+    Returns:
+        List of box dicts, or None when the request carries no geometry.
+    """
+    frame_dims: dict[str, int] = {}
+    if request.frame_width and request.frame_height:
+        frame_dims = {
+            "frame_width": request.frame_width,
+            "frame_height": request.frame_height,
+        }
+
+    boxes: list[dict] = []
+
+    if request.bounding_boxes:
+        for bb in request.bounding_boxes:
+            boxes.append(
+                {
+                    "x": bb.x,
+                    "y": bb.y,
+                    "width": bb.w,
+                    "height": bb.h,
+                    "label": bb.label or request.event_type,
+                    "confidence": (
+                        bb.confidence if bb.confidence is not None else request.confidence
+                    ),
+                    **frame_dims,
+                }
+            )
+
+    # Only derive from ppe_violations when explicit boxes weren't supplied,
+    # so a caller sending both doesn't get duplicates.
+    if not boxes and request.ppe_violations:
+        for detail in request.ppe_violations:
+            bb = detail.bounding_box
+            if bb is None:
+                continue
+
+            missing = [
+                PPE_ITEM_LABELS.get(item, item.replace("_", " ").title())
+                for item in detail.missing_ppe
+            ]
+            label = (
+                ", ".join(f"No {name}" for name in missing)
+                if missing
+                else "PPE Violation"
+            )
+
+            boxes.append(
+                {
+                    "x": bb.x,
+                    "y": bb.y,
+                    "width": bb.w,
+                    "height": bb.h,
+                    "label": label,
+                    "confidence": (
+                        bb.confidence if bb.confidence is not None else request.confidence
+                    ),
+                    "missing_ppe": detail.missing_ppe,
+                    "person_index": detail.person_index,
+                    **frame_dims,
+                }
+            )
+
+    if not boxes:
+        return None
+
+    if not frame_dims:
+        # Without frame dimensions the overlay has to assume the boxes are in
+        # the snapshot's own pixel space. That holds when the snapshot matches
+        # the inference frame resolution and silently misplaces boxes when it
+        # doesn't — worth a warning on ingest rather than a mystery later.
+        logger.warning(
+            "Bounding boxes ingested without frame dimensions; "
+            "overlay will assume snapshot-native coordinates",
+            event_type=request.event_type,
+            model_id=request.model_id,
+            box_count=len(boxes),
+        )
+
+    return boxes
 
 
 async def _ensure_device(db: DBSession, device_id) -> Device:

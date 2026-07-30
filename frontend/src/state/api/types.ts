@@ -230,6 +230,59 @@ export interface ViolationEvidence {
 }
 
 /**
+ * Detection bounding box persisted with a violation.
+ *
+ * Source: GET /api/v1/violations/{id} → bounding_boxes[]
+ *
+ * Coordinates are PIXELS in the space of the frame inference ran on, which is
+ * not necessarily the resolution of the stored snapshot. When frame_width /
+ * frame_height are present they define that space and the overlay scales
+ * accordingly; when absent the overlay falls back to assuming the snapshot's
+ * own natural dimensions.
+ *
+ * The snapshot image itself is never annotated server-side — it stays the
+ * clean raw frame for the training-data pipeline. Boxes are composited at
+ * display time only.
+ */
+export interface DetectionBoundingBox {
+  /** X coordinate of the top-left corner, in inference-frame pixels */
+  x: number;
+
+  /** Y coordinate of the top-left corner, in inference-frame pixels */
+  y: number;
+
+  /** Box width in inference-frame pixels */
+  width: number;
+
+  /** Box height in inference-frame pixels */
+  height: number;
+
+  /** Human-readable detection label (e.g. "No Hard Hat") */
+  label?: string | null;
+
+  /** Per-box confidence 0.0-1.0 */
+  confidence?: number | null;
+
+  /** Width of the frame the coordinates are relative to */
+  frame_width?: number | null;
+
+  /** Height of the frame the coordinates are relative to */
+  frame_height?: number | null;
+
+  /** PPE item keys missing for this person (PPE violations only) */
+  missing_ppe?: string[] | null;
+
+  /** Index of the person within the frame (PPE violations only) */
+  person_index?: number | null;
+
+  /**
+   * Legacy corner-coordinate form [x1, y1, x2, y2] written by older
+   * inference-loop records. Read-only fallback.
+   */
+  bbox?: number[] | null;
+}
+
+/**
  * Violation entity (F6 §3.1)
  *
  * Source: GET /api/v1/violations, GET /api/v1/violations/{id}
@@ -266,6 +319,13 @@ export interface Violation {
    * When absent, frontend should provide default pending evidence.
    */
   evidence?: ViolationEvidence;
+
+  /**
+   * Detection geometry for the review overlay - MAY be absent in list
+   * responses, and MAY be absent on detail for violations ingested before
+   * box metadata was persisted.
+   */
+  bounding_boxes?: DetectionBoundingBox[] | null;
 
   /** Email of reviewer - null if not reviewed */
   reviewed_by: string | null;
