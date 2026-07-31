@@ -42,6 +42,9 @@ from app.schemas.device import (
     InferenceStopResponse,
     ModelConfigUpdateRequest,
     ModelConfigUpdateResponse,
+    DeviceNamingUpdateRequest,
+    DeviceNamingUpdateResponse,
+    ManwayListResponse,
 )
 from app.schemas.error import (
     ErrorResponse,
@@ -87,6 +90,9 @@ __all__ = [
     "InferenceStopResponse",
     "ModelConfigUpdateRequest",
     "ModelConfigUpdateResponse",
+    "DeviceNamingUpdateRequest",
+    "DeviceNamingUpdateResponse",
+    "ManwayListResponse",
     # Event schemas
     "BoundingBoxInput",
     "BoundingBoxResponse",

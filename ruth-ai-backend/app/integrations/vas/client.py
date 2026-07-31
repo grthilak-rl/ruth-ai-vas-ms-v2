@@ -564,6 +564,60 @@ class VASClient:
         )
         return Device.model_validate(response.json())
 
+    async def update_device(
+        self,
+        device_id: str,
+        fields: dict[str, Any],
+    ) -> Device:
+        """Update a device in VAS.
+
+        VAS is the source of truth for device metadata. Ruth never edits its
+        own mirrored copy as the primary write — it writes here, and VAS
+        re-derives display_name from the updated fields.
+
+        Only the keys present in ``fields`` are sent, so a caller can clear a
+        field by passing an explicit None without disturbing its neighbours.
+
+        Args:
+            device_id: VAS device ID (NOT Ruth's internal device UUID)
+            fields: Partial device payload, e.g. {"manway": "TANK5",
+                "in_out": "IN"}
+
+        Returns:
+            The updated device, including VAS's freshly derived display_name
+
+        Raises:
+            VASNotFoundError: Device does not exist in VAS
+            VASError: On other API errors
+        """
+        response = await self._request(
+            "PUT",
+            f"/api/v1/devices/{device_id}",
+            json=fields,
+            # Same unauthenticated V1 path the device sync already uses:
+            # /api/v1/devices is listed in VAS's JWT_AUTH_PREFIXES, so the
+            # API-key middleware skips it and the route declares no auth
+            # dependency.
+            authenticated=False,
+        )
+        return Device.model_validate(response.json())
+
+    async def get_manways(self) -> list[str]:
+        """List the distinct manway values currently in use in VAS.
+
+        Feeds Ruth's manway autocomplete so a second naming entry point
+        reuses the existing vocabulary instead of fragmenting it.
+
+        Returns:
+            Sorted manway values, or [] if none are assigned
+        """
+        response = await self._request(
+            "GET",
+            "/api/v1/devices/manways",
+            authenticated=False,
+        )
+        return [str(m) for m in response.json()]
+
     async def get_device_status(self, device_id: str) -> DeviceStatus:
         """Get device status including streaming state.
 

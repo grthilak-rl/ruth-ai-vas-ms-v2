@@ -169,6 +169,74 @@ export async function updateModelConfig(
 }
 
 // ============================================================================
+// Structured naming (phase 2) — edits write through to VAS
+// ============================================================================
+
+/** Fields an operator can change. Omit a key to leave it untouched in VAS. */
+export interface DeviceNamingUpdate {
+  /** Grouping key, e.g. "TANK5". null clears it. VAS uppercases it. */
+  manway?: string | null;
+  /** null clears it. */
+  in_out?: 'IN' | 'OUT' | null;
+}
+
+/** What VAS actually stored, echoed back through Ruth's proxy. */
+export interface DeviceNamingResponse {
+  device_id: string;
+  name: string;
+  manway: string | null;
+  in_out: string | null;
+  display_name: string;
+}
+
+/**
+ * Update a device's manway / in_out.
+ *
+ * Ruth's backend forwards this to VAS, which owns the fields and derives
+ * display_name. The response carries what VAS stored — render that rather
+ * than the values that were sent, since VAS normalizes them.
+ */
+export async function updateDeviceNaming(
+  deviceId: string,
+  update: DeviceNamingUpdate
+): Promise<DeviceNamingResponse> {
+  return apiPatch<DeviceNamingResponse>(
+    `${DEVICES_PATH}/${deviceId}/naming`,
+    update
+  );
+}
+
+/**
+ * Fetch the manway values already in use, for autocomplete.
+ *
+ * Returns [] on failure — a missing vocabulary must never block naming.
+ */
+export async function fetchManways(): Promise<string[]> {
+  try {
+    const res = await apiGet<{ manways: string[] }>(`${DEVICES_PATH}/manways`);
+    return res?.manways ?? [];
+  } catch {
+    return [];
+  }
+}
+
+/**
+ * Derive the display name exactly as VAS does, for live preview while editing.
+ *
+ * Mirrors Device.display_name in the VAS backend: the segments that are set,
+ * joined with "_", with the stable identifier always last. Preview only — the
+ * saved value always comes back from VAS.
+ */
+export function deriveDisplayName(
+  identifier: string,
+  manway?: string | null,
+  inOut?: string | null
+): string {
+  const segments = [manway?.trim().toUpperCase(), inOut].filter(Boolean);
+  return [...segments, identifier].join('_');
+}
+
+// ============================================================================
 // Camera Status Helpers (F6 §4.4)
 // ============================================================================
 

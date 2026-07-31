@@ -116,6 +116,13 @@ class Device(BaseModel):
     rtsp_url: str | None = None
     is_active: bool = False
     location: str | None = None
+    # Structured naming (VAS phase 1). VAS is the source of truth: it owns
+    # these fields and derives display_name. Ruth mirrors them on sync and
+    # does not compute display_name itself, so the two can never disagree
+    # about the rule. Editing from Ruth is a later phase.
+    manway: str | None = None
+    in_out: str | None = None
+    display_name: str | None = None
     created_at: datetime | None = None
     updated_at: datetime | None = None
 

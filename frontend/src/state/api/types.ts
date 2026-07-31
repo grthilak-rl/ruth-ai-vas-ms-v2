@@ -412,14 +412,42 @@ export interface Device {
   /** VAS device ID - treat as opaque UUID */
   id: UUID;
 
-  /** Human-readable camera name */
+  /** Stable device identifier, e.g. "CUG3PTZ10072" */
   name: string;
+
+  /**
+   * Operator-facing name from VAS, derived there as
+   * `<manway>_<IN|OUT>_<identifier>` (e.g. TANK5_IN_CUG3PTZ10072).
+   *
+   * MAY be null for devices not yet re-synced since structured naming
+   * shipped, and equals `name` for cameras with no manway/in-out set.
+   * ALWAYS render via `deviceDisplayName()` rather than reading it directly.
+   *
+   * VAS is the source of truth; editing these from Ruth is a later phase.
+   */
+  display_name?: string | null;
+
+  /** Grouping key from VAS, e.g. "TANK5" - null until assigned */
+  manway?: string | null;
+
+  /** Which side of the manway this camera watches */
+  in_out?: 'IN' | 'OUT' | null;
 
   /** Whether camera is registered as active */
   is_active: boolean;
 
   /** Streaming and inference status */
   streaming: DeviceStreaming;
+}
+
+/**
+ * Resolve what to show an operator for a camera.
+ *
+ * Falls back to the stable identifier so an unnamed camera reads exactly as
+ * it did before structured naming - no placeholders, no empty labels.
+ */
+export function deviceDisplayName(device: Pick<Device, 'name' | 'display_name'>): string {
+  return device.display_name?.trim() || device.name;
 }
 
 /**

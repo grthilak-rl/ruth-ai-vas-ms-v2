@@ -1,6 +1,8 @@
 import { useMemo } from 'react';
 import { LiveVideoPlayer } from '../video/LiveVideoPlayer';
 import { AIModelSelector, type AIModel } from './AIModelSelector';
+import { deviceDisplayName } from '../../state';
+import { CameraNamingEditor } from './CameraNamingEditor';
 import type { Device } from '../../state';
 import type { ModelConfig } from '../../types/geofencing';
 import './CameraGridCell.css';
@@ -112,13 +114,17 @@ export function CameraGridCell({
     onFullscreen(camera.id);
   };
 
+  // Operator-facing label. VAS derives this from manway + in/out; falls
+  // back to the stable identifier for cameras not yet named.
+  const label = deviceDisplayName(camera);
+
   return (
     <div className="camera-grid-cell">
       {/* Video Area */}
       <div className="camera-grid-cell__video">
         <LiveVideoPlayer
           deviceId={camera.id}
-          deviceName={camera.name}
+          deviceName={label}
           isAvailable={status === 'live' || status === 'connecting'}
           isDetectionActive={isDetectionActive}
           showOverlays={showOverlays}
@@ -142,9 +148,13 @@ export function CameraGridCell({
 
       {/* Status Bar */}
       <div className="camera-grid-cell__status-bar">
-        <span className="camera-grid-cell__camera-name" title={camera.name}>
-          {camera.name}
-        </span>
+        <CameraNamingEditor
+          deviceId={camera.id}
+          identifier={camera.name}
+          manway={camera.manway}
+          inOut={camera.in_out}
+          displayName={label}
+        />
         <span className={`camera-grid-cell__status ${statusIndicator.className}`}>
           {statusIndicator.icon} {statusIndicator.label}
         </span>
@@ -155,7 +165,7 @@ export function CameraGridCell({
         <div className="camera-grid-cell__ai-controls">
           <AIModelSelector
             cameraId={camera.id}
-            cameraName={camera.name}
+            cameraName={label}
             videoUrl={`/api/v1/devices/${camera.id}/snapshot`}
             models={aiModels}
             onModelToggle={handleModelToggle}
@@ -178,7 +188,7 @@ export function CameraGridCell({
           type="button"
           className="camera-grid-cell__fullscreen-button"
           onClick={handleFullscreen}
-          aria-label={`Open ${camera.name} in fullscreen`}
+          aria-label={`Open ${label} in fullscreen`}
           disabled={status === 'offline' || status === 'error'}
         >
           ⛶ Fullscreen

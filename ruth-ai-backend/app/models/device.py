@@ -78,6 +78,29 @@ class Device(Base, TimestampMixin):
         nullable=True,
     )
 
+    # Structured naming, mirrored from VAS on each sync (VAS phase 1).
+    #
+    # `name` above stays the stable identifier (CUG3PTZ10072). display_name is
+    # DERIVED in VAS and stored here verbatim rather than recomputed, so there
+    # is exactly one implementation of the naming rule. It is NULL for devices
+    # last synced before this field existed — always read it as
+    # `display_name or name`.
+    #
+    # These are read-only from Ruth's side in phase 1; editing lands later.
+    manway: Mapped[str | None] = mapped_column(
+        String(64),
+        nullable=True,
+        index=True,
+    )
+    in_out: Mapped[str | None] = mapped_column(
+        String(8),
+        nullable=True,
+    )
+    display_name: Mapped[str | None] = mapped_column(
+        String(400),
+        nullable=True,
+    )
+
     # Whether the device is active and available for streaming
     is_active: Mapped[bool] = mapped_column(
         Boolean,

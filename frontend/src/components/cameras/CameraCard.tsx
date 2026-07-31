@@ -1,4 +1,5 @@
 import { Link } from 'react-router-dom';
+import { deviceDisplayName } from '../../state';
 import type { Device, CameraStatus, DetectionStatus } from '../../state';
 import { CameraStatusBadge } from './CameraStatusBadge';
 import { DetectionStatusBadge } from './DetectionStatusBadge';
@@ -57,7 +58,9 @@ export function CameraCard({
       {/* Info section */}
       <div className="camera-card__info">
         <div className="camera-card__header">
-          <h3 className="camera-card__name">{device.name}</h3>
+          <h3 className="camera-card__name" title={device.name}>
+            {deviceDisplayName(device)}
+          </h3>
           <CameraStatusBadge status={cameraStatus} />
         </div>
 

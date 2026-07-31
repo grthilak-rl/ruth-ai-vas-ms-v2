@@ -143,6 +143,11 @@ class DeviceService:
                 name=vas_device.name,
                 description=vas_device.description,
                 location=vas_device.location,
+                # Structured naming mirrored from VAS (source of truth).
+                # display_name is derived there, never recomputed here.
+                manway=vas_device.manway,
+                in_out=vas_device.in_out,
+                display_name=vas_device.display_name,
                 is_active=vas_device.is_active,
                 last_synced_at=now,
             )
@@ -157,6 +162,9 @@ class DeviceService:
             device.name = vas_device.name
             device.description = vas_device.description
             device.location = vas_device.location
+            device.manway = vas_device.manway
+            device.in_out = vas_device.in_out
+            device.display_name = vas_device.display_name
             device.is_active = vas_device.is_active
             device.last_synced_at = now
             logger.debug(
@@ -223,6 +231,50 @@ class DeviceService:
 
         if require_active and not device.is_active:
             raise DeviceInactiveError(device_id)
+
+        return device
+
+    async def apply_naming_from_vas(
+        self,
+        device_id: UUID,
+        *,
+        manway: str | None,
+        in_out: str | None,
+        display_name: str,
+    ) -> Device:
+        """Mirror structured naming that VAS has already accepted.
+
+        Call this ONLY after VAS has confirmed the write. Ruth's devices table
+        is a cache of VAS's, so these values must never be set speculatively —
+        otherwise Ruth would show a name VAS does not have.
+
+        The next full device sync overwrites these same columns with the same
+        values; this exists so a refresh immediately after saving doesn't
+        appear to lose the edit.
+
+        Args:
+            device_id: Local device UUID
+            manway: Grouping key exactly as VAS stored it (already normalized)
+            in_out: IN/OUT exactly as VAS stored it
+            display_name: Name as DERIVED by VAS, never recomputed here
+
+        Returns:
+            The updated device record
+
+        Raises:
+            DeviceNotFoundError: Device does not exist
+        """
+        device = await self.get_device_by_id(device_id)
+
+        device.manway = manway
+        device.in_out = in_out
+        device.display_name = display_name
+
+        logger.info(
+            "Mirrored naming from VAS",
+            device_id=str(device_id),
+            display_name=display_name,
+        )
 
         return device
 

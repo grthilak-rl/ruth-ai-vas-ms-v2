@@ -74,6 +74,9 @@ export type {
 // Validators
 // ============================================================================
 
+// Display helper for structured device naming (falls back to the identifier)
+export { deviceDisplayName } from './types';
+
 export {
   isHealthResponse,
   isViolation,

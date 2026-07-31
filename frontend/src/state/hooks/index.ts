@@ -26,6 +26,8 @@ export {
 export {
   useDevicesQuery,
   useDeviceQuery,
+  useManwaysQuery,
+  useUpdateDeviceNamingMutation,
 } from './useDevicesQuery';
 
 export {

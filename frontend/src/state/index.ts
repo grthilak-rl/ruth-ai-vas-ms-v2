@@ -118,6 +118,7 @@ export {
   // Devices
   fetchDevices,
   fetchDevice,
+  deviceDisplayName,
   getCameraStatus,
   getCameraStatusLabel,
   getDetectionStatus,

@@ -148,9 +148,17 @@ VAS-MS-V2 uses **JWT (JSON Web Token)** authentication with:
 | Endpoint Category | Authentication Required |
 |-------------------|------------------------|
 | V2 API (`/v2/*`) | **Yes** - JWT Bearer token |
-| V1 Device API (`/api/v1/devices/*`) | No (legacy compatibility) |
+| V1 Device API (`/api/v1/devices/*`) | **No** - reads *and writes*, see below |
+| V1 Recording API (`/api/v1/recordings/*`) | No |
 | Health endpoints (`/v2/health/*`) | No |
 | WebSocket signaling | Via query param or header |
+
+> The V1 device endpoints accept **no credentials of any kind** — not an
+> API key, not a Bearer token. This covers the write operations
+> (`PUT /api/v1/devices/{id}`, `PATCH .../enabled`, `POST`, `DELETE`), not
+> just reads. Anyone able to reach the VAS port can modify device records.
+> Integrators must supply their own access control; see the security notice
+> in [§3.2](#32-device-apis-v1---legacy).
 
 ### 2.6 Token Lifecycle Assumptions for Consumers
 
@@ -295,15 +303,57 @@ Content-Type: application/json
 
 ### 3.2 Device APIs (V1 - Legacy)
 
-> **SECURITY NOTICE:** V1 Device APIs currently use API Key authentication (`X-API-Key` header) for backwards compatibility. These endpoints are scheduled for deprecation. New integrations should use V2 APIs with JWT authentication where possible.
+> **SECURITY NOTICE — V1 Device APIs are currently UNAUTHENTICATED.**
+>
+> `/api/v1/devices/*` is listed in the API-key middleware's `JWT_AUTH_PREFIXES`
+> (`app/middleware/auth.py`), which makes the middleware skip the API-key check
+> and defer to the route's own auth dependency — and these routes declare none.
+> The practical effect is that **every V1 device endpoint, including the writes
+> (`PUT`, `PATCH`, `POST`, `DELETE`), is callable with no credentials at all.**
+>
+> ```bash
+> # No X-API-Key, no Bearer token — succeeds
+> curl http://<vas-host>:8085/api/v1/devices                 # 200
+> curl -X PUT http://<vas-host>:8085/api/v1/devices/<id> \
+>      -H 'Content-Type: application/json' -d '{"manway":"TANK5"}'   # 200
+>
+> # V2, for contrast
+> curl http://<vas-host>:8085/v2/streams                     # 403
+> ```
+>
+> An earlier revision of this guide stated these endpoints require an
+> `X-API-Key` header. That was inaccurate — sending one is harmless but has no
+> effect. §2.5 has always been correct. Integrators (Ruth AI, MCU) must
+> therefore treat VAS as a **trusted-network service** and not rely on VAS to
+> authorize device writes; put access control in front of it (network policy,
+> reverse proxy) or in your own backend. Do not expose VAS directly to
+> untrusted clients.
+>
+> These endpoints are scheduled for deprecation. New integrations should use
+> V2 APIs with JWT authentication where possible.
 >
 > **Migration Path:**
 > - Use `POST /api/v1/devices/{id}/start-stream` to start streams (returns `v2_stream_id`)
 > - Use V2 Stream APIs (`/v2/streams/*`) for all subsequent operations
-> - V2 Device management APIs are planned for a future release
+> - V2 Device management APIs are planned for a future release — device
+>   metadata writes (including structured naming) have no V2 equivalent yet
 
 #### GET /api/v1/devices
 **List all devices**
+
+This is the device-sync endpoint external systems poll. It is the only place
+`stream_state` is populated.
+
+**Query parameters:**
+
+| Param | Type | Default | Meaning |
+|---|---|---|---|
+| `skip` | int | `0` | Pagination offset |
+| `limit` | int | `100` | Max results |
+| `manway` | string | — | Filter to one manway group. Matched case-insensitively (the value is trimmed and upper-cased before comparison), so `?manway=tank5` and `?manway=TANK5` are equivalent. |
+
+Results are ordered by `name` (the stable identifier) so a row's position never
+changes when its metadata is edited.
 
 ```http
 GET /api/v1/devices?skip=0&limit=100
@@ -314,16 +364,30 @@ GET /api/v1/devices?skip=0&limit=100
 [
   {
     "id": "550e8400-e29b-41d4-a716-446655440000",
-    "name": "Front Door Camera",
-    "description": "Main entrance camera",
+    "name": "CUG3PTZ10068",
+    "description": null,
     "rtsp_url": "rtsp://192.168.1.100:554/stream1",
-    "is_active": false,
-    "location": "Building A - Entrance",
+    "is_active": true,
+    "enabled": true,
+    "location": null,
+    "manway": "COKEDRUM R 101",
+    "in_out": "IN",
+    "display_name": "COKEDRUM R 101_IN_CUG3PTZ10068",
     "created_at": "2026-01-10T08:00:00Z",
-    "updated_at": null
+    "updated_at": "2026-07-31T01:13:43.216737Z",
+    "stream_state": "live"
   }
 ]
 ```
+
+| Field | Notes |
+|---|---|
+| `id` | VAS device UUID. Use in all `/api/v1/devices/{device_id}` paths. |
+| `name` | **Stable identifier** (e.g. `CUG3PTZ10068`). See [3.2.1](#321-field-taxonomy--what-may-change). |
+| `enabled` | Operator policy. `false` = deliberately off, not failed. |
+| `manway`, `in_out` | Operator-set grouping metadata; `null` when unassigned. |
+| `display_name` | **Derived server-side.** Read it; never compute it. See [3.2.2](#322-display_name-derivation-contract). |
+| `stream_state` | `live` / `error` / `stopped` / `null`. **List endpoint only** — the single-device GET always returns `null` here. |
 
 ---
 
@@ -338,15 +402,26 @@ GET /api/v1/devices/550e8400-e29b-41d4-a716-446655440000
 ```json
 {
   "id": "550e8400-e29b-41d4-a716-446655440000",
-  "name": "Front Door Camera",
-  "description": "Main entrance camera",
+  "name": "CUG3PTZ10068",
+  "description": null,
   "rtsp_url": "rtsp://192.168.1.100:554/stream1",
   "is_active": true,
-  "location": "Building A - Entrance",
+  "enabled": true,
+  "location": null,
+  "manway": "COKEDRUM R 101",
+  "in_out": "IN",
+  "display_name": "COKEDRUM R 101_IN_CUG3PTZ10068",
   "created_at": "2026-01-10T08:00:00Z",
-  "updated_at": "2026-01-12T09:00:00Z"
+  "updated_at": "2026-07-31T01:13:43.216737Z",
+  "stream_state": null
 }
 ```
+
+> `stream_state` is **always `null`** on this endpoint — only
+> `GET /api/v1/devices` populates it. Use the list endpoint if you need
+> stream state.
+
+**Errors:** `404` device not found.
 
 ---
 
@@ -483,6 +558,214 @@ Consumers (including Ruth AI's device sync) should treat `enabled: false` as
 *deliberately off* and surface it as "Disabled", never as failed or
 reconnecting. `enabled` is returned by `GET /api/v1/devices`, so it
 propagates through the existing device sync with no extra call.
+
+---
+
+#### PUT /api/v1/devices/{device_id}
+**Update device metadata (partial)**
+
+The general device-update endpoint. It is what the VAS Devices page uses, what
+Ruth AI writes structured naming through, and what MCU should call.
+
+Despite being `PUT`, it behaves as a **partial update**: only the keys present
+in the body are applied. Omitted keys are left untouched; a key sent as `null`
+is cleared.
+
+**Request body (`DeviceUpdate`) — all fields optional:**
+
+| Field | Type | Constraints | Notes |
+|---|---|---|---|
+| `name` | string | 1–255 | ⚠️ Stable identifier — see the warning below |
+| `description` | string \| null | — | Free text |
+| `rtsp_url` | string | 1–512 | Must be unique across devices |
+| `location` | string \| null | — | Free text, pre-dates structured naming |
+| `is_active` | bool | — | Transient liveness; normally supervisor-managed |
+| `manway` | string \| null | ≤ 64 | Grouping key. Trimmed and **upper-cased by the server**. `""` and `null` both clear it. |
+| `in_out` | `"IN"` \| `"OUT"` \| null | exact case | `null` clears it. Lower-case `"in"` is rejected. |
+
+> ⚠️ **Do not send `name` to rename a camera.** `name` is the stable
+> identifier and is load-bearing outside the database: VAS derives the on-disk
+> camera directory from it (`sanitize_dirname(name)`), which keys recordings
+> (`<hot_storage>/<name>/`), snapshots and bookmarks. Changing it orphans every
+> recorded artefact already on disk. Structured naming exists precisely so
+> operators can relabel cameras **without** touching `name`.
+
+**Example — set both naming fields:**
+
+```http
+PUT /api/v1/devices/550e8400-e29b-41d4-a716-446655440000
+Content-Type: application/json
+
+{
+  "manway": "tank5 ",
+  "in_out": "IN"
+}
+```
+
+**Response (200 OK)** — the full updated device (`DeviceResponse`). Note the
+server normalized `"tank5 "` to `"TANK5"` and re-derived `display_name`:
+
+```json
+{
+  "id": "550e8400-e29b-41d4-a716-446655440000",
+  "name": "CUG3PTZ10068",
+  "description": null,
+  "rtsp_url": "rtsp://192.168.1.100:554/stream1",
+  "is_active": true,
+  "enabled": true,
+  "location": null,
+  "manway": "TANK5",
+  "in_out": "IN",
+  "display_name": "TANK5_IN_CUG3PTZ10068",
+  "created_at": "2026-01-10T08:00:00Z",
+  "updated_at": "2026-07-31T01:13:43.216737Z",
+  "stream_state": null
+}
+```
+
+**Example — change one field only.** `in_out` is absent from the body, so it
+keeps its current value:
+
+```json
+{ "manway": "TANK7" }
+```
+
+**Example — clear a field:**
+
+```json
+{ "in_out": null }
+```
+
+**Errors:**
+
+| Status | Cause |
+|---|---|
+| `404` | Device not found |
+| `422` | `in_out` not exactly `"IN"`/`"OUT"`; `manway` longer than 64 chars |
+| `400` | `rtsp_url` collides with another device |
+
+> **Always render the response, not your request.** The server normalizes
+> `manway` and re-derives `display_name`, so echoing back what you sent will
+> drift from what VAS stored.
+
+---
+
+#### GET /api/v1/devices/manways
+**List manway values in use**
+
+Returns the distinct, non-null `manway` values across all devices, sorted.
+Intended for autocomplete so operators reuse an existing group instead of
+inventing a near-duplicate (`TANK5` vs `Tank-5`).
+
+```http
+GET /api/v1/devices/manways
+```
+
+**Response (200 OK):**
+```json
+["COKEDRUM R 101", "COKEDRUM R 104"]
+```
+
+Returns `[]` when no device has a manway assigned.
+
+---
+
+### 3.2.1 Field taxonomy — what may change
+
+Model these three classes differently. Conflating them is the main integration
+hazard in this API.
+
+| Class | Fields | May change? | Safe to store/reference? |
+|---|---|---|---|
+| **Stable identifier** | `id`, `name` | Effectively never | Yes — use as keys, in paths, in filenames |
+| **Mutable metadata** | `manway`, `in_out`, `location`, `description`, `enabled` | Yes, any time an operator edits | Cache, but re-sync; never key on it |
+| **Derived** | `display_name` | Whenever its inputs change | Display only — never store as a key, never compute |
+
+- `id` — VAS device UUID; the path parameter for every device endpoint.
+- `name` — the camera identifier (`CUG3PTZ10068`). Stable by contract because
+  VAS keys on-disk storage on it. Treat as immutable.
+- `display_name` — **presentation only.** It changes when an operator edits
+  `manway`/`in_out`. Never use it to correlate records across systems, and
+  never build a file path from it.
+
+### 3.2.2 `display_name` derivation contract
+
+**Derived server-side. Clients read it; clients do not compute it.**
+
+`display_name` is a computed property on the VAS device model
+(`Device.display_name`), evaluated on read. It is not a stored column, so it
+cannot go stale and is never accepted as an input — sending `display_name` in
+a `PUT` body has no effect.
+
+**Rule:** join the segments that are set with `_`, with the identifier always
+last:
+
+```
+display_name = "_".join([manway?, in_out?] + [name])
+```
+
+| `manway` | `in_out` | `display_name` |
+|---|---|---|
+| `TANK5` | `IN` | `TANK5_IN_CUG3PTZ10068` |
+| `TANK5` | `null` | `TANK5_CUG3PTZ10068` |
+| `null` | `IN` | `IN_CUG3PTZ10068` |
+| `null` | `null` | `CUG3PTZ10068` ← fallback |
+
+The fallback matters: an unnamed camera reads exactly as it did before
+structured naming existed, so integrators need no "unnamed" placeholder.
+
+**For consumers (Ruth AI, MCU):**
+
+- **Render `display_name` directly.** Fall back to `name` only if the field is
+  absent or null, which happens for records synced before this feature shipped:
+  `display_name || name`.
+- **Do not re-implement the rule** to build a name from `manway`/`in_out`.
+  The one exception is an *optimistic preview* while an operator is typing in
+  an edit form — and even then, replace the preview with the value VAS returns
+  once the write completes. Ruth AI does exactly this
+  (`deriveDisplayName()` in `state/api/devices.api.ts`), and it is labelled a
+  preview helper for that reason.
+- `manway` may contain spaces (`COKEDRUM R 101`), so `display_name` is not
+  safe to split back into parts. Read `manway`/`in_out` from their own fields.
+
+### 3.2.3 Write-through pattern for external systems
+
+VAS is the **source of truth** for device metadata. External systems mirror it;
+they do not own it.
+
+```
+   Operator UI  ──▶  Your backend  ──▶  VAS  (PUT /api/v1/devices/{id})
+   (MCU / Ruth)                          │
+                                         ▼
+                                    source of truth
+                                         │
+   Your device table  ◀──  periodic sync ┘  (GET /api/v1/devices)
+```
+
+Rules that keep the two consistent:
+
+1. **Write to VAS first.** Only update your own mirrored row after VAS returns
+   `200`. If the VAS call fails, leave your copy untouched — otherwise you
+   display a name VAS does not have.
+2. **Do not let the browser call VAS directly.** Route writes through your own
+   backend, so credentials, access control and audit stay in one place. (VAS's
+   V1 device endpoints are unauthenticated — see the notice at the top of
+   §3.2 — which makes this more important, not less.)
+3. **Mirror what VAS returned**, not what you sent (normalization).
+4. **Updating your mirror is an optimization, not the write.** The periodic
+   device sync would converge anyway; writing through immediately just avoids
+   a refresh appearing to lose the edit.
+5. **Invalidate any cache of the device list** after a successful write, or the
+   change stays invisible for the cache TTL.
+
+**Reference implementation.** Ruth AI exposes
+`PATCH /api/v1/devices/{ruth_device_id}/naming` on its own backend, which
+resolves its internal UUID to the VAS device id, calls
+`PUT /api/v1/devices/{vas_device_id}`, then mirrors the response into its own
+table. MCU can follow the same shape or call VAS directly if it has no backend
+of its own. Note Ruth's endpoint takes **Ruth's** device UUID — its device
+table has its own primary keys and stores the VAS id separately, which is a
+distinction any mirroring system will need.
 
 ---
 

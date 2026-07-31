@@ -55,6 +55,7 @@ export const queryKeys = {
     all: ['devices'] as const,
     list: () => ['devices', 'list'] as const,
     detail: (id: string) => ['devices', 'detail', id] as const,
+    manways: () => ['devices', 'manways'] as const,
   },
 
   // Models domain

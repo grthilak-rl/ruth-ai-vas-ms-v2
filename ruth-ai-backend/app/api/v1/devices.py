@@ -39,6 +39,9 @@ from app.schemas import (
     InferenceStopResponse,
     ModelConfigUpdateRequest,
     ModelConfigUpdateResponse,
+    DeviceNamingUpdateRequest,
+    DeviceNamingUpdateResponse,
+    ManwayListResponse,
 )
 from app.services import (
     DeviceInactiveError,
@@ -116,6 +119,11 @@ async def list_devices(
             Device(
                 id=d.id,
                 name=d.name,
+                # Mirrored from VAS. May be NULL until the next device sync;
+                # clients render `display_name or name`.
+                display_name=d.display_name,
+                manway=d.manway,
+                in_out=d.in_out,
                 is_active=d.is_active,
                 streaming=DeviceStreaming(
                     # VAS video status
@@ -140,6 +148,167 @@ async def list_devices(
             DEVICES_LIST_CACHE_TTL_SECONDS,
         )
     return response
+
+
+@router.get(
+    "/devices/manways",
+    response_model=ManwayListResponse,
+    status_code=status.HTTP_200_OK,
+    summary="List manway values in use",
+    description="Proxies VAS's manway vocabulary for autocomplete.",
+    responses={
+        502: {"model": ErrorResponse, "description": "VAS unavailable"},
+    },
+)
+async def list_manways(vas_client: VASClientDep) -> ManwayListResponse:
+    """List the distinct manway values currently assigned in VAS.
+
+    Read straight from VAS rather than from Ruth's mirrored devices table so
+    the vocabulary is current even for cameras named since the last sync.
+
+    A failure here returns an empty list instead of an error: autocomplete is
+    a convenience, and losing it must not block an operator from naming a
+    camera.
+
+    MUST stay declared above ``GET /devices/{device_id}`` — FastAPI matches in
+    declaration order and the path-param route would otherwise capture
+    "manways" and fail UUID parsing.
+    """
+    try:
+        return ManwayListResponse(manways=await vas_client.get_manways())
+    except VASError as e:
+        logger.warning("Failed to fetch manways from VAS", error=str(e))
+        return ManwayListResponse(manways=[])
+
+
+@router.patch(
+    "/devices/{device_id}/naming",
+    response_model=DeviceNamingUpdateResponse,
+    status_code=status.HTTP_200_OK,
+    summary="Update device structured naming",
+    description=(
+        "Write manway / in_out through to VAS, which owns these fields and "
+        "derives display_name from them."
+    ),
+    responses={
+        404: {"model": ErrorResponse, "description": "Device not found"},
+        502: {"model": ErrorResponse, "description": "VAS rejected the update"},
+    },
+)
+async def update_device_naming(
+    device_id: UUID,
+    request: DeviceNamingUpdateRequest,
+    device_service: DeviceServiceDep,
+    vas_client: VASClientDep,
+) -> DeviceNamingUpdateResponse:
+    """Update a device's structured naming, writing through to VAS.
+
+    VAS is the source of truth. The order here matters: VAS is written FIRST
+    and Ruth's mirrored row is only updated once VAS confirms. If the VAS call
+    fails, Ruth's copy is left untouched, so Ruth can never display a name VAS
+    does not have.
+
+    Ruth's row is updated at all (rather than waiting for the next device
+    sync) so a browser refresh right after saving shows the new name instead
+    of appearing to have lost the edit.
+
+    Args:
+        device_id: Ruth AI internal device UUID
+        request: Fields to change; omitted fields are left alone in VAS
+        device_service: Injected DeviceService
+        vas_client: Injected VAS client
+
+    Returns:
+        The naming as VAS stored it, including the derived display_name
+
+    Raises:
+        HTTPException: 404 if the device is unknown, 502 if VAS rejects it
+    """
+    try:
+        device = await device_service.get_device_by_id(device_id)
+    except DeviceNotFoundError as e:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail={
+                "error": "device_not_found",
+                "message": str(e),
+                "details": e.details,
+            },
+        ) from e
+
+    # Only forward what the caller actually set. Sending the full model would
+    # turn "edit manway alone" into "clear in_out", because unset optional
+    # fields default to None.
+    fields = request.model_dump(include=request.model_fields_set)
+    if not fields:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail={
+                "error": "no_fields",
+                "message": "Provide at least one of: manway, in_out",
+            },
+        )
+
+    logger.info(
+        "Updating device naming via VAS",
+        device_id=str(device_id),
+        vas_device_id=device.vas_device_id,
+        fields=fields,
+    )
+
+    try:
+        updated = await vas_client.update_device(device.vas_device_id, fields)
+    except VASNotFoundError as e:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail={
+                "error": "device_not_found_in_vas",
+                "message": f"VAS does not know device {device.vas_device_id}",
+            },
+        ) from e
+    except VASError as e:
+        # Ruth's mirrored row is deliberately NOT touched on this path.
+        logger.warning(
+            "VAS rejected device naming update",
+            device_id=str(device_id),
+            error=str(e),
+        )
+        raise HTTPException(
+            status_code=status.HTTP_502_BAD_GATEWAY,
+            detail={
+                "error": "vas_update_failed",
+                "message": f"VAS rejected the update: {e}",
+            },
+        ) from e
+
+    # VAS accepted it — mirror the values it actually stored (manway
+    # normalized, display_name derived) rather than what was requested.
+    display_name = updated.display_name or updated.name
+    await device_service.apply_naming_from_vas(
+        device_id,
+        manway=updated.manway,
+        in_out=updated.in_out,
+        display_name=display_name,
+    )
+
+    # The devices list is Redis-cached; without this the grid would keep
+    # serving the old display_name for the whole TTL and the save would look
+    # like it silently failed.
+    await cache_delete(DEVICES_LIST_CACHE_KEY)
+
+    logger.info(
+        "Device naming updated",
+        device_id=str(device_id),
+        display_name=display_name,
+    )
+
+    return DeviceNamingUpdateResponse(
+        device_id=device_id,
+        name=updated.name,
+        manway=updated.manway,
+        in_out=updated.in_out,
+        display_name=display_name,
+    )
 
 
 @router.get(

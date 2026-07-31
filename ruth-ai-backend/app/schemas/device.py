@@ -6,6 +6,7 @@ From API Contract - Device & Stream APIs.
 
 import uuid
 from datetime import datetime
+from typing import Literal
 
 from pydantic import BaseModel, Field
 
@@ -48,7 +49,18 @@ class Device(BaseModel):
     """
 
     id: uuid.UUID = Field(..., description="Ruth AI internal device UUID")
-    name: str = Field(..., description="Device display name")
+    name: str = Field(..., description="Stable device identifier (e.g. CUG3PTZ10072)")
+    display_name: str | None = Field(
+        None,
+        description=(
+            "Operator-facing name from VAS, derived as "
+            "<manway>_<IN|OUT>_<identifier>. NULL for devices not yet re-synced "
+            "since structured naming shipped; clients should render "
+            "`display_name or name`."
+        ),
+    )
+    manway: str | None = Field(None, description="Grouping key from VAS, e.g. TANK5")
+    in_out: str | None = Field(None, description="IN or OUT, if set in VAS")
     is_active: bool = Field(..., description="Whether device is active")
     streaming: DeviceStreaming = Field(..., description="Streaming and inference status")
 
@@ -173,3 +185,55 @@ class ModelConfigUpdateResponse(BaseModel):
     device_id: uuid.UUID = Field(..., description="Device UUID")
     model_id: str = Field(..., description="AI model ID")
     config_updated: bool = Field(..., description="Whether config was updated")
+
+
+class DeviceNamingUpdateRequest(BaseModel):
+    """Request schema for PATCH /api/v1/devices/{id}/naming.
+
+    Structured naming fields, written through to VAS (the source of truth).
+    Ruth does not own these values — it forwards them and mirrors the result.
+
+    Both fields are optional and distinguishable three ways, which is why the
+    endpoint inspects ``model_fields_set`` rather than checking for None:
+
+        omitted        leave the field as it is in VAS
+        explicit null  clear the field
+        value          set the field
+
+    ``display_name`` is deliberately absent: it is DERIVED by VAS from these
+    two fields plus the device identifier, and is never client-supplied.
+    """
+
+    manway: str | None = Field(
+        None,
+        max_length=64,
+        description="Grouping key, e.g. TANK5. Null clears it. Uppercased by VAS.",
+    )
+    in_out: Literal["IN", "OUT"] | None = Field(
+        None,
+        description="Which side of the manway the camera watches. Null clears it.",
+    )
+
+
+class DeviceNamingUpdateResponse(BaseModel):
+    """Response schema for PATCH /api/v1/devices/{id}/naming.
+
+    Values are echoed back as VAS returned them (manway normalized,
+    display_name re-derived), so the client renders what VAS actually stored
+    rather than its own optimistic guess.
+    """
+
+    device_id: uuid.UUID = Field(..., description="Ruth AI internal device UUID")
+    name: str = Field(..., description="Stable device identifier, unchanged")
+    manway: str | None = Field(None, description="Grouping key as stored by VAS")
+    in_out: str | None = Field(None, description="IN or OUT as stored by VAS")
+    display_name: str = Field(..., description="Name derived by VAS")
+
+
+class ManwayListResponse(BaseModel):
+    """Response schema for GET /api/v1/devices/manways."""
+
+    manways: list[str] = Field(
+        default_factory=list,
+        description="Distinct manway values in use, for autocomplete",
+    )
