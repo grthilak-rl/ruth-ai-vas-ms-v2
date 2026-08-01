@@ -1,15 +1,20 @@
 """
-Frame Fetcher - Fetches frames from VAS and converts to base64
+Frame Fetcher - Reads frames from VAS's frame tap and converts to base64
 
 Handles:
-1. Creating snapshots from VAS devices
-2. Downloading snapshot image data
-3. Converting to base64 for unified runtime
-4. Extracting image metadata (format, dimensions)
+1. Reading the latest decoded frame from VAS (GET /v2/streams/{id}/frame/latest)
+2. Converting to base64 for unified runtime
+3. Extracting image metadata (format, dimensions)
+
+The frame comes off the decode VAS already performs to feed mediasoup, so
+fetching it costs no RTSP connection and no extra decode. This replaced a
+create-snapshot / poll-until-ready / download sequence that opened a fresh
+RTSP connection per frame and failed roughly a third of the time under load.
 """
 
 import asyncio
 import base64
+import os
 from dataclasses import dataclass
 from typing import Optional
 from uuid import UUID
@@ -21,9 +26,14 @@ import io
 from app.core.logging import get_logger
 from app.integrations.vas import VASClient
 from app.integrations.vas.exceptions import VASError
-from app.integrations.vas.models import SnapshotCreateRequest
 
 logger = get_logger(__name__)
+
+# Reject frames older than this. VAS taps at 2fps by default, so a healthy
+# stream is never more than ~500ms stale; this bounds how old a frame we are
+# willing to inference on when a pipeline stalls, rather than silently
+# reporting detections against a frame from minutes ago.
+DEFAULT_MAX_FRAME_AGE_MS = int(os.getenv("RUTH_MAX_FRAME_AGE_MS", "5000"))
 
 
 @dataclass
@@ -76,69 +86,63 @@ class FrameFetcher:
         self,
         device_id: Optional[UUID] = None,
         stream_id: Optional[UUID] = None,
-        timeout: float = 10.0,
+        max_age_ms: int = DEFAULT_MAX_FRAME_AGE_MS,
     ) -> FrameData:
         """
-        Fetch a frame from VAS and encode as base64.
+        Read the latest decoded frame from VAS and encode as base64.
 
         Args:
-            device_id: Device UUID to capture snapshot from
-            stream_id: Stream UUID to capture from (alternative to device_id)
-            timeout: Snapshot creation timeout in seconds
+            device_id: Device UUID (logging/context only; stream_id is required)
+            stream_id: Stream UUID to read the frame tap for
+            max_age_ms: Reject frames older than this, in milliseconds
 
         Returns:
             FrameData with base64-encoded image and metadata
 
         Raises:
-            ValueError: If neither device_id nor stream_id provided
-            VASError: If snapshot creation or download fails
+            ValueError: If stream_id is not provided
+            VASError: If no sufficiently fresh frame is available
         """
         if not device_id and not stream_id:
             raise ValueError("Either device_id or stream_id must be provided")
 
-        # Create snapshot via VAS
-        logger.debug(
-            "Creating snapshot",
-            device_id=str(device_id) if device_id else None,
-            stream_id=str(stream_id) if stream_id else None,
-        )
-
-        snapshot_request = SnapshotCreateRequest(
-            label=f"ai_inference_{device_id or stream_id}",
-            metadata={"source": "unified_runtime", "purpose": "inference"},
-        )
+        if not stream_id:
+            raise ValueError(
+                "stream_id is required to read the frame tap. Cannot read frames "
+                "from device_id alone — the stream must be started via VAS first."
+            )
 
         try:
-            # Create snapshot - VAS API only supports stream_id
-            # If device_id is provided, we need a stream_id from the device
-            if not stream_id and device_id:
-                raise ValueError(
-                    "stream_id is required. Cannot create snapshot from device_id alone. "
-                    "The stream must be started via VAS before capturing snapshots."
+            image_bytes, header_width, header_height = (
+                await self.vas_client.get_latest_frame(
+                    stream_id=str(stream_id),
+                    max_age_ms=max_age_ms,
                 )
-
-            snapshot = await self.vas_client.create_snapshot(
-                stream_id=str(stream_id),
-                request=snapshot_request,
             )
-
-            logger.debug("Snapshot created", snapshot_id=snapshot.id)
-
-            # Wait for snapshot to be ready
-            snapshot = await self.vas_client.wait_for_snapshot_ready(
-                snapshot_id=snapshot.id,
-                timeout=timeout,
-            )
-
-            # Download snapshot image
-            image_bytes = await self._download_snapshot_image(snapshot.id)
 
             # Encode to base64 and extract metadata
             frame_data = self._encode_and_extract_metadata(image_bytes)
 
-            logger.info(
+            # VAS reports the tapped frame's geometry in response headers. It
+            # should agree with what we decode here; if it ever doesn't, the
+            # decoded values win, because inference coordinates are only
+            # meaningful relative to the bytes actually handed to the model.
+            if (
+                header_width
+                and header_height
+                and (header_width, header_height)
+                != (frame_data.width, frame_data.height)
+            ):
+                logger.warning(
+                    "Frame dimension mismatch between VAS headers and image",
+                    stream_id=str(stream_id),
+                    header_dimensions=f"{header_width}x{header_height}",
+                    decoded_dimensions=f"{frame_data.width}x{frame_data.height}",
+                )
+
+            logger.debug(
                 "Frame fetched and encoded",
-                snapshot_id=snapshot.id,
+                stream_id=str(stream_id),
                 format=frame_data.format,
                 dimensions=f"{frame_data.width}x{frame_data.height}",
                 size_kb=f"{frame_data.size_kb:.1f}KB",
@@ -147,29 +151,12 @@ class FrameFetcher:
             return frame_data
 
         except VASError as e:
-            logger.error("Failed to fetch frame from VAS", error=str(e))
+            logger.error(
+                "Failed to fetch frame from VAS",
+                stream_id=str(stream_id),
+                error=str(e),
+            )
             raise
-
-    async def _download_snapshot_image(self, snapshot_id: str) -> bytes:
-        """
-        Download snapshot image from VAS.
-
-        Args:
-            snapshot_id: Snapshot UUID
-
-        Returns:
-            Raw image bytes
-
-        Raises:
-            VASError: If download fails
-        """
-        image_data = bytearray()
-
-        async with self.vas_client.download_snapshot_image(snapshot_id) as response:
-            async for chunk in response.aiter_bytes(chunk_size=8192):
-                image_data.extend(chunk)
-
-        return bytes(image_data)
 
     def _encode_and_extract_metadata(self, image_bytes: bytes) -> FrameData:
         """
@@ -207,7 +194,7 @@ class FrameFetcher:
     async def fetch_and_encode_from_reference(
         self,
         frame_reference: str,
-        timeout: float = 10.0,
+        max_age_ms: int = DEFAULT_MAX_FRAME_AGE_MS,
     ) -> FrameData:
         """
         Fetch frame from a reference string (for backward compatibility).
@@ -219,7 +206,7 @@ class FrameFetcher:
 
         Args:
             frame_reference: Frame reference URI
-            timeout: Fetch timeout in seconds
+            max_age_ms: Reject frames older than this, in milliseconds
 
         Returns:
             FrameData with base64 encoding
@@ -237,12 +224,17 @@ class FrameFetcher:
         ref_type, ref_id = parts
 
         if ref_type == "device":
-            return await self.fetch_and_encode(device_id=UUID(ref_id), timeout=timeout)
+            return await self.fetch_and_encode(
+                device_id=UUID(ref_id), max_age_ms=max_age_ms
+            )
         elif ref_type == "stream":
-            return await self.fetch_and_encode(stream_id=UUID(ref_id), timeout=timeout)
+            return await self.fetch_and_encode(
+                stream_id=UUID(ref_id), max_age_ms=max_age_ms
+            )
         elif ref_type == "snapshot":
-            # Direct snapshot download
-            image_bytes = await self._download_snapshot_image(ref_id)
+            # A stored snapshot, not a live frame — this genuinely wants the
+            # snapshot API and is unaffected by the move to the frame tap.
+            image_bytes = await self.vas_client.get_snapshot_image(ref_id)
             return self._encode_and_extract_metadata(image_bytes)
         else:
             raise ValueError(f"Unsupported reference type: {ref_type}")

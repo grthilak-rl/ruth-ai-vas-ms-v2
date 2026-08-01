@@ -1103,6 +1103,71 @@ class VASClient:
         async with self.download_snapshot_image(snapshot_id) as response:
             return await response.aread()
 
+    async def get_latest_frame(
+        self,
+        stream_id: str,
+        max_age_ms: int | None = None,
+    ) -> tuple[bytes, int | None, int | None]:
+        """Get the newest decoded frame for a stream from VAS's frame tap.
+
+        Replaces the create-snapshot / poll-until-ready / download sequence.
+        That path opened a fresh RTSP connection to the camera per frame, which
+        is what produced the timeout-and-retry storms; this is a single GET
+        against a frame VAS's existing pipeline has already decoded.
+
+        Args:
+            stream_id: VAS stream UUID
+            max_age_ms: Reject frames older than this, in milliseconds
+
+        Returns:
+            (image_bytes, width, height). Dimensions are None if VAS did not
+            report them; callers fall back to reading them off the image.
+
+        Raises:
+            VASConnectionError: If the client is not connected
+            VASError: If no frame is available or the request fails
+        """
+        if not self._client:
+            raise VASConnectionError("Client not connected")
+
+        token = await self._ensure_valid_token()
+        params: dict[str, Any] = {}
+        if max_age_ms is not None:
+            params["max_age_ms"] = max_age_ms
+
+        response = await self._client.get(
+            f"/v2/streams/{stream_id}/frame/latest",
+            headers=self._get_auth_headers(token),
+            params=params,
+        )
+
+        if not response.is_success:
+            try:
+                error_data = response.json()
+                error_message = VASErrorResponse.model_validate(
+                    error_data
+                ).error_description
+            except (ValueError, ValidationError):
+                error_message = response.text
+
+            raise VASError(
+                f"Failed to fetch latest frame for stream {stream_id}: "
+                f"{error_message}"
+            )
+
+        def _header_int(name: str) -> int | None:
+            raw = response.headers.get(name)
+            try:
+                return int(raw) if raw is not None else None
+            except ValueError:
+                return None
+
+        return (
+            response.content,
+            _header_int("X-Frame-Width"),
+            _header_int("X-Frame-Height"),
+        )
+
     async def wait_for_bookmark_ready(
         self,
         bookmark_id: str,

@@ -29,6 +29,7 @@ Usage:
 
 import asyncio
 import base64
+import os
 from contextlib import asynccontextmanager
 from datetime import datetime, timezone
 from typing import Any, AsyncGenerator, Callable, Dict, Optional
@@ -90,6 +91,85 @@ def _normalize_bbox(bbox: Any) -> Optional[Dict[str, int]]:
     }
 
 
+# ---------------------------------------------------------------------------
+# GPU budget
+# ---------------------------------------------------------------------------
+# Inference is GPU-bound and the GPU is shared by every active camera, so a
+# fixed per-camera fps is not something we can promise: measured fall_detection
+# runs ~94ms and ppe_detection ~295ms, meaning one 3090 sustains roughly 10
+# fall inferences/sec in total. Ask 7 cameras for 2fps each and demand (14/sec)
+# exceeds supply; the loop would fall further behind on every camera and the
+# frames it did inference would be increasingly stale.
+#
+# So per-camera fps is derived, not configured: cameras get the target rate
+# when the GPU has room, and an equal share of capacity when it doesn't. Adding
+# a camera slows every camera a little instead of overcommitting the GPU.
+TARGET_FPS = float(os.getenv("RUTH_INFERENCE_TARGET_FPS", "2.0"))
+MIN_FPS = float(os.getenv("RUTH_INFERENCE_MIN_FPS", "0.2"))
+MAX_GPU_UTILIZATION = float(os.getenv("RUTH_INFERENCE_MAX_GPU_UTIL", "0.85"))
+INFERENCE_CONCURRENCY = int(os.getenv("RUTH_INFERENCE_CONCURRENCY", "2"))
+
+# Until a model has been measured, assume the slower of the two known models
+# so early iterations under-schedule rather than overcommit.
+DEFAULT_LATENCY_S = 0.3
+LATENCY_EWMA_ALPHA = 0.3
+
+
+class InferenceBudget:
+    """Shares finite GPU capacity across the active inference sessions.
+
+    Tracks how long each model actually takes and hands out a per-iteration
+    sleep interval that keeps aggregate GPU demand under MAX_GPU_UTILIZATION.
+    Degradation is graceful and automatic: with few cameras everyone gets
+    TARGET_FPS, and as cameras are added each one's rate falls until it reaches
+    MIN_FPS — a floor, so a saturated system still makes progress on every
+    camera rather than starving some completely.
+    """
+
+    def __init__(self) -> None:
+        self._active: set = set()
+        self._latency_s: Dict[str, float] = {}
+
+    def register(self, session_id: UUID) -> None:
+        self._active.add(session_id)
+
+    def unregister(self, session_id: UUID) -> None:
+        self._active.discard(session_id)
+
+    @property
+    def active_count(self) -> int:
+        return len(self._active)
+
+    def record_latency(self, model_id: str, seconds: float) -> None:
+        """Fold one observed inference duration into the model's EWMA."""
+        previous = self._latency_s.get(model_id)
+        if previous is None:
+            self._latency_s[model_id] = seconds
+        else:
+            self._latency_s[model_id] = (
+                LATENCY_EWMA_ALPHA * seconds
+                + (1 - LATENCY_EWMA_ALPHA) * previous
+            )
+
+    def latency_for(self, model_id: str) -> float:
+        return self._latency_s.get(model_id, DEFAULT_LATENCY_S)
+
+    def fps_for(self, model_id: str) -> float:
+        """Per-camera fps this model can sustain given current contention."""
+        n = max(1, self.active_count)
+        latency = self.latency_for(model_id)
+        if latency <= 0:
+            return TARGET_FPS
+        # Each inference occupies the GPU for `latency`, and n cameras share
+        # it, so the fair share per camera is util / (n * latency).
+        fair_share_fps = MAX_GPU_UTILIZATION / (n * latency)
+        return max(MIN_FPS, min(TARGET_FPS, fair_share_fps))
+
+    def interval_for(self, model_id: str) -> float:
+        """Seconds to wait between inferences for one camera."""
+        return 1.0 / self.fps_for(model_id)
+
+
 class InferenceLoopService:
     """
     Background service that runs inference on active streams.
@@ -130,6 +210,12 @@ class InferenceLoopService:
         # Tracks: last violation state, last violation time, active zones with violations
         self._violation_state: Dict[UUID, Dict[str, Any]] = {}  # session_id -> state
         self._violation_cooldown_seconds = 30  # Minimum seconds between violations for same zone
+
+        # GPU budget shared by every session task. The semaphore bounds how many
+        # inferences are in flight so a burst of sessions can't queue work
+        # faster than the GPU drains it; the budget derives each session's pace.
+        self._budget = InferenceBudget()
+        self._gpu_slots = asyncio.Semaphore(INFERENCE_CONCURRENCY)
 
         # VAS stream-state cache populated by VASEventConsumer.
         # Maps stream_id/room_id (string) -> "active" | "paused".
@@ -260,6 +346,9 @@ class InferenceLoopService:
         if session_id in self._session_tasks:
             task = self._session_tasks.pop(session_id)
             task.cancel()
+            # Free this session's share of the GPU budget so the remaining
+            # cameras immediately re-pace to the larger slice available.
+            self._budget.unregister(session_id)
             logger.info("Stopped inference task", session_id=str(session_id))
 
     async def _inference_task(
@@ -286,15 +375,24 @@ class InferenceLoopService:
             inference_fps: Target FPS for inference
             confidence_threshold: Minimum confidence for detections
         """
-        interval = 1.0 / inference_fps
         consecutive_errors = 0
         max_consecutive_errors = 10
+
+        # The session's configured inference_fps is now an upper bound, not a
+        # promise: the budget hands out the achievable rate given how many
+        # cameras are sharing the GPU. Interval is recomputed every iteration
+        # so sessions starting or stopping re-pace the survivors immediately.
+        self._budget.register(session_id)
+        interval = self._budget.interval_for(model_id)
 
         logger.info(
             "Starting inference task",
             session_id=str(session_id),
             model_id=model_id,
             config=model_config,
+            requested_fps=inference_fps,
+            scheduled_fps=round(self._budget.fps_for(model_id), 2),
+            active_sessions=self._budget.active_count,
         )
 
         while self._running and session_id in self._session_tasks:
@@ -323,17 +421,26 @@ class InferenceLoopService:
                     await asyncio.sleep(interval)
                     continue
 
-                # Submit inference via runtime router
-                result = await self._runtime_router.submit_inference(
-                    model_id=model_id,
-                    stream_id=UUID(vas_stream_id) if vas_stream_id else session_id,
-                    device_id=device_id,
-                    model_version=model_version,
-                    timestamp=datetime.now(timezone.utc),
-                    priority=5,
-                    metadata={"session_id": str(session_id)},
-                    config=model_config,
-                )
+                # Submit inference via runtime router. The semaphore caps how
+                # many inferences are in flight across all sessions; the timing
+                # around it feeds the budget so pacing tracks what the GPU is
+                # actually delivering rather than a number we guessed.
+                async with self._gpu_slots:
+                    inference_started = asyncio.get_event_loop().time()
+                    result = await self._runtime_router.submit_inference(
+                        model_id=model_id,
+                        stream_id=UUID(vas_stream_id) if vas_stream_id else session_id,
+                        device_id=device_id,
+                        model_version=model_version,
+                        timestamp=datetime.now(timezone.utc),
+                        priority=5,
+                        metadata={"session_id": str(session_id)},
+                        config=model_config,
+                    )
+                    self._budget.record_latency(
+                        model_id,
+                        asyncio.get_event_loop().time() - inference_started,
+                    )
 
                 # Check for violations with debouncing
                 if result.get("status") == "success" and result.get("result"):
@@ -409,7 +516,15 @@ class InferenceLoopService:
                 # Reset error counter on success
                 consecutive_errors = 0
 
-                # Calculate sleep time to maintain FPS
+                # Re-derive the pace from the budget every iteration, so a
+                # camera starting or stopping (or a model turning out slower
+                # than assumed) immediately re-paces this session too.
+                interval = self._budget.interval_for(model_id)
+
+                # Sleep the remainder of the interval. When the GPU is
+                # saturated, elapsed already exceeds interval and this is 0 —
+                # the loop simply runs as fast as the GPU allows instead of
+                # queueing work it cannot keep up with.
                 elapsed = asyncio.get_event_loop().time() - start_time
                 sleep_time = max(0, interval - elapsed)
                 await asyncio.sleep(sleep_time)
@@ -438,24 +553,43 @@ class InferenceLoopService:
 
                 # Exponential backoff on errors.
                 #
-                # The floor matters more than the growth rate here. `interval`
-                # is 1/inference_fps (0.1s at fps=10), so a pure
-                # interval * 2**n backoff retries a failed frame fetch after
-                # 0.2s, 0.4s, 0.8s... But a frame fetch failure is almost
-                # always a snapshot timeout, and VAS keeps the underlying
-                # ffmpeg RTSP connection alive after our client gives up.
-                # Retrying inside a few hundred ms therefore opens a second
-                # (then third) concurrent RTSP connection to a camera that is
-                # already struggling, which makes the next snapshot slower
-                # still — a self-sustaining cascade that only affects cameras
-                # the loop is actively polling. Any single success resets
-                # consecutive_errors, so it never trips the stop threshold; it
-                # just oscillates at a high failure rate.
+                # This used to need a 5s floor: fetching a frame meant asking
+                # VAS to create a snapshot, which opened a fresh RTSP
+                # connection to the camera, and retrying quickly stacked
+                # concurrent connections on a camera that was already
+                # struggling — a self-sustaining cascade.
                 #
-                # Backing off at least as long as a healthy snapshot takes
-                # (~6s) lets the stale ffmpeg exit before we ask again.
-                backoff = min(max(5.0, interval * (2 ** consecutive_errors)), 30)
+                # Reading the frame tap has no such coupling. A miss means the
+                # file isn't there or is stale, which costs one cheap HTTP GET
+                # and touches neither the camera nor the live pipeline, so the
+                # long floor is no longer warranted. A modest floor remains so
+                # a genuinely dead stream isn't polled in a tight loop.
+                backoff = min(max(1.0, interval * (2 ** consecutive_errors)), 15)
                 await asyncio.sleep(backoff)
+
+        # Natural exit (loop condition false, or the error threshold tripped).
+        # Cancellation is handled in _stop_session_task, which unregisters
+        # there because a cancelled task never reaches this line.
+        self._budget.unregister(session_id)
+
+        # Drop our own entry so _main_loop can revive this session.
+        #
+        # Without this, a task that tripped max_consecutive_errors was dead
+        # permanently: the coroutine returned but its entry stayed in
+        # _session_tasks, and _main_loop only starts tasks for sessions NOT in
+        # that dict. A transient burst — VAS restarting, a camera blipping,
+        # the frame tap not yet warm after a stream restart — therefore ended
+        # inference for that camera until the whole service was restarted,
+        # even though the session stayed LIVE and healthy.
+        #
+        # Removing the entry lets the next _main_loop pass (every 500ms) spawn
+        # a fresh task, matching the auto-recovery the stream and producer
+        # paths already have. This does not spin on a genuinely dead camera:
+        # reaching the ceiling costs 10 attempts with 1s-doubling backoff
+        # capped at 15s, so each retry cycle is ~100s rather than a hot loop.
+        #
+        # pop(..., None) because _stop_session_task may have removed it first.
+        self._session_tasks.pop(session_id, None)
 
     async def _increment_session_counter(
         self,

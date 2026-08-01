@@ -187,7 +187,6 @@ class RuntimeRouter:
         frame_data = await self.frame_fetcher.fetch_and_encode(
             device_id=device_id,
             stream_id=stream_id,
-            timeout=10.0,
         )
 
         logger.debug(
