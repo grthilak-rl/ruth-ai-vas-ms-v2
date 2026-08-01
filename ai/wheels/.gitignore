@@ -1,0 +1,15 @@
+# Optional local wheelhouse for the unified-runtime image build.
+#
+# The Dockerfile bind-mounts this directory and passes it to pip as
+# --find-links, so any wheel dropped here is installed from disk instead of
+# being downloaded. This matters most for torch (~2.2GB), which is unreliable
+# to pull over a slow link.
+#
+# Leaving the directory empty is fully supported: pip simply finds no local
+# candidate and downloads from the index as normal. That is what happens on a
+# fresh server (e.g. the MCU deploy). The directory itself must exist on every
+# machine, because the Dockerfile bind-mounts it — which is why this file is
+# committed rather than a bare .gitkeep.
+#
+# Wheels themselves must never be committed.
+*.whl

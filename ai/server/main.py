@@ -114,7 +114,7 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     # Initialize core components
     registry = ModelRegistry()
     validator = ContractValidator()
-    loader = ModelLoader()
+    loader = ModelLoader(gpu_manager=gpu_manager)
     sandbox_manager = SandboxManager()
 
     # Concurrency management (limit concurrent inferences)

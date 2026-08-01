@@ -436,8 +436,26 @@ class InferenceLoopService:
                     )
                     break
 
-                # Exponential backoff on errors
-                await asyncio.sleep(min(interval * (2 ** consecutive_errors), 30))
+                # Exponential backoff on errors.
+                #
+                # The floor matters more than the growth rate here. `interval`
+                # is 1/inference_fps (0.1s at fps=10), so a pure
+                # interval * 2**n backoff retries a failed frame fetch after
+                # 0.2s, 0.4s, 0.8s... But a frame fetch failure is almost
+                # always a snapshot timeout, and VAS keeps the underlying
+                # ffmpeg RTSP connection alive after our client gives up.
+                # Retrying inside a few hundred ms therefore opens a second
+                # (then third) concurrent RTSP connection to a camera that is
+                # already struggling, which makes the next snapshot slower
+                # still — a self-sustaining cascade that only affects cameras
+                # the loop is actively polling. Any single success resets
+                # consecutive_errors, so it never trips the stop threshold; it
+                # just oscillates at a high failure rate.
+                #
+                # Backing off at least as long as a healthy snapshot takes
+                # (~6s) lets the stale ffmpeg exit before we ask again.
+                backoff = min(max(5.0, interval * (2 ** consecutive_errors)), 30)
+                await asyncio.sleep(backoff)
 
     async def _increment_session_counter(
         self,

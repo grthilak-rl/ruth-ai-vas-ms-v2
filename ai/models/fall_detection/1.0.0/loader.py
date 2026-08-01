@@ -13,12 +13,17 @@ import logging
 logger = logging.getLogger(__name__)
 
 
-def load(weights_path: Path) -> Any:
+def load(weights_path: Path, device: str = "cpu") -> Any:
     """
     Load the YOLOv7-Pose model from weights.
 
     Args:
         weights_path: Path to the weights directory
+        device: Torch device to load onto ("cpu", "cuda:0", ...). The runtime
+            passes the device it allocated via GPUManager; declaring this
+            parameter is what opts the model into that allocation at all
+            (ModelLoader inspects the signature and falls back to a CPU-only
+            call when `device` is absent).
 
     Returns:
         Loaded model instance ready for inference
@@ -39,12 +44,14 @@ def load(weights_path: Path) -> Any:
     if not weights_file.exists():
         raise FileNotFoundError(f"Model weights not found: {weights_file}")
 
-    logger.info(f"Loading YOLOv7-Pose model from {weights_file}")
+    logger.info(f"Loading YOLOv7-Pose model from {weights_file} on {device}")
 
-    # Load model (CPU by default, runtime can move to GPU if available)
-    model = attempt_load(str(weights_file), map_location='cpu')
+    # Load straight onto the allocated device. Loading to CPU and relying on
+    # "the runtime can move it later" never happened — nothing moved it, so
+    # every inference ran on CPU (~559ms) despite an available GPU.
+    model = attempt_load(str(weights_file), map_location=device)
     model.eval()
 
-    logger.info(f"Successfully loaded fall detection model")
+    logger.info(f"Successfully loaded fall detection model on {device}")
 
     return model

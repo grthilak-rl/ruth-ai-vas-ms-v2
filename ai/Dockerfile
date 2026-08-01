@@ -77,14 +77,48 @@ ARG VARIANT=cpu
 COPY requirements.txt /tmp/requirements.txt
 COPY requirements-gpu.txt /tmp/requirements-gpu.txt
 
-# Install Python packages based on variant
-RUN if [ "$VARIANT" = "cpu" ]; then \
-        pip install --no-cache-dir -r /tmp/requirements.txt; \
+# Install Python packages based on variant.
+#
+# type=cache keeps pip's download cache on the build host between builds, so
+# any given wheel is fetched at most once per server. This replaces
+# --no-cache-dir, which was self-defeating here: it forced a fresh ~2.2GB
+# torch download on every single build.
+#
+# type=bind exposes the optional wheels/ directory from the build context as a
+# local wheelhouse. A bind mount adds no image layer, so a 2.2GB wheel never
+# lands in the build cache or the final image.
+#
+# torch is installed from that wheel BY FILEPATH, before the requirements pass.
+# --find-links alone is not enough: requirements-gpu.txt carries
+# "--extra-index-url .../whl/cu121", and pip resolves find-links and index
+# candidates into one pool, so it would still fetch 2.2GB from the index.
+# Naming the file leaves pip no choice. The requirements pass then sees
+# torch==2.1.2+cu121 already satisfied and skips it, while torchvision and
+# everything else resolve from the index as usual.
+#
+# The glob keeps this portable: no wheel present (a fresh server, e.g. the MCU
+# deploy) means the branch is skipped entirely and requirements-gpu.txt
+# downloads torch from the index as normal. Same Dockerfile everywhere.
+#
+# Only the gpu branch reads the wheelhouse. The cpu variant pins "torch==2.1.2",
+# which under PEP 440 also matches the local version "2.1.2+cu121" — so pointing
+# a CPU build at this directory could silently install the CUDA build into a
+# slim CPU image. It resolves from its own cpu index instead.
+RUN --mount=type=cache,target=/root/.cache/pip,sharing=locked \
+    --mount=type=bind,source=wheels,target=/tmp/wheels \
+    if [ "$VARIANT" = "cpu" ]; then \
+        pip install -r /tmp/requirements.txt; \
     elif [ "$VARIANT" = "gpu" ]; then \
-        pip install --no-cache-dir -r /tmp/requirements-gpu.txt; \
+        if ls /tmp/wheels/torch-*.whl >/dev/null 2>&1; then \
+            echo "Installing torch from local wheelhouse:" /tmp/wheels/torch-*.whl; \
+            pip install /tmp/wheels/torch-*.whl; \
+        else \
+            echo "No local torch wheel found; resolving torch from the index."; \
+        fi; \
+        pip install --find-links=/tmp/wheels -r /tmp/requirements-gpu.txt; \
     elif [ "$VARIANT" = "jetson" ]; then \
         # Jetson has PyTorch pre-installed, install remaining deps
-        pip install --no-cache-dir \
+        pip install --find-links=/tmp/wheels \
             fastapi==0.109.0 \
             uvicorn[standard]==0.27.0 \
             pydantic==2.5.3 \

@@ -108,8 +108,11 @@ def _lazy_load_model():
 
     from models.experimental import attempt_load
 
-    # Load model
-    model = attempt_load(str(weights_path), map_location='cpu')
+    # Load model. This path only runs when the runtime did not supply a model
+    # instance (loader.py is the normal route), so it picks its own device
+    # rather than silently pinning to CPU.
+    device = "cuda:0" if torch.cuda.is_available() else "cpu"
+    model = attempt_load(str(weights_path), map_location=device)
     model.eval()
 
     return model
@@ -147,6 +150,13 @@ def _run_inference_with_model(frame: np.ndarray, model) -> Dict[str, Any]:
     img_tensor /= 255.0  # Normalize
     if img_tensor.ndimension() == 3:
         img_tensor = img_tensor.unsqueeze(0)
+
+    # Follow the model onto whatever device it was loaded on. Deriving this
+    # from the weights rather than a global keeps CPU fallback working
+    # untouched. Postprocessing is device-safe: output_to_keypoint already
+    # does .cpu().numpy() on both boxes and keypoints.
+    model_device = next(model.parameters()).device
+    img_tensor = img_tensor.to(model_device)
 
     # Inference
     with torch.no_grad():
