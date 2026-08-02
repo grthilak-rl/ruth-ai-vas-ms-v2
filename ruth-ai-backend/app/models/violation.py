@@ -94,6 +94,17 @@ class Violation(Base, TimestampMixin):
         index=True,
     )
 
+    # The model's own, more specific violation string (e.g. "missing_vest",
+    # "possible_fall"). `type` is the stable four-value classification the
+    # schema commits to; this keeps the detail without coupling the database
+    # to a vocabulary that changes whenever a model adds a class.
+    # NULL means the model reported nothing more specific than `type`.
+    type_detail: Mapped[str | None] = mapped_column(
+        String(64),
+        nullable=True,
+        index=True,
+    )
+
     status: Mapped[ViolationStatus] = mapped_column(
         ENUM(
             ViolationStatus,

@@ -40,6 +40,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.logging import get_logger
 from app.models import Device, StreamSession, StreamState, Violation, ViolationStatus
+from app.models.enums import is_known_violation_type, resolve_violation_type
 from app.integrations.unified_runtime.router import RuntimeRouter
 from app.integrations.vas import VASClient
 
@@ -106,12 +107,17 @@ def _normalize_bbox(bbox: Any) -> Optional[Dict[str, int]]:
 # a camera slows every camera a little instead of overcommitting the GPU.
 TARGET_FPS = float(os.getenv("RUTH_INFERENCE_TARGET_FPS", "2.0"))
 MIN_FPS = float(os.getenv("RUTH_INFERENCE_MIN_FPS", "0.2"))
-# Kept at 2 deliberately. Raising it to 3 was measured and rejected: aggregate
-# throughput moved only 5.43 -> 5.60 inferences/sec (+3%), because the GPU is
-# already the binding constraint at this point, and the extra concurrent task
-# was enough to surface a session-handling race in the violation-write path
-# ("This Session's transaction has been rolled back..."). Not worth 3% for a
-# new error class. Revisit only after that write path is made concurrency-safe.
+# Kept at 2 deliberately: raising it to 3 was measured and rejected, moving
+# aggregate throughput only 5.43 -> 5.60 inferences/sec (+3%) because the GPU
+# is already the binding constraint here.
+#
+# An earlier version of this comment also blamed the bump for a "session
+# handling race" in the violation-write path. That was wrong. The
+# "This Session's transaction has been rolled back" errors were not a race and
+# had nothing to do with concurrency — each call already gets its own session.
+# They were an invalid enum value failing the insert, with the real cause
+# masked by the hand-driven session generator. Both are fixed (see _db() and
+# VIOLATION_TYPE_MAP); the value stays at 2 purely on the throughput evidence.
 INFERENCE_CONCURRENCY = int(os.getenv("RUTH_INFERENCE_CONCURRENCY", "2"))
 
 # Occupancy ceiling the scheduler aims for.
@@ -328,10 +334,7 @@ class InferenceLoopService:
         """Main loop that monitors active sessions."""
         while self._running:
             try:
-                # Get DB session from async generator
-                db_gen = self._db_session_factory()
-                db = await db_gen.__anext__()
-                try:
+                async with self._db() as db:
                     # Get all LIVE sessions
                     stmt = select(StreamSession).where(
                         StreamSession.state == StreamState.LIVE
@@ -349,11 +352,6 @@ class InferenceLoopService:
                     for session_id in list(self._session_tasks.keys()):
                         if session_id not in active_session_ids:
                             self._stop_session_task(session_id)
-                finally:
-                    try:
-                        await db_gen.__anext__()
-                    except StopAsyncIteration:
-                        pass
 
             except Exception as e:
                 logger.error(f"Error in inference main loop: {e}", exc_info=True)
@@ -661,6 +659,28 @@ class InferenceLoopService:
         self._session_devices.pop(session_id, None)
         self._latest_detections.pop(device_id, None)
 
+    def _db(self):
+        """A DB session whose rollback path actually runs on failure.
+
+        The factory is an async generator with the right semantics already:
+
+            try:     yield session; await session.commit()
+            except:  await session.rollback(); raise
+            finally: await session.close()
+
+        but driving it by hand — ``db = await gen.__anext__()`` then advancing
+        it again in a ``finally`` — never throws the exception INTO the
+        generator, so that ``except`` branch was unreachable. A failed flush
+        left the session needing rollback, the ``finally`` resumed the
+        generator at ``await session.commit()``, and SQLAlchemy raised
+        PendingRollbackError — which is what got logged, MASKING the real
+        error behind "This Session's transaction has been rolled back".
+
+        asynccontextmanager's __aexit__ calls athrow(), so the generator sees
+        the exception, rolls back, and the original error propagates intact.
+        """
+        return asynccontextmanager(self._db_session_factory)()
+
     def get_latest_detection(self, device_id: UUID) -> Optional[Dict[str, Any]]:
         """Newest detection result for a device, or None if there isn't one.
 
@@ -707,20 +727,13 @@ class InferenceLoopService:
             return
 
         try:
-            db_gen = self._db_session_factory()
-            db = await db_gen.__anext__()
-            try:
+            async with self._db() as db:
                 await db.execute(
                     update(StreamSession)
                     .where(StreamSession.id == session_id)
                     .values({column_name: column + 1})
                 )
                 await db.commit()
-            finally:
-                try:
-                    await db_gen.__anext__()
-                except StopAsyncIteration:
-                    pass
         except Exception as e:
             # Counter is observational; never break the inference loop for it.
             logger.debug(
@@ -755,18 +768,39 @@ class InferenceLoopService:
             frame_height: Height of the inferenced frame (for overlay mapping)
         """
         try:
-            # Get DB session from async generator
-            db_gen = self._db_session_factory()
-            db = await db_gen.__anext__()
-            try:
+            async with self._db() as db:
                 # Get device name
                 stmt = select(Device).where(Device.id == device_id)
                 result = await db.execute(stmt)
                 device = result.scalar_one_or_none()
                 camera_name = device.name if device else "Unknown"
 
-                # Extract detection details
-                violation_type = inference_result.get("violation_type", model_id)
+                # Extract detection details.
+                #
+                # `or model_id` rather than a dict default: models emit an
+                # explicit "violation_type": None (fall_detection does), which
+                # .get(key, default) would pass straight through as None.
+                raw_violation_type = inference_result.get("violation_type") or model_id
+                violation_enum, violation_detail = resolve_violation_type(raw_violation_type)
+
+                if not is_known_violation_type(raw_violation_type):
+                    # Loud, because this is how the next unmapped model value
+                    # announces itself. It no longer costs us the row — the
+                    # violation is stored under a generic type with the raw
+                    # string in type_detail — but it does need a human to add
+                    # it to VIOLATION_TYPE_MAP.
+                    logger.warning(
+                        "Unmapped violation_type from model — stored under fallback type. "
+                        "Add it to VIOLATION_TYPE_MAP.",
+                        raw_violation_type=raw_violation_type,
+                        model_id=model_id,
+                        fallback_type=violation_enum.value,
+                        device_id=str(device_id),
+                    )
+
+                # Keep the model's own string for labelling and evidence, so
+                # the specific value survives in bounding_boxes[].label too.
+                violation_type = raw_violation_type
                 confidence = inference_result.get("confidence", 0.0)
                 detections = inference_result.get("detections", [])
 
@@ -795,7 +829,8 @@ class InferenceLoopService:
                 violation = Violation(
                     device_id=device_id,
                     stream_session_id=session_id,
-                    type=violation_type,
+                    type=violation_enum,
+                    type_detail=violation_detail,
                     status=ViolationStatus.OPEN,  # New violations start as OPEN
                     confidence=confidence,
                     timestamp=datetime.now(timezone.utc),
@@ -831,11 +866,6 @@ class InferenceLoopService:
                             violation_type=violation_type,
                         )
                     )
-            finally:
-                try:
-                    await db_gen.__anext__()
-                except StopAsyncIteration:
-                    pass
 
         except Exception as e:
             logger.error(
@@ -879,10 +909,7 @@ class InferenceLoopService:
                 )
                 return
 
-            # Get DB session and create evidence record
-            db_gen = self._db_session_factory()
-            db = await db_gen.__anext__()
-            try:
+            async with self._db() as db:
                 evidence = Evidence(
                     violation_id=violation_id,
                     evidence_type=EvidenceType.SNAPSHOT,
@@ -900,11 +927,6 @@ class InferenceLoopService:
                     violation_id=str(violation_id),
                     snapshot_id=snapshot.id,
                 )
-            finally:
-                try:
-                    await db_gen.__anext__()
-                except StopAsyncIteration:
-                    pass
 
         except Exception as e:
             logger.error(
