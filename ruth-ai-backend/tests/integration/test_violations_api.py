@@ -106,13 +106,13 @@ class TestListViolations:
             assert violation["status"] == "open"
 
     @pytest.mark.asyncio
-    async def test_list_violations_filter_by_device(
+    async def test_list_violations_filter_by_camera(
         self,
         client: AsyncClient,
         seeded_device: dict,
         test_engine: AsyncEngine,
     ):
-        """Filters violations by device_id."""
+        """Filters violations by camera_id (the contract's parameter name)."""
         device_id = seeded_device["id"]
 
         # Create a violation for the device
@@ -136,12 +136,96 @@ class TestListViolations:
             db.add(violation)
             await db.commit()
 
-        # Filter by device
+        # Filter by camera
+        response = await client.get(f"/api/v1/violations?camera_id={device_id}")
+
+        assert response.status_code == 200
+        data = response.json()
+        assert len(data["items"]) > 0
+        for violation in data["items"]:
+            assert violation["camera_id"] == str(device_id)
+
+    @pytest.mark.asyncio
+    async def test_list_violations_camera_filter_excludes_other_cameras(
+        self,
+        client: AsyncClient,
+        seeded_device: dict,
+        test_engine: AsyncEngine,
+    ):
+        """camera_id actually narrows the result set.
+
+        Regression guard: the endpoint used to accept only `device_id`, so a
+        `camera_id` filter was silently dropped and callers got every
+        camera's violations back with a 200.
+        """
+        device_id = seeded_device["id"]
+        other_camera_id = uuid.uuid4()
+
+        session_factory = async_sessionmaker(
+            bind=test_engine,
+            class_=AsyncSession,
+            expire_on_commit=False,
+        )
+
+        async with session_factory() as db:
+            db.add(
+                Violation(
+                    device_id=device_id,
+                    type=ViolationType.FALL_DETECTED,
+                    status=ViolationStatus.OPEN,
+                    confidence=0.85,
+                    timestamp=datetime.now(timezone.utc),
+                    camera_name="Test",
+                    model_id="test",
+                    model_version="1.0",
+                )
+            )
+            await db.commit()
+
+        # A camera with no violations of its own must come back empty, not
+        # with the seeded device's violations.
+        response = await client.get(f"/api/v1/violations?camera_id={other_camera_id}")
+
+        assert response.status_code == 200
+        assert response.json()["items"] == []
+
+    @pytest.mark.asyncio
+    async def test_list_violations_device_id_alias_still_works(
+        self,
+        client: AsyncClient,
+        seeded_device: dict,
+        test_engine: AsyncEngine,
+    ):
+        """The deprecated `device_id` alias keeps working for old callers."""
+        device_id = seeded_device["id"]
+
+        session_factory = async_sessionmaker(
+            bind=test_engine,
+            class_=AsyncSession,
+            expire_on_commit=False,
+        )
+
+        async with session_factory() as db:
+            db.add(
+                Violation(
+                    device_id=device_id,
+                    type=ViolationType.FALL_DETECTED,
+                    status=ViolationStatus.OPEN,
+                    confidence=0.85,
+                    timestamp=datetime.now(timezone.utc),
+                    camera_name="Test",
+                    model_id="test",
+                    model_version="1.0",
+                )
+            )
+            await db.commit()
+
         response = await client.get(f"/api/v1/violations?device_id={device_id}")
 
         assert response.status_code == 200
         data = response.json()
-        for violation in data["violations"]:
+        assert len(data["items"]) > 0
+        for violation in data["items"]:
             assert violation["camera_id"] == str(device_id)
 
     @pytest.mark.asyncio

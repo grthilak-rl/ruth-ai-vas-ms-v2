@@ -95,7 +95,12 @@ def build_evidence_summary(evidence_list: list[Evidence]) -> ViolationEvidenceSu
 async def list_violations(
     db: DBSession,
     violation_status: str | None = Query(None, alias="status", description="Filter by status"),
-    device_id: UUID | None = Query(None, description="Filter by device"),
+    camera_id: UUID | None = Query(None, description="Filter by camera ID"),
+    device_id: UUID | None = Query(
+        None,
+        deprecated=True,
+        description="Deprecated alias for camera_id. Use camera_id.",
+    ),
     since: datetime | None = Query(None, description="Violations after this timestamp"),
     until: datetime | None = Query(None, description="Violations before this timestamp"),
     limit: int = Query(100, ge=1, le=1000, description="Maximum results"),
@@ -103,10 +108,17 @@ async def list_violations(
 ) -> ViolationListResponse:
     """List all violations with optional filtering.
 
+    The camera filter is named `camera_id` per API Contract §1.3. This
+    endpoint previously only accepted `device_id`, so the frontend's
+    `camera_id` was silently dropped and every caller got all cameras
+    back. `device_id` stays accepted as a deprecated alias so existing
+    callers keep working; `camera_id` wins when both are supplied.
+
     Args:
         db: Database session
         violation_status: Filter by status
-        device_id: Filter by device UUID
+        camera_id: Filter by camera UUID (the device's id)
+        device_id: Deprecated alias for camera_id
         since: Only violations after this timestamp
         until: Only violations before this timestamp
         limit: Maximum results to return
@@ -115,6 +127,7 @@ async def list_violations(
     Returns:
         List of violations with total count
     """
+    camera_filter = camera_id if camera_id is not None else device_id
     # Build query with eager loading of evidence
     stmt = (
         select(Violation)
@@ -126,8 +139,8 @@ async def list_violations(
     if violation_status is not None:
         stmt = stmt.where(Violation.status == violation_status)
 
-    if device_id is not None:
-        stmt = stmt.where(Violation.device_id == device_id)
+    if camera_filter is not None:
+        stmt = stmt.where(Violation.device_id == camera_filter)
 
     if since is not None:
         stmt = stmt.where(Violation.timestamp >= since)
@@ -151,6 +164,7 @@ async def list_violations(
         total=total,
         returned=len(violations),
         status=violation_status,
+        camera_id=str(camera_filter) if camera_filter else None,
     )
 
     return ViolationListResponse(

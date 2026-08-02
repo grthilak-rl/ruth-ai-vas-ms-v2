@@ -95,7 +95,7 @@ class ViolationQueryParams(BaseModel):
     """Query parameters for GET /api/v1/violations."""
 
     status: str | None = Field(None, description="Filter by status")
-    device_id: uuid.UUID | None = Field(None, description="Filter by device")
+    camera_id: uuid.UUID | None = Field(None, description="Filter by camera ID")
     since: datetime | None = Field(None, description="Filter by timestamp (after)")
     limit: int = Field(default=100, ge=1, le=1000, description="Maximum results")
     offset: int = Field(default=0, ge=0, description="Pagination offset")
