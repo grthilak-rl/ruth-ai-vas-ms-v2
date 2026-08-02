@@ -13,9 +13,8 @@ import './CameraGridCell.css';
  * Individual camera cell in the grid with video, controls, and status.
  * Per F7 §4.2.3:
  * - Video area with detection overlays
- * - Status bar with camera name and status indicator
- * - AI controls with model selector and detection status
- * - Actions bar with fullscreen button and violation count
+ * - Status bar with camera name, detection status and status indicator
+ * - AI controls with model selector, fullscreen button and violation count
  *
  * States per F7 §8:
  * - Loading: Connecting state
@@ -155,6 +154,9 @@ export function CameraGridCell({
           inOut={camera.in_out}
           displayName={label}
         />
+        <span className={`camera-grid-cell__detection ${detectionStatusInfo.className}`}>
+          {detectionStatusInfo.icon} {detectionStatusInfo.label}
+        </span>
         <span className={`camera-grid-cell__status ${statusIndicator.className}`}>
           {statusIndicator.icon} {statusIndicator.label}
         </span>
@@ -171,8 +173,19 @@ export function CameraGridCell({
             onModelToggle={handleModelToggle}
             modelConfigs={modelConfigs}
           />
-          <span className={`camera-grid-cell__detection ${detectionStatusInfo.className}`}>
-            {detectionStatusInfo.icon} {detectionStatusInfo.label}
+          <button
+            type="button"
+            className="camera-grid-cell__fullscreen-button"
+            onClick={handleFullscreen}
+            aria-label={`Open ${label} in fullscreen`}
+            disabled={status === 'offline' || status === 'error'}
+          >
+            ⛶ Fullscreen
+          </button>
+          <span className="camera-grid-cell__violation-count">
+            {violationCount !== undefined && violationCount >= 0
+              ? `${violationCount} violation${violationCount !== 1 ? 's' : ''}`
+              : '--'}
           </span>
         </div>
         {detectionStatus === 'degraded' && (
@@ -180,24 +193,6 @@ export function CameraGridCell({
             ⚠ AI may be slower or less accurate
           </div>
         )}
-      </div>
-
-      {/* Actions Bar */}
-      <div className="camera-grid-cell__actions">
-        <button
-          type="button"
-          className="camera-grid-cell__fullscreen-button"
-          onClick={handleFullscreen}
-          aria-label={`Open ${label} in fullscreen`}
-          disabled={status === 'offline' || status === 'error'}
-        >
-          ⛶ Fullscreen
-        </button>
-        <span className="camera-grid-cell__violation-count">
-          {violationCount !== undefined && violationCount >= 0
-            ? `${violationCount} violation${violationCount !== 1 ? 's' : ''}`
-            : '--'}
-        </span>
       </div>
     </div>
   );

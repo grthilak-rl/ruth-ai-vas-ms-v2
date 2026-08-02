@@ -10,6 +10,13 @@
   border-radius: 0.5rem;
   height: 100%;
   position: relative;
+
+  /* The two rows under the video are kept the same height. Row 1's tallest
+     element is a status badge (0.75rem text at line-height 1.5, plus 0.25rem
+     padding = 1.625rem), so the row-2 controls are pinned to that same box
+     and both rows share one min-height floor. */
+  --camera-cell-control-height: 1.625rem;
+  --camera-cell-row-height: 2.6875rem;
 }
 
 .camera-grid-cell__video {
@@ -21,10 +28,14 @@
   border-radius: 0.5rem 0.5rem 0 0;
 }
 
+/* Row 1: camera name (grows) + detection badge + live/status badge. */
 .camera-grid-cell__status-bar {
   display: flex;
   justify-content: space-between;
   align-items: center;
+  gap: 0.5rem;
+  box-sizing: border-box;
+  min-height: var(--camera-cell-row-height);
   padding: 0.5rem 0.75rem;
   background: var(--color-bg-secondary, #f3f4f6);
   border-top: 1px solid var(--color-border, #d1d5db);
@@ -70,14 +81,19 @@
 }
 
 .camera-grid-cell__controls {
+  box-sizing: border-box;
+  min-height: var(--camera-cell-row-height);
   padding: 0.5rem 0.75rem;
+  background: var(--color-bg-secondary, #f3f4f6);
   border-top: 1px solid var(--color-border, #d1d5db);
+  border-radius: 0 0 0.5rem 0.5rem;
 }
 
+/* Row 2: model selector + fullscreen on the left, violation count pushed
+   to the right end by the auto margin on the count itself. */
 .camera-grid-cell__ai-controls {
   display: flex;
   align-items: center;
-  justify-content: space-between;
   gap: 0.5rem;
 }
 
@@ -119,17 +135,11 @@
   color: #92400e;
 }
 
-.camera-grid-cell__actions {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  padding: 0.5rem 0.75rem;
-  background: var(--color-bg-secondary, #f3f4f6);
-  border-top: 1px solid var(--color-border, #d1d5db);
-}
-
+/* Sits beside the model selector, so it must match the trigger's box. */
 .camera-grid-cell__fullscreen-button {
-  padding: 0.375rem 0.75rem;
+  flex-shrink: 0;
+  white-space: nowrap;
+  padding: 0 0.625rem;
   border: 1px solid var(--color-border, #d1d5db);
   background: var(--color-bg-primary, #ffffff);
   color: var(--color-text-primary, #1f2937);
@@ -156,7 +166,27 @@
 }
 
 .camera-grid-cell__violation-count {
+  margin-left: auto;
+  align-self: center;
   font-size: 0.75rem;
   font-weight: 500;
+  white-space: nowrap;
   color: var(--color-text-secondary, #6b7280);
+}
+
+/* Both row-2 controls are pinned to the same box as a row-1 badge, so the
+   two rows come out the same height. Padding is horizontal only — the
+   height and centering come from the flex box itself, which keeps the
+   0.75rem label from clipping. */
+.camera-grid-cell__ai-controls .ai-model-selector__trigger,
+.camera-grid-cell__fullscreen-button {
+  display: inline-flex;
+  align-items: center;
+  box-sizing: border-box;
+  height: var(--camera-cell-control-height);
+  line-height: 1;
+}
+
+.camera-grid-cell__ai-controls .ai-model-selector__trigger {
+  padding: 0 0.625rem;
 }
