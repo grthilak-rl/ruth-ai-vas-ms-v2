@@ -56,6 +56,11 @@ export const queryKeys = {
     list: () => ['devices', 'list'] as const,
     detail: (id: string) => ['devices', 'detail', id] as const,
     manways: () => ['devices', 'manways'] as const,
+    /**
+     * Latest AI detections for one camera. Keyed by device so every view
+     * showing that camera shares a single poll and a single cache entry.
+     */
+    detections: (id: string) => ['devices', 'detections', id] as const,
   },
 
   // Models domain

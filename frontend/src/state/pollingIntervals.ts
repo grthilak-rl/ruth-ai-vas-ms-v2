@@ -36,6 +36,15 @@ export const POLLING_INTERVALS = {
   MODELS_STATUS: 60 * 1000,
 
   /**
+   * Live detection overlay polling interval.
+   * 500ms — the backend inference loop targets ~2fps per camera, so polling
+   * faster than this just re-reads the same result, and slower would drop
+   * frames the backend already paid for. React Query dedupes by query key,
+   * so this is one request per camera regardless of how many tiles show it.
+   */
+  DETECTIONS: 500,
+
+  /**
    * Devices list polling interval.
    * 120s — this endpoint composes Ruth-DB + VAS state per camera and
    * is by far the heaviest. Mutations (start/stop inference) invalidate

@@ -209,3 +209,12 @@ export type {
   CapacityMetrics,
   UsageLevel,
 } from './hardware.api';
+
+export {
+  fetchLatestDetections,
+} from './detections.api';
+export type {
+  DetectionBox,
+  DetectionResult,
+  LatestDetectionResponse,
+} from './detections.api';

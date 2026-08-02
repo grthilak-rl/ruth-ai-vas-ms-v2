@@ -1,19 +1,18 @@
-import { useState, useRef, useCallback, useEffect } from 'react';
+import { useState, useRef, useCallback, useEffect, useMemo } from 'react';
 import type { MouseEvent as ReactMouseEvent } from 'react';
 import { VideoErrorBoundary } from './VideoErrorBoundary';
 import { connectToStream, disconnectStream, type WebRTCConnection } from '../../services/webrtc';
+import { type FallDetectionResult, drawFallDetections } from '../../services/fallDetection';
 import {
-  FallDetectionManager,
-  type FallDetectionResult,
-  type Detection,
-  drawFallDetections,
-  isPersonFallen,
-} from '../../services/fallDetection';
-import { PPEDetectionManager, type PPEDetectionResult, type PPEPersonDetection, drawPPEDetections } from '../../services/ppeDetection';
-import { TankDetectionManager, type TankDetectionResult, drawTankDetections } from '../../services/tankDetection';
-import { ChaneTankMonitorManager, type ChaneTankResult, drawChaneTankMonitor } from '../../services/chaneTankMonitor';
+  type PPEDetectionResult,
+  type RawUnifiedPPEResponse,
+  drawPPEDetections,
+  transformAPIResponse as transformPPEResponse,
+} from '../../services/ppeDetection';
+import { type TankDetectionResult, drawTankDetections } from '../../services/tankDetection';
+import { type ChaneTankResult, drawChaneTankMonitor } from '../../services/chaneTankMonitor';
 import { estimateRadiusFromClick } from '../../services/roiRayCast';
-import { reportFallEvent, reportPPEEvent, type BoundingBox, type PPEViolationDetail } from '../../services/api';
+import { useCameraDetections } from '../../state/hooks/useCameraDetections';
 import './LiveVideoPlayer.css';
 
 /**
@@ -97,10 +96,80 @@ export function LiveVideoPlayer({
     isAvailable ? 'idle' : 'offline'
   );
   const [connectionStatus, setConnectionStatus] = useState<string>('');
-  const [fallDetection, setFallDetection] = useState<FallDetectionResult | null>(null);
-  const [ppeDetection, setPPEDetection] = useState<PPEDetectionResult | null>(null);
-  const [tankDetection, setTankDetection] = useState<TankDetectionResult | null>(null);
-  const [chaneTankDetection, setChaneTankDetection] = useState<ChaneTankResult | null>(null);
+
+  // Detections are READ from the backend, not computed here.
+  //
+  // The backend inference loop already runs every active model against frames
+  // tapped from VAS's decode pipeline, so a browser-side loop would be a
+  // second inference of the same footage — the cost that made a 16-tile wall
+  // untenable (16 JPEG encodes + 16 POSTs per second on the main thread).
+  // Reading instead makes the backend the single source and leaves this
+  // component doing nothing but drawing.
+  //
+  // The hook is keyed by device, so several tiles showing one camera share a
+  // single poll.
+  const { detection } = useCameraDetections(deviceId, isDetectionActive);
+
+  // Fan the one backend result out to the per-model shapes the draw effect
+  // below already expects. Only the model that actually ran has a result, so
+  // at most one of these is non-null. Memoised because the draw effect
+  // depends on them by reference and would otherwise re-run every render.
+  const { fallDetection, ppeDetection, tankDetection, chaneTankDetection } = useMemo(() => {
+    const empty = {
+      fallDetection: null as FallDetectionResult | null,
+      ppeDetection: null as PPEDetectionResult | null,
+      tankDetection: null as TankDetectionResult | null,
+      chaneTankDetection: null as ChaneTankResult | null,
+    };
+    if (!detection?.result) return empty;
+
+    const raw = detection.result as Record<string, unknown>;
+    const frameWidth = detection.frame_width ?? undefined;
+    const frameHeight = detection.frame_height ?? undefined;
+
+    switch (detection.model_id) {
+      case 'fall_detection':
+        // Boxes are in the model's 640x640 space; drawFallDetections scales
+        // by MODEL_SIZE, so no coordinate work is needed. The defaults mirror
+        // what the old client-side path applied before handing results on —
+        // the renderer assumes `detections` is always an array.
+        return {
+          ...empty,
+          fallDetection: {
+            ...(raw as unknown as FallDetectionResult),
+            detections: (raw.detections as FallDetectionResult['detections']) ?? [],
+            confidence: (raw.confidence as number) ?? 0,
+            videoWidth: frameWidth,
+            videoHeight: frameHeight,
+          },
+        };
+      case 'ppe_detection':
+        // MUST go through the same transform the browser-side path used. The
+        // runtime returns flat {item, status, bbox} rows; drawPPEDetections
+        // destructures {person_bbox, ppe_items, violations, missing_ppe} off
+        // each element and calls violations.length. Passing the raw response
+        // through crashes the render on the first PPE result.
+        //
+        // Frame geometry comes from the backend's tapped frame rather than
+        // this <video> element, since PPE reports in frame pixels and the two
+        // are not necessarily the same size.
+        return {
+          ...empty,
+          ppeDetection: transformPPEResponse(
+            raw as unknown as RawUnifiedPPEResponse,
+            'full',
+            frameWidth,
+            frameHeight
+          ),
+        };
+      case 'tank_overflow_monitoring':
+        return { ...empty, tankDetection: raw as unknown as TankDetectionResult };
+      case 'chane_tank_monitor':
+        return { ...empty, chaneTankDetection: raw as unknown as ChaneTankResult };
+      default:
+        return empty;
+    }
+  }, [detection]);
   // chane_tank_monitor click-to-set-ROI: provisional circle (intrinsic px),
   // not committed until the operator confirms.
   const [provisionalRoi, setProvisionalRoi] = useState<{ cx: number; cy: number; r: number } | null>(null);
@@ -129,141 +198,12 @@ export function LiveVideoPlayer({
   // circular useCallback dependency.
   const reconnectAttemptsRef = useRef(0);
   const handleConnectRef = useRef<(() => Promise<void>) | null>(null);
-  const fallDetectionRef = useRef<FallDetectionManager | null>(null);
-  const ppeDetectionRef = useRef<PPEDetectionManager | null>(null);
-  const tankDetectionRef = useRef<TankDetectionManager | null>(null);
-  const chaneTankDetectionRef = useRef<ChaneTankMonitorManager | null>(null);
-  const lastFallReportTimeRef = useRef<number>(0);
-  const lastPPEReportTimeRef = useRef<number>(0);
   const streamIdRef = useRef<string | null>(null);  // Use ref for immediate access in callbacks
 
-  // Debounce interval for reporting (30 seconds between reports for same device)
-  const FALL_REPORT_DEBOUNCE_MS = 30000;
-  const PPE_REPORT_DEBOUNCE_MS = 30000;
-
-  /**
-   * Report a fall detection to the backend (with debouncing)
-   * Only reports if enough time has passed since the last report
-   * Now includes VAS stream ID for snapshot capture
-   */
-  const reportFallToBackend = useCallback(async (
-    detections: Detection[],
-    confidence: number
-  ) => {
-    const now = Date.now();
-
-    // Check debounce - don't report if we recently reported a fall
-    if (now - lastFallReportTimeRef.current < FALL_REPORT_DEBOUNCE_MS) {
-      console.log('[LiveVideoPlayer] Skipping fall report - debounced');
-      return;
-    }
-
-    // Convert detections to bounding boxes for the API
-    const boundingBoxes: BoundingBox[] = detections
-      .filter(d => isPersonFallen(d))
-      .map(d => {
-        const [x1, y1, x2, y2] = d.bbox;
-        return {
-          x: Math.round(x1),
-          y: Math.round(y1),
-          w: Math.round(x2 - x1),
-          h: Math.round(y2 - y1),
-        };
-      });
-
-    if (boundingBoxes.length === 0) {
-      return;
-    }
-
-    try {
-      // Use ref for immediate access to latest stream ID (state may be stale in callback)
-      const streamId = streamIdRef.current;
-      console.log('[LiveVideoPlayer] Reporting fall to backend for device:', deviceId, 'stream:', streamId);
-      const response = await reportFallEvent(
-        deviceId,
-        confidence,
-        boundingBoxes,
-        streamId || undefined  // Pass stream ID for snapshot capture
-      );
-      lastFallReportTimeRef.current = now;
-      console.log('[LiveVideoPlayer] Fall reported successfully:', response);
-
-      if (response.violation_id) {
-        console.log('[LiveVideoPlayer] Violation created:', response.violation_id);
-      }
-    } catch (error) {
-      console.error('[LiveVideoPlayer] Failed to report fall:', error);
-    }
-  }, [deviceId]);  // Use ref for streamId, so no dependency needed
-
-  /**
-   * Report a PPE violation to the backend (with debouncing)
-   */
-  const reportPPEToBackend = useCallback(async (
-    detections: PPEPersonDetection[],
-    confidence: number
-  ) => {
-    const now = Date.now();
-
-    // Check debounce
-    if (now - lastPPEReportTimeRef.current < PPE_REPORT_DEBOUNCE_MS) {
-      console.log('[LiveVideoPlayer] Skipping PPE report - debounced');
-      return;
-    }
-
-    // Convert detections to violation details for the API.
-    // Per-box confidence is carried through so the violation detail overlay
-    // can render "No Hard Hat 0.62" over the stored snapshot.
-    const violations: PPEViolationDetail[] = detections
-      .filter(d => d.violations.length > 0)
-      .map((d, idx) => ({
-        person_index: idx,
-        missing_ppe: d.missing_ppe,
-        bounding_box: {
-          x: Math.round(d.person_bbox.x1),
-          y: Math.round(d.person_bbox.y1),
-          w: Math.round(d.person_bbox.x2 - d.person_bbox.x1),
-          h: Math.round(d.person_bbox.y2 - d.person_bbox.y1),
-          confidence: d.person_bbox.confidence,
-        },
-      }));
-
-    if (violations.length === 0) {
-      return;
-    }
-
-    try {
-      const streamId = streamIdRef.current;
-      console.log('[LiveVideoPlayer] Reporting PPE violation to backend for device:', deviceId, 'stream:', streamId);
-
-      // The boxes above are in the inference frame's pixel space, which is the
-      // native size of the <video> element we extracted the frame from. Send
-      // those dimensions so the review overlay can scale onto the snapshot.
-      const video = videoRef.current;
-      const frameDimensions =
-        video?.videoWidth && video?.videoHeight
-          ? { width: video.videoWidth, height: video.videoHeight }
-          : undefined;
-
-      const response = await reportPPEEvent(
-        deviceId,
-        confidence,
-        violations,
-        streamId || undefined,
-        undefined,
-        undefined,
-        frameDimensions
-      );
-      lastPPEReportTimeRef.current = now;
-      console.log('[LiveVideoPlayer] PPE violation reported successfully:', response);
-
-      if (response.violation_id) {
-        console.log('[LiveVideoPlayer] Violation created:', response.violation_id);
-      }
-    } catch (error) {
-      console.error('[LiveVideoPlayer] Failed to report PPE violation:', error);
-    }
-  }, [deviceId]);
+  // Violation reporting deliberately removed: the backend inference loop
+  // already creates violation records for every active session. Reporting
+  // from here as well produced duplicate rows for the same event, and did
+  // so once per open browser view.
 
   // Draw detections on canvas whenever fallDetection, ppeDetection, or tankDetection updates
   useEffect(() => {
@@ -462,26 +402,6 @@ export function LiveVideoPlayer({
       reconnectTimeoutRef.current = null;
     }
 
-    if (fallDetectionRef.current) {
-      fallDetectionRef.current.stop();
-      fallDetectionRef.current = null;
-    }
-
-    if (ppeDetectionRef.current) {
-      ppeDetectionRef.current.stop();
-      ppeDetectionRef.current = null;
-    }
-
-    if (tankDetectionRef.current) {
-      tankDetectionRef.current.stop();
-      tankDetectionRef.current = null;
-    }
-
-    if (chaneTankDetectionRef.current) {
-      chaneTankDetectionRef.current.stop();
-      chaneTankDetectionRef.current = null;
-    }
-
     if (connectionRef.current) {
       await disconnectStream(connectionRef.current);
       connectionRef.current = null;
@@ -491,10 +411,6 @@ export function LiveVideoPlayer({
       videoRef.current.srcObject = null;
     }
 
-    setFallDetection(null);
-    setPPEDetection(null);
-    setTankDetection(null);
-    setChaneTankDetection(null);
     streamIdRef.current = null;
   }, []);
 
@@ -572,67 +488,9 @@ export function LiveVideoPlayer({
         setPlayerState('playing');
         console.log('[LiveVideoPlayer] WebRTC stream playing');
 
-        // Start AI detection after video is playing
-        if (isDetectionActive) {
-          // Start fall detection if enabled
-          if (isFallDetectionEnabled) {
-            fallDetectionRef.current = new FallDetectionManager({ fps: 2 });  // 500ms interval
-            fallDetectionRef.current.start(video, (result) => {
-              console.log('[LiveVideoPlayer] Got fall detection result:', result.detections?.length || 0, 'detections');
-              setFallDetection(result);
-
-              const fallenDetections = result.detections?.filter(d => isPersonFallen(d)) || [];
-              if (fallenDetections.length > 0) {
-                console.log('[LiveVideoPlayer] Fall detected!', fallenDetections.length, 'person(s) fallen');
-                reportFallToBackend(result.detections || [], result.confidence);
-              }
-            });
-            console.log('[LiveVideoPlayer] Fall detection started');
-          }
-
-          // Start PPE detection if enabled
-          if (isPPEDetectionEnabled) {
-            ppeDetectionRef.current = new PPEDetectionManager({ fps: 1, mode: 'full' });  // 1 FPS with GPU acceleration
-            ppeDetectionRef.current.start(video, (result) => {
-              console.log('[LiveVideoPlayer] Got PPE detection result:', result.detections?.length || 0, 'detections');
-              setPPEDetection(result);
-
-              if (result.violation_detected) {
-                console.log('[LiveVideoPlayer] PPE violation detected!');
-                reportPPEToBackend(result.detections || [], result.detections?.[0]?.person_bbox.confidence || 0.5);
-              }
-            });
-            console.log('[LiveVideoPlayer] PPE detection started');
-          }
-
-          // Start tank overflow detection if enabled
-          if (isTankOverflowEnabled) {
-            tankDetectionRef.current = new TankDetectionManager({
-              fps: 1,
-              tankCorners: tankCorners,
-              capacityLiters: 0.3, // Default 300ml for coffee mug testing
-              alertThreshold: 90,
-            });
-            tankDetectionRef.current.start(video, (result) => {
-              console.log('[LiveVideoPlayer] Got tank detection result:', result.level_percent.toFixed(1) + '%');
-              setTankDetection(result);
-            });
-            console.log('[LiveVideoPlayer] Tank overflow detection started');
-          }
-
-          // Start chane tank monitor if enabled
-          if (isChaneTankEnabled) {
-            chaneTankDetectionRef.current = new ChaneTankMonitorManager({
-              fps: 2,
-              roiCircle: chaneTankRoiCircle,
-            });
-            chaneTankDetectionRef.current.start(video, (result) => {
-              console.log('[LiveVideoPlayer] Got chane tank result:', result.fill_percentage.toFixed(1) + '%', 'roi:', result.roi?.source);
-              setChaneTankDetection(result);
-            });
-            console.log('[LiveVideoPlayer] Chane tank monitor started');
-          }
-        }
+        // No client-side inference here any more: the backend inference
+        // loop is the single detection source and this component only
+        // draws what useCameraDetections reads back.
       } else {
         console.error('[LiveVideoPlayer] Video element not found');
         setPlayerState('error');
@@ -643,7 +501,10 @@ export function LiveVideoPlayer({
       setPlayerState('error');
       setConnectionStatus('Connection failed');
     }
-  }, [deviceId, isDetectionActive, isFallDetectionEnabled, isPPEDetectionEnabled, isTankOverflowEnabled, isChaneTankEnabled, tankCorners, chaneTankRoiCircle, reportFallToBackend, reportPPEToBackend, scheduleReconnect]);
+    // Connecting no longer depends on which models are enabled — that is the
+    // backend's business now — so the model flags are out of the deps and a
+    // toggle no longer tears down and rebuilds the WebRTC connection.
+  }, [deviceId, scheduleReconnect]);
 
   // Keep the ref pointing at the current handleConnect so scheduleReconnect
   // can call it without taking a dependency on it.
@@ -690,79 +551,10 @@ export function LiveVideoPlayer({
     }
   }, [isAvailable, playerState, cleanup]);
 
-  // Handle detection toggle changes while stream is playing
-  useEffect(() => {
-    const video = videoRef.current;
-
-    // Debug: Log detection state changes
-    console.log('[LiveVideoPlayer] Detection toggle effect:', {
-      playerState,
-      isDetectionActive,
-      isPPEDetectionEnabled,
-      isFallDetectionEnabled,
-      showOverlays,
-      hasVideo: !!video,
-      ppeDetectionRunning: !!ppeDetectionRef.current,
-    });
-
-    if (playerState !== 'playing' || !video) {
-      return;
-    }
-
-    // Handle fall detection toggle
-    if (isDetectionActive && isFallDetectionEnabled && !fallDetectionRef.current) {
-      console.log('[LiveVideoPlayer] Starting fall detection (enabled while playing)');
-      fallDetectionRef.current = new FallDetectionManager({ fps: 2 });
-      fallDetectionRef.current.start(video, (result) => {
-        setFallDetection(result);
-        const fallenDetections = result.detections?.filter(d => isPersonFallen(d)) || [];
-        if (fallenDetections.length > 0) {
-          reportFallToBackend(result.detections || [], result.confidence);
-        }
-      });
-    } else if ((!isDetectionActive || !isFallDetectionEnabled) && fallDetectionRef.current) {
-      console.log('[LiveVideoPlayer] Stopping fall detection');
-      fallDetectionRef.current.stop();
-      fallDetectionRef.current = null;
-      setFallDetection(null);
-    }
-
-    // Handle PPE detection toggle
-    if (isDetectionActive && isPPEDetectionEnabled && !ppeDetectionRef.current) {
-      console.log('[LiveVideoPlayer] Starting PPE detection (enabled while playing)');
-      ppeDetectionRef.current = new PPEDetectionManager({ fps: 1, mode: 'full' });
-      ppeDetectionRef.current.start(video, (result) => {
-        setPPEDetection(result);
-        if (result.violation_detected) {
-          reportPPEToBackend(result.detections || [], result.detections?.[0]?.person_bbox.confidence || 0.5);
-        }
-      });
-    } else if ((!isDetectionActive || !isPPEDetectionEnabled) && ppeDetectionRef.current) {
-      console.log('[LiveVideoPlayer] Stopping PPE detection');
-      ppeDetectionRef.current.stop();
-      ppeDetectionRef.current = null;
-      setPPEDetection(null);
-    }
-
-    // Handle tank overflow detection toggle
-    if (isDetectionActive && isTankOverflowEnabled && !tankDetectionRef.current) {
-      console.log('[LiveVideoPlayer] Starting tank overflow detection (enabled while playing)');
-      tankDetectionRef.current = new TankDetectionManager({
-        fps: 1,
-        tankCorners: tankCorners,
-        capacityLiters: 0.3, // Default 300ml for coffee mug testing
-        alertThreshold: 90,
-      });
-      tankDetectionRef.current.start(video, (result) => {
-        setTankDetection(result);
-      });
-    } else if ((!isDetectionActive || !isTankOverflowEnabled) && tankDetectionRef.current) {
-      console.log('[LiveVideoPlayer] Stopping tank overflow detection');
-      tankDetectionRef.current.stop();
-      tankDetectionRef.current = null;
-      setTankDetection(null);
-    }
-  }, [isDetectionActive, isFallDetectionEnabled, isPPEDetectionEnabled, isTankOverflowEnabled, playerState, deviceId, tankCorners, reportFallToBackend, reportPPEToBackend]);
+  // The start/stop-managers-on-toggle effect is gone with them. Enabling or
+  // disabling a model is now purely a backend concern: the inference loop
+  // starts or stops that camera's session, and this component simply stops
+  // receiving results for it.
 
   // Cleanup on unmount
   useEffect(() => {

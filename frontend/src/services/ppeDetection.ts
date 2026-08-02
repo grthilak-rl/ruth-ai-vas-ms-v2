@@ -59,7 +59,7 @@ interface RawPPEDetection {
   model_source: string;
 }
 
-interface RawUnifiedPPEResponse {
+export interface RawUnifiedPPEResponse {
   violation_detected: boolean;
   violation_type: string | null;
   severity: string;
@@ -136,7 +136,17 @@ function blobToBase64(blob: Blob): Promise<string> {
  * Transform unified runtime API response to the expected PPEDetectionResult format
  * Groups flat detections into person-centric structure
  */
-function transformAPIResponse(
+/**
+ * Group the runtime's flat PPE detections into per-person records.
+ *
+ * Exported because the backend inference loop returns this same raw runtime
+ * response, and overlays fed from the backend must go through exactly the
+ * transform the browser-side path used. Handing the raw response straight to
+ * drawPPEDetections looks plausible — it has a `detections` array — but the
+ * elements are flat {item, status, bbox} rows, not the {person_bbox,
+ * ppe_items, violations, missing_ppe} records the renderer destructures.
+ */
+export function transformAPIResponse(
   rawResponse: RawUnifiedPPEResponse,
   mode: 'presence' | 'violation' | 'full',
   videoWidth?: number,
@@ -145,9 +155,11 @@ function transformAPIResponse(
   const meta = rawResponse.metadata ?? {};
   const personDetections: PPEPersonDetection[] = [];
 
-  // Find all person detections first
-  const persons = rawResponse.detections.filter(d => d.item === 'person' || d.model_source === 'person');
-  const ppeItems = rawResponse.detections.filter(d => d.item !== 'person' && d.model_source !== 'person');
+  // Find all person detections first. Default to empty: a result with no
+  // detections key at all is a legitimate "nothing seen" response.
+  const rawDetections = rawResponse.detections ?? [];
+  const persons = rawDetections.filter(d => d.item === 'person' || d.model_source === 'person');
+  const ppeItems = rawDetections.filter(d => d.item !== 'person' && d.model_source !== 'person');
 
   // If persons detected, group PPE items with each person
   if (persons.length > 0) {
@@ -395,8 +407,16 @@ export function drawPPEDetections(
   const scaleX = videoWidth ? canvasWidth / videoWidth : 1;
   const scaleY = videoHeight ? canvasHeight / videoHeight : 1;
 
-  detections.forEach((detection, personIdx) => {
-    const { person_bbox, ppe_items, violations, missing_ppe } = detection;
+  (detections ?? []).forEach((detection, personIdx) => {
+    // Defensive defaults: a malformed or untransformed record must render
+    // nothing rather than take down the whole player with
+    // "can't access property 'length' of undefined" from inside the
+    // React render path.
+    const { person_bbox } = detection;
+    if (!person_bbox) return;
+    const ppe_items = detection.ppe_items ?? {};
+    const violations = detection.violations ?? [];
+    const missing_ppe = detection.missing_ppe ?? [];
     const hasViolations = violations.length > 0;
 
     // Scale person bounding box

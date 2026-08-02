@@ -77,3 +77,5 @@ export {
   useBookmarksListQuery,
   type VasBookmark,
 } from './useBookmarksQuery';
+
+export { useCameraDetections } from './useCameraDetections';

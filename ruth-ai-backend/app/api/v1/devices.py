@@ -962,3 +962,53 @@ async def get_device_snapshot(
                 device_id=str(device_id),
                 vas_stream_id=vas_stream_id,
             )
+
+
+@router.get(
+    "/devices/{device_id}/detections/latest",
+    status_code=status.HTTP_200_OK,
+    summary="Latest AI detections for a device",
+    description=(
+        "Returns the most recent inference result produced by the backend "
+        "inference loop for this device, so browser overlays can render "
+        "detections instead of running their own inference."
+    ),
+    responses={
+        404: {"model": ErrorResponse, "description": "No detections available"},
+        500: {"model": ErrorResponse, "description": "Internal server error"},
+    },
+)
+async def get_latest_detections(device_id: UUID) -> dict:
+    """
+    Read the newest detection result for a device.
+
+    The backend inference loop is the single source of detections; this is a
+    passive read of its in-memory latest-result cache, so polling it costs one
+    dict lookup and runs no inference of its own.
+
+    Bounding boxes are only meaningful against the frame they were computed
+    on, so ``frame_width`` / ``frame_height`` travel with every result. Model
+    coordinate spaces are unchanged from what clients already handle:
+    fall_detection reports in 640x640 model space, ppe_detection in frame
+    pixels.
+    """
+    from app.services.inference_loop import get_inference_loop
+
+    loop = get_inference_loop()
+    if loop is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Inference loop is not running",
+        )
+
+    detection = loop.get_latest_detection(device_id)
+    if detection is None:
+        # No active session for this device, or it hasn't produced a first
+        # result yet. Not an error — the common case for a camera with no
+        # model enabled — so clients treat this as "nothing to draw".
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"No detections available for device {device_id}",
+        )
+
+    return detection

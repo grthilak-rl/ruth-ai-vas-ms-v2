@@ -106,8 +106,40 @@ def _normalize_bbox(bbox: Any) -> Optional[Dict[str, int]]:
 # a camera slows every camera a little instead of overcommitting the GPU.
 TARGET_FPS = float(os.getenv("RUTH_INFERENCE_TARGET_FPS", "2.0"))
 MIN_FPS = float(os.getenv("RUTH_INFERENCE_MIN_FPS", "0.2"))
-MAX_GPU_UTILIZATION = float(os.getenv("RUTH_INFERENCE_MAX_GPU_UTIL", "0.85"))
+# Kept at 2 deliberately. Raising it to 3 was measured and rejected: aggregate
+# throughput moved only 5.43 -> 5.60 inferences/sec (+3%), because the GPU is
+# already the binding constraint at this point, and the extra concurrent task
+# was enough to surface a session-handling race in the violation-write path
+# ("This Session's transaction has been rolled back..."). Not worth 3% for a
+# new error class. Revisit only after that write path is made concurrency-safe.
 INFERENCE_CONCURRENCY = int(os.getenv("RUTH_INFERENCE_CONCURRENCY", "2"))
+
+# Occupancy ceiling the scheduler aims for.
+#
+# This is deliberately > 1.0, which needs explaining. record_latency() times
+# the whole submit_inference round trip — frame fetch, base64, HTTP to the
+# runtime, and only then the GPU — so the "latency" the budget divides by is
+# roughly 2.4x actual GPU time (measured: ~200ms round trip vs ~83ms
+# fall_detection inference). Treating that as GPU occupancy made the loop pace
+# to a real GPU utilisation of 0.42 when it believed it was at 0.85, costing
+# about half the achievable throughput.
+#
+# Raising the ceiling compensates. Measured on this deployment: at 1.7 the
+# 4-camera set reached 1.5fps (fall) with real GPU occupancy of only 0.66, so
+# the round trip is ~283ms against ~83ms of GPU — a ratio of ~3.4x rather than
+# the 2.4x first estimated. 2.3 buys the full 2fps target and lands real GPU
+# occupancy near 0.88. It is safe for the value to exceed 1.0 precisely
+# because the divisor is not GPU time — sessions waiting on HTTP overlap with
+# sessions on the GPU.
+#
+# Overshooting is self-correcting rather than dangerous: saturating the GPU
+# raises measured latency, which feeds the EWMA and pulls the allocated fps
+# back down on the next iteration.
+#
+# This is the quick knob, not the correct fix. The correct fix is to time only
+# the runtime call so this number means what its name says; then this drops
+# back to ~0.85. Tracked as a follow-up.
+MAX_GPU_UTILIZATION = float(os.getenv("RUTH_INFERENCE_MAX_GPU_UTIL", "2.3"))
 
 # Until a model has been measured, assume the slower of the two known models
 # so early iterations under-schedule rather than overcommit.
@@ -216,6 +248,15 @@ class InferenceLoopService:
         # faster than the GPU drains it; the budget derives each session's pace.
         self._budget = InferenceBudget()
         self._gpu_slots = asyncio.Semaphore(INFERENCE_CONCURRENCY)
+
+        # session_id -> device_id, so a cancelled session can drop its
+        # device's detections (the cancel path has no device_id otherwise).
+        self._session_devices: Dict[UUID, UUID] = {}
+
+        # Newest detection result per device, for browser overlays to read.
+        # Bounded by definition: one entry per device, overwritten in place,
+        # and dropped when the device's session stops.
+        self._latest_detections: Dict[UUID, Dict[str, Any]] = {}
 
         # VAS stream-state cache populated by VASEventConsumer.
         # Maps stream_id/room_id (string) -> "active" | "paused".
@@ -334,6 +375,7 @@ class InferenceLoopService:
             )
         )
         self._session_tasks[session.id] = task
+        self._session_devices[session.id] = session.device_id
         logger.info(
             "Started inference task",
             session_id=str(session.id),
@@ -349,6 +391,14 @@ class InferenceLoopService:
             # Free this session's share of the GPU budget so the remaining
             # cameras immediately re-pace to the larger slice available.
             self._budget.unregister(session_id)
+            # Drop the device's last detection. Without this, turning a model
+            # off would leave its final result readable forever and browsers
+            # would keep drawing ghost boxes over a camera with no active
+            # model. Cancellation skips the task's own exit path, so this is
+            # the only place the toggle-off case gets cleaned up.
+            device_id = self._session_devices.pop(session_id, None)
+            if device_id is not None:
+                self._latest_detections.pop(device_id, None)
             logger.info("Stopped inference task", session_id=str(session_id))
 
     async def _inference_task(
@@ -451,6 +501,24 @@ class InferenceLoopService:
                     inference_result = result["result"]
                     violation_detected = inference_result.get("violation_detected", False)
                     confidence = inference_result.get("confidence", 0.0)
+
+                    # Publish for browser overlays. Freshest-wins, one entry per
+                    # device, so this is a fixed-size dict rather than a stream:
+                    # nobody wants a detection from 10 seconds ago, and writing
+                    # ~2/sec/camera to Postgres would be pure write
+                    # amplification for data that is stale within 500ms.
+                    self._latest_detections[device_id] = {
+                        "device_id": str(device_id),
+                        "model_id": model_id,
+                        "model_version": result.get("model_version"),
+                        "result": inference_result,
+                        # Coordinate reference. Bounding boxes are only
+                        # meaningful against the frame they were computed on,
+                        # so the frame geometry travels with them.
+                        "frame_width": result.get("frame_width"),
+                        "frame_height": result.get("frame_height"),
+                        "captured_at": asyncio.get_event_loop().time(),
+                    }
 
                     # Get or initialize session violation state
                     if session_id not in self._violation_state:
@@ -590,6 +658,26 @@ class InferenceLoopService:
         #
         # pop(..., None) because _stop_session_task may have removed it first.
         self._session_tasks.pop(session_id, None)
+        self._session_devices.pop(session_id, None)
+        self._latest_detections.pop(device_id, None)
+
+    def get_latest_detection(self, device_id: UUID) -> Optional[Dict[str, Any]]:
+        """Newest detection result for a device, or None if there isn't one.
+
+        Returns a copy with ``age_ms`` filled in, so callers can decide for
+        themselves whether a result is too old to draw rather than having that
+        policy baked in here.
+        """
+        entry = self._latest_detections.get(device_id)
+        if entry is None:
+            return None
+
+        age_ms = int(
+            (asyncio.get_event_loop().time() - entry["captured_at"]) * 1000
+        )
+        payload = {k: v for k, v in entry.items() if k != "captured_at"}
+        payload["age_ms"] = age_ms
+        return payload
 
     async def _increment_session_counter(
         self,
