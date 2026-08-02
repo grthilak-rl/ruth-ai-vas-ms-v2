@@ -124,6 +124,7 @@ from .exceptions import (
     ViolationTerminalStateError,
 )
 from .stream_service import StreamService
+from .shift_service import ShiftService
 from .violation_service import ViolationService
 
 __all__ = [
@@ -131,6 +132,7 @@ __all__ = [
     "DeviceService",
     "StreamService",
     "EventIngestionService",
+    "ShiftService",
     "ViolationService",
     "EvidenceService",
     "HealthService",

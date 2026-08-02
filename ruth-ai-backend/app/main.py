@@ -27,6 +27,7 @@ from app.api.v1 import (
     hardware,
     health,
     models,
+    shifts,
     violations,
 )
 from app.core.config import get_settings
@@ -74,6 +75,7 @@ def create_application() -> FastAPI:
     app.include_router(devices.router, prefix="/api/v1")
     app.include_router(events.router, prefix="/api/v1")
     app.include_router(violations.router, prefix="/api/v1")
+    app.include_router(shifts.router, prefix="/api/v1")
     app.include_router(analytics.router, prefix="/api/v1")
     app.include_router(models.router, prefix="/api/v1")
     app.include_router(chat.router, prefix="/api/v1")

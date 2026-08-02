@@ -4,6 +4,7 @@ This module exports all database models for use throughout the application.
 Models are designed to match the Ruth AI API Contract Specification exactly.
 """
 
+from app.models.app_setting import SHIFT_SCHEDULE_KEY, AppSetting
 from app.models.base import Base, TimestampMixin
 from app.models.bookmark_analysis import BookmarkAnalysis
 from app.models.device import Device
@@ -34,6 +35,8 @@ __all__ = [
     "EvidenceType",
     "EvidenceStatus",
     # Models
+    "AppSetting",
+    "SHIFT_SCHEDULE_KEY",
     "BookmarkAnalysis",
     "Device",
     "StreamSession",

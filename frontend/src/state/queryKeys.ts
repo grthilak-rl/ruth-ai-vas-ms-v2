@@ -97,4 +97,17 @@ export const queryKeys = {
   bookmarks: {
     list: ['bookmarks', 'list'] as const,
   },
+
+  // Shifts domain (site-global shift schedule + shift-scoped counts)
+  shifts: {
+    all: ['shifts'] as const,
+    schedule: ['shifts', 'schedule'] as const,
+    current: ['shifts', 'current'] as const,
+    /**
+     * Counts are keyed by the cameras asked about, sorted, so the same
+     * grid shares one cache entry however the tiles happen to be ordered.
+     */
+    violationCounts: (cameraIds: string[]) =>
+      ['shifts', 'violation-counts', [...cameraIds].sort().join(',')] as const,
+  },
 } as const;

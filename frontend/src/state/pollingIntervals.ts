@@ -80,6 +80,15 @@ export const POLLING_INTERVALS = {
    * once it sees a terminal state.
    */
   ANALYSIS_DETAIL_RUNNING: 5 * 1000,
+
+  /**
+   * Per-camera current-shift violation counts on the monitoring grid.
+   * 30s — one request covers the whole grid regardless of size, and the
+   * card badge is glanceable rather than time-critical. VIOLATIONS (10s)
+   * is tuned for the alerts list an operator is actively reading; paying
+   * that rate for a number on a tile buys little.
+   */
+  SHIFT_VIOLATION_COUNTS: 30 * 1000,
 } as const;
 
 /**

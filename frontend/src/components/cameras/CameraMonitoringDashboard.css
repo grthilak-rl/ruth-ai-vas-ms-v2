@@ -60,6 +60,7 @@
    each control puts inside itself. */
 .camera-monitoring-dashboard__toolbar .camera-grid-selector__button,
 .camera-monitoring-dashboard__toolbar .camera-selector-dropdown__trigger,
+.camera-monitoring-dashboard__toolbar .shift-config-dropdown__trigger,
 .camera-monitoring-dashboard__toolbar .camera-monitoring-dashboard__viewing-pane-tile-button,
 .camera-monitoring-dashboard__toolbar .camera-monitoring-dashboard__viewing-pane-button {
   display: inline-flex;

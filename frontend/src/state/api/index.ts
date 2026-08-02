@@ -11,7 +11,7 @@
 // Client & Error Handling
 // ============================================================================
 
-export { apiGet, apiGetFull, apiPatch, apiPost, ApiError } from './client';
+export { apiGet, apiGetFull, apiPatch, apiPost, apiPut, ApiError } from './client';
 export type { RequestOptions, RequestResult, ApiErrorCategory } from './client';
 
 export {
@@ -218,3 +218,21 @@ export type {
   DetectionResult,
   LatestDetectionResponse,
 } from './detections.api';
+
+export {
+  fetchShiftSchedule,
+  updateShiftSchedule,
+  fetchCurrentShift,
+  fetchCurrentShiftViolationCounts,
+  millisUntilShiftEnd,
+  formatTimeRemaining,
+  formatShiftWindow,
+} from './shifts.api';
+export type {
+  ShiftMode,
+  ShiftDefinition,
+  ShiftSchedule,
+  ShiftScheduleResponse,
+  CurrentShift,
+  ShiftViolationCounts,
+} from './shifts.api';

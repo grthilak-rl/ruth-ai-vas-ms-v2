@@ -1,7 +1,10 @@
 import { useState, useEffect, useMemo, useCallback } from 'react';
 import { CameraGridSelector } from './CameraGridSelector';
 import { CameraSelectorDropdown } from './CameraSelectorDropdown';
+import { ShiftConfigDropdown } from './ShiftConfigDropdown';
+import { ShiftIndicator } from './ShiftIndicator';
 import { CameraGridCell } from './CameraGridCell';
+import { useShiftViolationCountsQuery } from '../../state/hooks/useShiftQuery';
 import type { AIModel } from './AIModelSelector';
 import type { Device } from '../../state';
 import type { ModelConfig } from '../../types/geofencing';
@@ -287,6 +290,13 @@ export function CameraMonitoringDashboard({
     return cameras.filter((camera) => selectedCameraIds.includes(camera.id));
   }, [cameras, selectedCameraIds]);
 
+  // Unreviewed violations raised during the current shift, per camera.
+  // One request covers every tile on the grid; the backend owns both the
+  // shift window and the counting, so the number on a card and the shift
+  // named in the toolbar always describe the same window.
+  const shiftCountsQuery = useShiftViolationCountsQuery(selectedCameraIds);
+  const violationCounts = shiftCountsQuery.data?.counts;
+
   // Convert backend model to frontend AIModel format
   const convertToAIModel = useCallback(
     (model: ModelStatusInfo, cameraId: string): AIModel => {
@@ -478,6 +488,8 @@ export function CameraMonitoringDashboard({
             gridSize={gridSize}
             onSelectionChange={handleCameraSelectionChange}
           />
+          <ShiftConfigDropdown />
+          <ShiftIndicator />
           {viewingPaneControls}
         </div>
         <div className={`camera-monitoring-dashboard__grid camera-monitoring-dashboard__grid--${gridSize}x${gridSize}`}>
@@ -524,6 +536,8 @@ export function CameraMonitoringDashboard({
             gridSize={gridSize}
             onSelectionChange={handleCameraSelectionChange}
           />
+          <ShiftConfigDropdown />
+          <ShiftIndicator />
           {viewingPaneControls}
         </div>
         <div className="camera-monitoring-dashboard__empty-state">
@@ -549,6 +563,8 @@ export function CameraMonitoringDashboard({
           gridSize={gridSize}
           onSelectionChange={handleCameraSelectionChange}
         />
+        <ShiftConfigDropdown />
+        <ShiftIndicator />
         {viewingPaneControls}
       </div>
 
@@ -583,7 +599,7 @@ export function CameraMonitoringDashboard({
               status={getCameraStatus(cell.camera)}
               detectionStatus={getDetectionStatusForCamera(cell.camera.id)}
               aiModels={getAIModelsForCamera(cell.camera.id)}
-              violationCount={0} // TODO: Wire up actual violation count
+              violationCount={violationCounts?.[cell.camera.id]}
               onModelToggle={handleModelToggle}
               onRoiConfirm={handleRoiConfirm}
               modelConfigs={modelConfigs[cell.camera.id]}

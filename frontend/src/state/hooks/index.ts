@@ -79,3 +79,10 @@ export {
 } from './useBookmarksQuery';
 
 export { useCameraDetections } from './useCameraDetections';
+
+export {
+  useShiftScheduleQuery,
+  useUpdateShiftSchedule,
+  useCurrentShiftQuery,
+  useShiftViolationCountsQuery,
+} from './useShiftQuery';

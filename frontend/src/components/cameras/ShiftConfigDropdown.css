@@ -1,0 +1,264 @@
+/**
+ * ShiftConfigDropdown Styles
+ *
+ * Mirrors CameraSelectorDropdown: same trigger shape, same anchored panel,
+ * so the two toolbar controls read as one family.
+ */
+
+.shift-config-dropdown {
+  position: relative;
+}
+
+.shift-config-dropdown__trigger {
+  padding: 0.5rem 1rem;
+  border: 1px solid var(--color-border, #d1d5db);
+  background: var(--color-bg-primary, #ffffff);
+  color: var(--color-text-primary, #1f2937);
+  font-size: 0.875rem;
+  font-weight: 500;
+  border-radius: 0.375rem;
+  cursor: pointer;
+  transition: all 0.2s ease;
+}
+
+.shift-config-dropdown__trigger:hover:not(:disabled) {
+  background: var(--color-bg-secondary, #f3f4f6);
+  border-color: var(--color-border-hover, #9ca3af);
+}
+
+.shift-config-dropdown__trigger:focus {
+  outline: 2px solid var(--color-primary, #3b82f6);
+  outline-offset: 2px;
+}
+
+.shift-config-dropdown__trigger:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.shift-config-dropdown__panel {
+  position: absolute;
+  top: calc(100% + 0.5rem);
+  left: 0;
+  width: 26rem;
+  max-height: 34rem;
+  background: var(--color-bg-primary, #ffffff);
+  border: 1px solid var(--color-border, #d1d5db);
+  border-radius: 0.5rem;
+  box-shadow: 0 10px 15px -3px rgba(0, 0, 0, 0.1), 0 4px 6px -2px rgba(0, 0, 0, 0.05);
+  z-index: 1000;
+  display: flex;
+  flex-direction: column;
+}
+
+.shift-config-dropdown__header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 1rem;
+  border-bottom: 1px solid var(--color-border, #d1d5db);
+}
+
+.shift-config-dropdown__title {
+  font-size: 1rem;
+  font-weight: 600;
+  color: var(--color-text-primary, #1f2937);
+  margin: 0;
+}
+
+.shift-config-dropdown__close {
+  border: none;
+  background: none;
+  cursor: pointer;
+  font-size: 1rem;
+  line-height: 1;
+  padding: 0.25rem;
+  color: var(--color-text-secondary, #6b7280);
+  border-radius: 0.25rem;
+}
+
+.shift-config-dropdown__close:hover {
+  background: var(--color-bg-secondary, #f3f4f6);
+  color: var(--color-text-primary, #1f2937);
+}
+
+/* The shift rows are the part that grows with the shift count, so the
+   scroll lives here and the header/footer stay pinned. */
+.shift-config-dropdown__content {
+  padding: 1rem;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 0.875rem;
+}
+
+.shift-config-dropdown__hint {
+  margin: 0;
+  font-size: 0.75rem;
+  line-height: 1.4;
+  color: var(--color-text-secondary, #6b7280);
+}
+
+.shift-config-dropdown__modes {
+  border: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+
+.shift-config-dropdown__legend {
+  font-size: 0.75rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+  color: var(--color-text-secondary, #6b7280);
+  padding: 0;
+  margin-bottom: 0.25rem;
+}
+
+.shift-config-dropdown__radio {
+  display: flex;
+  align-items: flex-start;
+  gap: 0.5rem;
+  font-size: 0.875rem;
+  color: var(--color-text-primary, #1f2937);
+  cursor: pointer;
+}
+
+.shift-config-dropdown__radio input {
+  margin-top: 0.2rem;
+  cursor: pointer;
+}
+
+.shift-config-dropdown__radio-note {
+  display: block;
+  font-size: 0.75rem;
+  color: var(--color-text-secondary, #6b7280);
+}
+
+.shift-config-dropdown__field {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.75rem;
+  font-size: 0.875rem;
+  color: var(--color-text-primary, #1f2937);
+}
+
+.shift-config-dropdown__field-label {
+  font-weight: 500;
+}
+
+.shift-config-dropdown__select,
+.shift-config-dropdown__number,
+.shift-config-dropdown__shift-name,
+.shift-config-dropdown__shift-time {
+  padding: 0.375rem 0.5rem;
+  border: 1px solid var(--color-border, #d1d5db);
+  border-radius: 0.25rem;
+  background: var(--color-bg-primary, #ffffff);
+  color: var(--color-text-primary, #1f2937);
+  font-size: 0.8125rem;
+  font-family: inherit;
+}
+
+.shift-config-dropdown__select {
+  min-width: 11rem;
+}
+
+.shift-config-dropdown__number {
+  width: 4rem;
+}
+
+.shift-config-dropdown__shifts {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+
+.shift-config-dropdown__shift-row {
+  display: flex;
+  align-items: center;
+  gap: 0.375rem;
+}
+
+/* The name takes the slack; the two time inputs stay a fixed, equal size
+   so the start/end columns line up down the list. */
+.shift-config-dropdown__shift-name {
+  flex: 1;
+  min-width: 0;
+}
+
+.shift-config-dropdown__shift-time {
+  flex-shrink: 0;
+  width: 6.5rem;
+}
+
+.shift-config-dropdown__shift-dash {
+  color: var(--color-text-secondary, #6b7280);
+}
+
+.shift-config-dropdown__error {
+  padding: 0.625rem 0.75rem;
+  border: 1px solid #fca5a5;
+  border-radius: 0.25rem;
+  background: #fee2e2;
+}
+
+.shift-config-dropdown__error-message {
+  margin: 0;
+  font-size: 0.8125rem;
+  color: #991b1b;
+}
+
+.shift-config-dropdown__conflicts {
+  margin: 0.375rem 0 0;
+  padding-left: 1.125rem;
+  font-size: 0.75rem;
+  color: #991b1b;
+}
+
+.shift-config-dropdown__footer {
+  display: flex;
+  justify-content: flex-end;
+  gap: 0.5rem;
+  padding: 0.75rem 1rem;
+  border-top: 1px solid var(--color-border, #d1d5db);
+}
+
+.shift-config-dropdown__cancel,
+.shift-config-dropdown__save {
+  padding: 0.375rem 0.875rem;
+  border-radius: 0.25rem;
+  font-size: 0.8125rem;
+  font-weight: 500;
+  cursor: pointer;
+  border: 1px solid var(--color-border, #d1d5db);
+}
+
+.shift-config-dropdown__cancel {
+  background: var(--color-bg-primary, #ffffff);
+  color: var(--color-text-primary, #1f2937);
+}
+
+.shift-config-dropdown__cancel:hover {
+  background: var(--color-bg-secondary, #f3f4f6);
+}
+
+.shift-config-dropdown__save {
+  background: var(--color-primary, #3b82f6);
+  border-color: var(--color-primary, #3b82f6);
+  color: #ffffff;
+}
+
+.shift-config-dropdown__save:hover:not(:disabled) {
+  background: var(--color-primary-hover, #2563eb);
+  border-color: var(--color-primary-hover, #2563eb);
+}
+
+.shift-config-dropdown__save:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}

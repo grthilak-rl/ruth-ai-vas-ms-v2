@@ -358,6 +358,29 @@ export async function apiPatch<T>(
 }
 
 /**
+ * PUT request
+ *
+ * Used for replacing a resource wholesale (e.g. the site shift schedule,
+ * where a partial update of a set of shifts that must tile the day has no
+ * coherent meaning).
+ */
+export async function apiPut<T>(
+  path: string,
+  body: unknown,
+  options: RequestOptions = {}
+): Promise<T> {
+  const url = buildApiUrl(path);
+
+  const result = await fetchWithRetry<T>(url, {
+    method: 'PUT',
+    headers: buildHeaders(options.headers),
+    body: JSON.stringify(body),
+  }, options);
+
+  return result.data;
+}
+
+/**
  * POST request
  *
  * Used for creating resources.

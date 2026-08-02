@@ -40,6 +40,13 @@ export class ApiError extends Error {
   /** Original error for debugging (never exposed to UI) */
   public readonly originalError?: Error;
 
+  /**
+   * Structured payload from the backend's error envelope, when it sent
+   * one. Endpoints that reject a request for a reason the operator can
+   * act on put the specifics here — e.g. which shifts overlap.
+   */
+  public readonly details?: Record<string, unknown>;
+
   constructor(params: {
     status: number;
     message: string;
@@ -48,6 +55,7 @@ export class ApiError extends Error {
     retryable: boolean;
     userMessage: string;
     originalError?: Error;
+    details?: Record<string, unknown>;
   }) {
     super(params.message);
     this.name = 'ApiError';
@@ -57,6 +65,7 @@ export class ApiError extends Error {
     this.retryable = params.retryable;
     this.userMessage = params.userMessage;
     this.originalError = params.originalError;
+    this.details = params.details;
   }
 
   /**
@@ -195,6 +204,7 @@ export async function createApiErrorFromResponse(
 
   let message = `HTTP ${status}`;
   let code: string | undefined;
+  let details: Record<string, unknown> | undefined;
 
   // Try to extract error details from response body
   try {
@@ -202,6 +212,20 @@ export async function createApiErrorFromResponse(
     if (body.message) message = body.message;
     if (body.code) code = body.code;
     if (body.error) message = body.error;
+
+    // FastAPI wraps HTTPException payloads in `detail`. Without this the
+    // backend's own message and its structured `details` are both dropped
+    // and the caller is left with a bare "HTTP 422".
+    const detail = body.detail;
+    if (detail && typeof detail === 'object' && !Array.isArray(detail)) {
+      if (typeof detail.message === 'string') message = detail.message;
+      if (typeof detail.error === 'string') code = code ?? detail.error;
+      if (detail.details && typeof detail.details === 'object') {
+        details = detail.details as Record<string, unknown>;
+      }
+    } else if (typeof detail === 'string') {
+      message = detail;
+    }
   } catch {
     // Response body not JSON, use status text
     message = response.statusText || message;
@@ -215,6 +239,7 @@ export async function createApiErrorFromResponse(
     retryable,
     userMessage,
     originalError,
+    details,
   });
 }
 
