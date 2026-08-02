@@ -38,11 +38,36 @@
 
 .camera-monitoring-dashboard__toolbar {
   display: flex;
-  justify-content: space-between;
   align-items: center;
+  /* Consistent spacing between control groups. Replaces
+     justify-content: space-between, which distributed leftover space rather
+     than guaranteeing a gap — so once the controls grew wide enough the free
+     space hit zero and the grid buttons sat flush against the camera
+     selector. A gap is spacing that cannot be squeezed out; the Viewing Pane
+     group still right-aligns via its own margin-left: auto. */
+  gap: 1rem;
+  flex-wrap: wrap;
   padding: 1rem;
   background: var(--color-bg-secondary, #f3f4f6);
   border-radius: 0.5rem;
+}
+
+/* Shared height for every control on the toolbar row.
+   The controls already agreed on padding and font-size, but their line boxes
+   did not: the active grid button renders a 1rem "◉" inside 0.875rem text,
+   which grew that button relative to its siblings and to the selector. Pinning
+   the height and centring the content makes the row line up regardless of what
+   each control puts inside itself. */
+.camera-monitoring-dashboard__toolbar .camera-grid-selector__button,
+.camera-monitoring-dashboard__toolbar .camera-selector-dropdown__trigger,
+.camera-monitoring-dashboard__toolbar .camera-monitoring-dashboard__viewing-pane-tile-button,
+.camera-monitoring-dashboard__toolbar .camera-monitoring-dashboard__viewing-pane-button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  height: 2.25rem;
+  line-height: 1.25;
+  box-sizing: border-box;
 }
 
 /* Grid Layouts */
@@ -254,4 +279,66 @@
     grid-template-columns: repeat(2, 1fr);
     grid-template-rows: repeat(auto-fill, 1fr);
   }
+}
+/* ============================================================================
+   Viewing Pane entry (F7 + wall display)
+   ============================================================================ */
+
+.camera-monitoring-dashboard__viewing-pane-controls {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  margin-left: auto;
+}
+
+.camera-monitoring-dashboard__viewing-pane-label {
+  font-size: 0.8125rem;
+  font-weight: 500;
+  color: #5f6368;
+}
+
+.camera-monitoring-dashboard__viewing-pane-tiles {
+  display: flex;
+  gap: 0.25rem;
+}
+
+.camera-monitoring-dashboard__viewing-pane-tile-button {
+  min-width: 2rem;
+  padding: 0.25rem 0.5rem;
+  font-size: 0.75rem;
+  color: #3c4043;
+  background-color: #fff;
+  border: 1px solid #dadce0;
+  border-radius: 4px;
+  cursor: pointer;
+}
+
+.camera-monitoring-dashboard__viewing-pane-tile-button:hover {
+  background-color: #f1f3f4;
+}
+
+.camera-monitoring-dashboard__viewing-pane-tile-button--active {
+  color: #fff;
+  background-color: #1a73e8;
+  border-color: #1a73e8;
+}
+
+.camera-monitoring-dashboard__viewing-pane-button {
+  padding: 0.35rem 0.75rem;
+  font-size: 0.8125rem;
+  /* font-family/border reset: this became a <button>, which unlike the <a> it
+     replaced inherits neither the page font nor a borderless look from the UA. */
+  font-family: inherit;
+  font-weight: 500;
+  color: #fff;
+  text-decoration: none;
+  background-color: #1a73e8;
+  border: 1px solid #1a73e8;
+  border-radius: 4px;
+  white-space: nowrap;
+  cursor: pointer;
+}
+
+.camera-monitoring-dashboard__viewing-pane-button:hover {
+  background-color: #1765cc;
 }

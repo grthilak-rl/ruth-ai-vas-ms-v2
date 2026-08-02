@@ -52,5 +52,7 @@
 }
 
 .camera-grid-selector__active-indicator {
-  font-size: 1rem;
+  /* Was 1rem inside a 0.875rem button, which made the active button taller
+     than its siblings and knocked the row out of alignment. */
+  font-size: inherit;
 }

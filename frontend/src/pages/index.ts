@@ -5,6 +5,7 @@ export { AlertDetailPage } from './AlertDetailPage';
 export { CamerasPage } from './CamerasPage';
 export { CameraDetailPage } from './CameraDetailPage';
 export { CameraFullscreenPageWrapper } from './CameraFullscreenPageWrapper';
+export { ViewingPanePage } from './ViewingPanePage';
 export { BookmarkAnalysesListPage } from './BookmarkAnalysesListPage';
 export { BookmarkAnalysisDetailPage } from './BookmarkAnalysisDetailPage';
 export { BookmarkMonitoringPage } from './BookmarkMonitoringPage';

@@ -14,6 +14,13 @@ import {
   autoSelectCameras,
   getMaxCameras,
 } from '../../utils/cameraGridPreferences';
+import {
+  type PaneGridSize,
+  PANE_GRID_SIZES,
+  getPaneGridSize,
+  getPaneTileCount,
+  setPaneGridSize,
+} from '../../utils/viewingPanePreferences';
 import { fetchModelsStatus, type ModelStatusInfo } from '../../state/api/models.api';
 import { type StartInferenceRequest } from '../../state/api/devices.api';
 import {
@@ -57,6 +64,11 @@ export function CameraMonitoringDashboard({
 }: CameraMonitoringDashboardProps) {
   // Grid size state
   const [gridSize, setGridSizeState] = useState<GridSize>(getGridSize());
+
+  // Tile count the Viewing Pane will open with. Stored in the pane's own
+  // preferences so choosing it here and opening the wall agree, and so the
+  // wall keeps it across reloads.
+  const [paneGridSize, setPaneGridSizeState] = useState<PaneGridSize>(getPaneGridSize);
 
   // Selected cameras state
   const [selectedCameraIds, setSelectedCameraIdsState] = useState<string[]>(() =>
@@ -370,6 +382,90 @@ export function CameraMonitoringDashboard({
     return cells;
   }, [selectedCameras, gridSize]);
 
+  // Open the wall in its OWN window, not this tab.
+  //
+  // The operator runs two displays: the management view on the workstation and
+  // the wall on a monitoring TV. Navigating in-tab would replace the view they
+  // are working in, so this opens a separate window that can be dragged to the
+  // TV and fullscreened there while this tab stays on the monitoring page.
+  //
+  // The window is NAMED, so clicking again focuses the existing wall rather
+  // than spawning a second copy — a second copy would mean a second set of
+  // WebRTC consumers decoding the same feeds. popup=yes drops the tab/address
+  // bar so it behaves like a display surface; the route already renders
+  // outside AppShell, so there is no app chrome either.
+  const handleOpenViewingPane = useCallback(() => {
+    const features = [
+      'popup=yes',
+      'noopener=no',
+      'width=1280',
+      'height=720',
+      'menubar=no',
+      'toolbar=no',
+      'location=no',
+      'status=no',
+      'resizable=yes',
+      'scrollbars=no',
+    ].join(',');
+
+    const paneWindow = window.open('/cameras/viewing-pane', 'ruth-ai-viewing-pane', features);
+
+    if (paneWindow) {
+      // Already-open wall: bring it forward instead of leaving the operator
+      // wondering why the click did nothing.
+      paneWindow.focus();
+    } else {
+      console.warn(
+        '[CameraMonitoring] Viewing Pane window was blocked. Allow pop-ups for this site.'
+      );
+    }
+  }, []);
+
+  // Viewing Pane entry. Shared by the loading / empty / main toolbars so the
+  // control is in the same place regardless of dashboard state.
+  //
+  // A button rather than a <Link>: this must open a separate window, not
+  // navigate this tab. The route is still a real bookmarkable URL for kiosk
+  // use — see handleOpenViewingPane.
+  const viewingPaneControls = (
+    <div className="camera-monitoring-dashboard__viewing-pane-controls">
+      <span className="camera-monitoring-dashboard__viewing-pane-label">Viewing Pane:</span>
+      <div
+        className="camera-monitoring-dashboard__viewing-pane-tiles"
+        role="group"
+        aria-label="Viewing pane tile count"
+      >
+        {PANE_GRID_SIZES.map((size) => (
+          <button
+            key={size}
+            type="button"
+            className={`camera-monitoring-dashboard__viewing-pane-tile-button ${
+              size === paneGridSize
+                ? 'camera-monitoring-dashboard__viewing-pane-tile-button--active'
+                : ''
+            }`}
+            onClick={() => {
+              setPaneGridSizeState(size);
+              setPaneGridSize(size);
+            }}
+            aria-pressed={size === paneGridSize}
+            title={`${size}x${size} (${getPaneTileCount(size)} tiles)`}
+          >
+            {getPaneTileCount(size)}
+          </button>
+        ))}
+      </div>
+      <button
+        type="button"
+        className="camera-monitoring-dashboard__viewing-pane-button"
+        onClick={handleOpenViewingPane}
+        title="Opens in a separate window you can move to the monitoring TV"
+      >
+        ⛶ Open Viewing Pane
+      </button>
+    </div>
+  );
+
   // Loading state
   if (isLoading) {
     return (
@@ -382,6 +478,7 @@ export function CameraMonitoringDashboard({
             gridSize={gridSize}
             onSelectionChange={handleCameraSelectionChange}
           />
+          {viewingPaneControls}
         </div>
         <div className={`camera-monitoring-dashboard__grid camera-monitoring-dashboard__grid--${gridSize}x${gridSize}`}>
           {Array.from({ length: getMaxCameras(gridSize) }).map((_, index) => (
@@ -427,6 +524,7 @@ export function CameraMonitoringDashboard({
             gridSize={gridSize}
             onSelectionChange={handleCameraSelectionChange}
           />
+          {viewingPaneControls}
         </div>
         <div className="camera-monitoring-dashboard__empty-state">
           <div className="camera-monitoring-dashboard__empty-content">
@@ -451,6 +549,7 @@ export function CameraMonitoringDashboard({
           gridSize={gridSize}
           onSelectionChange={handleCameraSelectionChange}
         />
+        {viewingPaneControls}
       </div>
 
       <div

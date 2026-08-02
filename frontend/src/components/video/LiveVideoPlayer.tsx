@@ -71,6 +71,14 @@ interface LiveVideoPlayerProps {
    * is false.
    */
   autoConnectDelayMs?: number;
+  /**
+   * Strip every interactive affordance: LIVE badge, pause/resume, the idle
+   * "Play Live Video" button and the ROI toolbar. For passive displays (the
+   * viewing pane wall) where there is no operator to click anything and any
+   * chrome is just noise burned into a monitor. Off by default so every
+   * existing caller is untouched.
+   */
+  chromeless?: boolean;
 }
 
 export function LiveVideoPlayer({
@@ -91,6 +99,7 @@ export function LiveVideoPlayer({
   geofenceZones,
   shouldAutoConnect = false,
   autoConnectDelayMs = 0,
+  chromeless = false,
 }: LiveVideoPlayerProps) {
   const [playerState, setPlayerState] = useState<PlayerState>(
     isAvailable ? 'idle' : 'offline'
@@ -681,7 +690,7 @@ export function LiveVideoPlayer({
         />
 
         {/* chane_tank_monitor ROI toolbar (live view) */}
-        {roiSelectable && (
+        {!chromeless && roiSelectable && (
           <div className="live-video-player__roi-toolbar">
             {roiSelecting ? (
               provisionalRoi ? (
@@ -707,7 +716,7 @@ export function LiveVideoPlayer({
         )}
 
         {/* Idle state overlay */}
-        {playerState === 'idle' && (
+        {!chromeless && playerState === 'idle' && (
           <div className="live-video-player__idle-overlay">
             <button
               type="button"
@@ -724,7 +733,7 @@ export function LiveVideoPlayer({
         )}
 
         {/* Live indicator */}
-        {playerState === 'playing' && (
+        {!chromeless && playerState === 'playing' && (
           <div className="live-video-player__live-badge">
             <span className="live-video-player__live-dot" />
             LIVE
@@ -742,7 +751,7 @@ export function LiveVideoPlayer({
         )}
 
         {/* Video controls */}
-        {playerState === 'playing' && (
+        {!chromeless && playerState === 'playing' && (
           <div className="live-video-player__controls">
             <button
               type="button"
@@ -755,7 +764,7 @@ export function LiveVideoPlayer({
           </div>
         )}
 
-        {playerState === 'paused' && (
+        {!chromeless && playerState === 'paused' && (
           <div className="live-video-player__paused-overlay">
             <button
               type="button"

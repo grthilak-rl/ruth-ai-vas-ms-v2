@@ -1,0 +1,258 @@
+/**
+ * Viewing Pane — fullscreen video wall
+ *
+ * Passive display styling: black, no chrome, nothing that invites a click.
+ */
+
+.viewing-pane {
+  position: fixed;
+  inset: 0;
+  background-color: #000;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  overflow: hidden;
+}
+
+/* Idle: hide the pointer too. A stationary arrow parked in the middle of an
+   unattended wall is persistent chrome in exactly the way the toolbar was,
+   and on a display showing the same pixels for months it is a burn-in risk.
+   Any mouse movement restores it along with the controls. */
+.viewing-pane--idle {
+  cursor: none;
+}
+
+/* ============================================================================
+   The aspect-locked grid
+   ============================================================================
+   A square grid of 16:9 tiles is itself 16:9, whatever N is. So the whole
+   layout rule is one width calculation:
+
+     width = min(viewport width, the width our height allows at 16:9)
+
+   On a 16:9 monitor both terms are equal, so the grid fills the screen with
+   mathematically zero margin — not "almost zero". On an ultrawide the height
+   term wins and the slack becomes left/right margin; on a 4:3 monitor the
+   width term wins and the slack becomes top/bottom margin. Either way the
+   slack is screen margin, never a bar inside a tile.
+
+   Using dvh/dvw rather than vh/vw so a mobile browser's collapsing toolbar
+   can't leave the grid mis-sized, and so entering fullscreen needs no
+   recalculation.
+*/
+.viewing-pane__grid {
+  width: min(100dvw, calc(100dvh * 16 / 9));
+  aspect-ratio: 16 / 9;
+  display: grid;
+  /* Gapless: any gap would show black seams between feeds. */
+  gap: 0;
+  background-color: #000;
+}
+
+.viewing-pane__grid--1 { grid-template: repeat(1, 1fr) / repeat(1, 1fr); }
+.viewing-pane__grid--2 { grid-template: repeat(2, 1fr) / repeat(2, 1fr); }
+.viewing-pane__grid--3 { grid-template: repeat(3, 1fr) / repeat(3, 1fr); }
+.viewing-pane__grid--4 { grid-template: repeat(4, 1fr) / repeat(4, 1fr); }
+
+/* ============================================================================
+   Tiles
+   ============================================================================ */
+
+.viewing-pane__tile {
+  position: relative;
+  overflow: hidden;
+  background-color: #000;
+  /* Each cell is exactly 16:9 because the grid is 16:9 split N x N evenly, so
+     the feed fits with no crop, no distortion and no letterbox. min-width/
+     min-height:0 stops grid's automatic min-content sizing from inflating a
+     cell and reintroducing the seams we just removed. */
+  min-width: 0;
+  min-height: 0;
+}
+
+/* Neutralise the player's own card styling inside a tile.
+   LiveVideoPlayer is shared with the monitoring grid, where it is a rounded
+   card that letterboxes its video. On the wall it must be an edge-to-edge
+   pane, so the overrides live here rather than in the shared component. */
+.viewing-pane__tile .live-video-player {
+  width: 100%;
+  height: 100%;
+  aspect-ratio: auto;
+  border-radius: 0;
+}
+
+.viewing-pane__tile .live-video-player__video {
+  width: 100%;
+  height: 100%;
+  max-width: none;
+  max-height: none;
+  /* Tile aspect == feed aspect == 16:9, so cover, contain and fill are
+     geometrically identical here. cover is chosen so sub-pixel rounding at
+     awkward viewport sizes crops an imperceptible sliver rather than exposing
+     a hairline black bar. */
+  object-fit: cover;
+  display: block;
+}
+
+/* ============================================================================
+   Tile label + clear control
+   ============================================================================ */
+
+.viewing-pane__tile-label {
+  position: absolute;
+  top: 0;
+  left: 0;
+  z-index: 20;
+  max-width: calc(100% - 3rem);
+  padding: 0.35em 0.7em;
+  font-size: clamp(0.625rem, 1.1vw, 1rem);
+  font-weight: 600;
+  line-height: 1.2;
+  color: #fff;
+  /* Gradient rather than a solid chip: readable over a bright or dark scene
+     without stamping a hard-edged box onto a monitor that displays the same
+     pixels for months. */
+  background: linear-gradient(135deg, rgba(0, 0, 0, 0.75) 0%, rgba(0, 0, 0, 0) 100%);
+  text-shadow: 0 1px 2px rgba(0, 0, 0, 0.9);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  pointer-events: none;
+}
+
+.viewing-pane__tile-clear {
+  position: absolute;
+  top: 0.25rem;
+  right: 0.25rem;
+  z-index: 25;
+  width: 1.75rem;
+  height: 1.75rem;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0;
+  font-size: 1rem;
+  line-height: 1;
+  color: #fff;
+  background-color: rgba(0, 0, 0, 0.55);
+  border: 1px solid rgba(255, 255, 255, 0.25);
+  border-radius: 4px;
+  cursor: pointer;
+  /* Hidden until the tile is hovered: this is a wall display, and a row of
+     persistent ✕ buttons is exactly the chrome we are trying not to show.
+     Focus-visible keeps it reachable by keyboard. */
+  opacity: 0;
+  transition: opacity 120ms ease-in-out;
+}
+
+.viewing-pane__tile:hover .viewing-pane__tile-clear,
+.viewing-pane__tile-clear:focus-visible {
+  opacity: 1;
+}
+
+.viewing-pane__tile-clear:hover {
+  background-color: rgba(197, 34, 31, 0.85);
+}
+
+/* ============================================================================
+   Empty tile (camera picker)
+   ============================================================================ */
+
+.viewing-pane__tile--empty {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+}
+
+.viewing-pane__tile-picker {
+  max-width: 80%;
+  padding: 0.4em 0.6em;
+  font-size: clamp(0.625rem, 0.9vw, 0.875rem);
+  color: #e5e7eb;
+  background-color: rgba(255, 255, 255, 0.06);
+  border: 1px solid rgba(255, 255, 255, 0.2);
+  border-radius: 4px;
+  cursor: pointer;
+}
+
+.viewing-pane__tile-picker:focus-visible {
+  outline: 2px solid #60a5fa;
+  outline-offset: 2px;
+}
+
+.viewing-pane__tile-empty-hint {
+  position: absolute;
+  bottom: 0.5rem;
+  font-size: clamp(0.5rem, 0.7vw, 0.75rem);
+  color: rgba(229, 231, 235, 0.45);
+  pointer-events: none;
+}
+
+/* ============================================================================
+   Pane toolbar — transient, never part of the wall image
+   ============================================================================ */
+
+.viewing-pane__toolbar {
+  position: fixed;
+  top: 0;
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 100;
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  padding: 0.5rem 1rem;
+  color: #e5e7eb;
+  background-color: rgba(17, 24, 39, 0.92);
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  border-top: none;
+  border-radius: 0 0 8px 8px;
+  /* Hidden by default and revealed by the inactivity timer in ViewingPane.tsx.
+     This used to be driven by `.viewing-pane:hover`, which cannot work here:
+     the pane IS the whole screen, so the hover was true whenever the pointer
+     was anywhere on the display and the toolbar never went away — sitting
+     permanently over the top-row tiles' display_name labels.
+
+     pointer-events: none while hidden so an invisible bar can't swallow
+     clicks aimed at the tiles underneath. */
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 200ms ease-in-out;
+}
+
+.viewing-pane__toolbar--visible,
+.viewing-pane__toolbar:focus-within {
+  opacity: 1;
+  pointer-events: auto;
+}
+
+.viewing-pane__toolbar-button {
+  padding: 0.3rem 0.7rem;
+  font-size: 0.8125rem;
+  color: #e5e7eb;
+  background-color: rgba(255, 255, 255, 0.08);
+  border: 1px solid rgba(255, 255, 255, 0.18);
+  border-radius: 4px;
+  cursor: pointer;
+}
+
+.viewing-pane__toolbar-button:hover {
+  background-color: rgba(255, 255, 255, 0.16);
+}
+
+.viewing-pane__toolbar-button--active {
+  background-color: #2563eb;
+  border-color: #2563eb;
+  color: #fff;
+}
+
+.viewing-pane__toolbar-label {
+  font-size: 0.75rem;
+  color: rgba(229, 231, 235, 0.7);
+}
+
+.viewing-pane__toolbar-group {
+  display: flex;
+  gap: 0.25rem;
+}

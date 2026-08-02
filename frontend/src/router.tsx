@@ -8,6 +8,7 @@ import {
   CamerasPage,
   CameraDetailPage,
   CameraFullscreenPageWrapper,
+  ViewingPanePage,
   BookmarkMonitoringPage,
   AnalyticsPage,
   CameraPerformancePage,
@@ -32,6 +33,16 @@ import {
  * if the user lacks the required role.
  */
 export const router = createBrowserRouter([
+  // Viewing Pane — deliberately OUTSIDE the AppShell layout.
+  //
+  // The wall display must render feeds edge to edge with no nav, header or
+  // page padding, so it cannot be a child of AppShell. Being a real route
+  // (rather than an overlay on /cameras) also means it can be bookmarked or
+  // used as a kiosk homepage, so the display restores itself after a reboot.
+  {
+    path: '/cameras/viewing-pane',
+    element: <ViewingPanePage />,
+  },
   {
     path: '/',
     element: <AppShell />,
