@@ -7,6 +7,7 @@ import { drawPPEDetections } from '../../services/ppeDetection';
 import { drawTankDetections } from '../../services/tankDetection';
 import { drawChaneTankMonitor } from '../../services/chaneTankMonitor';
 import { overlayStylesFor } from '../../services/overlayStyle';
+import { drawStoreDetections, storeOverlaysFrom } from '../../services/storeOverlay';
 import { estimateRadiusFromClick } from '../../services/roiRayCast';
 import { useCameraDetectionsAll } from '../../state/hooks/useCameraDetectionsAll';
 import { fanOutDetections } from './detectionFanOut';
@@ -132,6 +133,13 @@ export function LiveVideoPlayer({
     () => fanOutDetections(detections, enabledModels),
     [detections, enabledModels]
   );
+  // Uploaded (model store) models: generic boxes from result.objects. A
+  // shared empty value when there are none, so the draw effect below runs
+  // exactly as before for cameras without store models.
+  const storeOverlays = useMemo(
+    () => storeOverlaysFrom(detections, enabledModels),
+    [detections, enabledModels]
+  );
   // chane_tank_monitor click-to-set-ROI: provisional circle (intrinsic px),
   // not committed until the operator confirms.
   const [provisionalRoi, setProvisionalRoi] = useState<{ cx: number; cy: number; r: number } | null>(null);
@@ -184,6 +192,7 @@ export function LiveVideoPlayer({
       [hasFallDetection, hasPPEDetection, hasTankDetection, hasChaneTankDetection].filter(Boolean).length
     );
     const hasGeofenceZones = isGeofencingEnabled && geofenceZones && geofenceZones.length > 0;
+    const hasStoreOverlays = storeOverlays.length > 0;
 
     // Debug logging
     if (tankDetection) {
@@ -203,7 +212,7 @@ export function LiveVideoPlayer({
     // it while paused. It's handled as a separate concern below.
     const onlyProvisional = !!provisionalRoi && video?.videoWidth ? true : false;
 
-    if (!canvas || !video || ((!hasFallDetection && !hasPPEDetection && !hasTankDetection && !hasChaneTankDetection && !hasGeofenceZones) && !onlyProvisional) || (!onlyProvisional && (!showOverlays || !isDetectionActive))) {
+    if (!canvas || !video || ((!hasFallDetection && !hasPPEDetection && !hasTankDetection && !hasChaneTankDetection && !hasGeofenceZones && !hasStoreOverlays) && !onlyProvisional) || (!onlyProvisional && (!showOverlays || !isDetectionActive))) {
       // Clear canvas if detection is disabled
       if (canvas) {
         const ctx = canvas.getContext('2d');
@@ -364,7 +373,13 @@ export function LiveVideoPlayer({
         ctx.restore();
       }
     }
-  }, [fallDetection, ppeDetection, tankDetection, chaneTankDetection, provisionalRoi, showOverlays, isDetectionActive, isTankOverflowEnabled, isGeofencingEnabled, tankCorners, geofenceZones]);
+
+    // Uploaded (model store) models, drawn last. Only when the camera runs
+    // one: built-in rendering above is unchanged.
+    if (hasStoreOverlays) {
+      drawStoreDetections(ctx, storeOverlays, canvas.width, canvas.height);
+    }
+  }, [fallDetection, ppeDetection, tankDetection, chaneTankDetection, storeOverlays, provisionalRoi, showOverlays, isDetectionActive, isTankOverflowEnabled, isGeofencingEnabled, tankCorners, geofenceZones]);
 
   // Cleanup function
   const cleanup = useCallback(async () => {

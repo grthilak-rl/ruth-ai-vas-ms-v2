@@ -510,6 +510,23 @@ export interface ModelStatusInfo {
 
   /** When model started - MAY be null if not started */
   started_at: ISOTimestamp | null;
+
+  // Uploaded (model store) models only; absent on built-in entries.
+
+  /** 'store' for an uploaded model */
+  source?: 'store';
+
+  /** Name to show for an uploaded model */
+  display_name?: string;
+
+  /** Rules that only fire inside a zone of their type */
+  zone_required_rules?: string[];
+
+  /** Every rule needs a zone: the model can raise nothing without one */
+  all_rules_need_zone?: boolean;
+
+  /** Reports missing PPE, like the built-in ppe_detection */
+  reports_ppe?: boolean;
 }
 
 /**

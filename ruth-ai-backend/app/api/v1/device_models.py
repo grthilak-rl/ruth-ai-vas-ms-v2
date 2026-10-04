@@ -25,6 +25,7 @@ from app.services.exceptions import (
     StreamStartError,
 )
 from app.services.model_rates import MAX_OVERRIDE_FPS, MIN_OVERRIDE_FPS, desired_fps
+from app.services.model_store.enabled import enabled_store_models
 from app.services.session_models import (
     SessionModelError,
     SessionModelsService,
@@ -116,6 +117,19 @@ async def add_model(
     streams: StreamServiceDep,
     db: DBSession,
 ) -> DeviceModelsOut:
+    # Uploaded models whose every rule needs a zone can raise nothing without
+    # one: refuse them until zones are drawn (fails closed for API callers
+    # too, not just the picker). Built-in models are never affected.
+    store_info = enabled_store_models().get(body.model_id)
+    if store_info and store_info.all_rules_need_zone and not (body.config or {}).get("zones"):
+        raise HTTPException(
+            422,
+            detail={
+                "error": "zone_required",
+                "message": f"{store_info.display_name} needs a zone for every rule "
+                f"({', '.join(store_info.zone_required_rules)}); draw one first",
+            },
+        )
     service = SessionModelsService(streams, db)
     try:
         outcome = await service.add(device_id, body.model_dump())

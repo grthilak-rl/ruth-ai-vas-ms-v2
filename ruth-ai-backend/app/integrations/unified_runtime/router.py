@@ -71,6 +71,14 @@ class RuntimeRouter:
         self.unified_runtime_client = unified_runtime_client or UnifiedRuntimeClient()
         self.frame_fetcher = FrameFetcher(vas_client)
 
+    async def client_for(self, model_id: str) -> UnifiedRuntimeClient:
+        """The runtime client that serves ``model_id``.
+
+        One runtime serves every model here. StoreAwareRouter overrides this
+        to send uploaded (model store) models to the store runtime.
+        """
+        return self.unified_runtime_client
+
     def decide_routing(self, model_id: str) -> RoutingDecision:
         """
         Decide where to route an inference request.
@@ -197,7 +205,8 @@ class RuntimeRouter:
         )
 
         # Step 2: Submit to unified runtime
-        response = await self.unified_runtime_client.submit_inference(
+        client = await self.client_for(model_id)
+        response = await client.submit_inference(
             model_id=model_id,
             frame_base64=frame_data.base64_data,
             stream_id=stream_id,
@@ -269,7 +278,8 @@ class RuntimeRouter:
         if decision.target != RoutingTarget.UNIFIED_RUNTIME:
             raise ValueError(f"Unsupported routing target: {decision.target}")
 
-        response = await self.unified_runtime_client.submit_inference(
+        client = await self.client_for(model_id)
+        response = await client.submit_inference(
             model_id=model_id,
             frame_base64=frame_data.base64_data,
             stream_id=stream_id,

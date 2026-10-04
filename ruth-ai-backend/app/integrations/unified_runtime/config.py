@@ -33,6 +33,23 @@ class UnifiedRuntimeConfig(BaseSettings):
         validation_alias="UNIFIED_RUNTIME_TIMEOUT"
     )
 
+    # Model store runtime: a second runtime serving uploaded models. Empty
+    # (the default) turns the feature off: every model goes to the runtime
+    # above, exactly as before.
+    model_store_runtime_url: str = Field(
+        default="",
+        description="Model store runtime base URL (empty = disabled)",
+        validation_alias="MODEL_STORE_RUNTIME_URL",
+    )
+
+    # The store runtime's RUNTIME_ID (fixed in compose). Its registration is
+    # never taken as "the AI runtime" for system health.
+    model_store_runtime_id: str = Field(
+        default="model-store-runtime",
+        description="RUNTIME_ID the model store runtime registers with",
+        validation_alias="MODEL_STORE_RUNTIME_ID",
+    )
+
     # Model routing configuration
     # Maps model_id to routing target: "unified" or "container"
     model_routing: Dict[str, Literal["unified", "container"]] = Field(

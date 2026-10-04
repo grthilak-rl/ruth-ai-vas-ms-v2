@@ -429,3 +429,39 @@ a script and a manual restart (A2); 3 makes it self-service.
   built-in PPE does).
 - **E.** Landing pieces 1+2 first (goal reachable, script-installed
   manifests) and 3 after, or all at once.
+
+---
+
+## 9. As implemented: pieces 1–2, B and C (2026-10-04)
+
+Decisions: A2 manual restart (token watcher in piece 3), B minimal live
+overlay now, C picker warning, D gloves `high`, E pieces 1–2 + B now.
+
+Differences from the text above:
+- **Result shape.** `detections` holds only the boxes a violation is about
+  (the backend stores every `detections` box on the violation, labelled with
+  its type); everything detected goes in `objects`, which the live overlay
+  draws. Without the split a "hardhat present" box would be saved on a
+  missing-hardhat violation.
+- **Plugin errors propagate** (the runtime reports `status: failed`, the
+  backend logs and backs off) instead of returning a silent "no violation".
+- **Store ids for routing** come from the store runtime's `/capabilities`
+  (cached 30 s; a failed read keeps the last known set). `/models/status`
+  lists a store model only if it is both reported by the store runtime and
+  installed under `enabled/` (its manifest gives display name, zone rules
+  and PPE flag).
+- **Built-in `/models/status` entries unchanged** by serializing with
+  `response_model_exclude_unset`: built-in entries set exactly the original
+  fields, so the new optional ones never appear on them (not even as null).
+- **Compose:** `model-store-runtime` sits behind the `model-store` profile, so
+  a plain `docker compose up -d` is unchanged; `MODEL_STORE_RUNTIME_URL`
+  defaults to empty (off).
+- **Installer:** `ai/store_plugin/install_enabled.py` (stdlib only) builds the
+  enabled tree from the three manifests in `ai/store_plugin/manifests/`,
+  checking each against its weights' own class names via a restricted
+  unpickler; previous tree kept under `state/` for rollback.
+- **Overlay (B):** `services/storeOverlay.ts`, drawn after all built-in
+  overlays and only when a store result is present; label
+  "<model> · <class> <confidence>", red for detections a rule fired on.
+- **Warning (C):** shown in the picker panel while `ppe_detection` and a store
+  model with `reports_ppe` run on the same camera.

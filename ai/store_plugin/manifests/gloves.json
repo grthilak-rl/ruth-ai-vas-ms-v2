@@ -1,0 +1,15 @@
+{
+  "manifest_version": 1,
+  "model_id": "gloves",
+  "display_name": "Gloves",
+  "weights": "bestgloves.pt",
+  "task": "detect",
+  "imgsz": 1280,
+  "classes": {"0": "gloves", "1": "no-gloves"},
+  "rules": [
+    {"id": "missing_gloves", "classes": ["no-gloves"], "min_confidence": 0.5,
+     "violation_type": "missing_gloves", "severity": "high"}
+  ],
+  "performance": {"inference_time_hint_ms": 40, "recommended_fps": 2},
+  "limits": {"max_memory_mb": 1536, "inference_timeout_ms": 5000}
+}

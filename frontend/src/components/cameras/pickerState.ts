@@ -66,8 +66,13 @@ export function configsFor(
 
 /** A runtime model as a picker row. */
 export function toAIModel(model: ModelStatusInfo, isEnabled: boolean, isPending: boolean = false): AIModel {
+  // An uploaded model whose every rule needs a zone can raise nothing until
+  // zones can be drawn; the backend refuses it too (422 zone_required).
+  const blockedForZones = model.all_rules_need_zone === true && !isEnabled;
   let state: AIModel['state'];
-  if (model.health === 'unhealthy' || model.status === 'error') {
+  if (blockedForZones) {
+    state = 'unavailable';
+  } else if (model.health === 'unhealthy' || model.status === 'error') {
     state = 'unavailable';
   } else if (model.health === 'degraded') {
     state = isEnabled ? 'degraded' : 'inactive';
@@ -76,13 +81,35 @@ export function toAIModel(model: ModelStatusInfo, isEnabled: boolean, isPending:
   } else {
     state = 'inactive';
   }
-  return {
+  const row: AIModel = {
     id: model.model_id,
-    name: modelDisplayName(model.model_id),
+    name: model.display_name ?? modelDisplayName(model.model_id),
     state,
     requiresGeofencing: MODELS_REQUIRING_CONFIG.has(model.model_id),
     pending: isPending,
   };
+  if (blockedForZones) {
+    row.disabledReason = `Needs a zone for every rule (${(model.zone_required_rules ?? []).join(', ')}) — available with zone setup`;
+  }
+  return row;
+}
+
+/**
+ * Warning when the built-in PPE model and uploaded PPE models run on the
+ * same camera: both report missing PPE, so one missing item raises a
+ * violation from each. Null when there is nothing to warn about.
+ */
+export function ppeOverlapWarning(
+  available: readonly ModelStatusInfo[],
+  runningIds: readonly string[]
+): string | null {
+  if (!runningIds.includes('ppe_detection')) return null;
+  const overlapping = available.filter(
+    (m) => m.source === 'store' && m.reports_ppe === true && runningIds.includes(m.model_id)
+  );
+  if (overlapping.length === 0) return null;
+  const names = overlapping.map((m) => m.display_name ?? modelDisplayName(m.model_id)).join(', ');
+  return `PPE Detection and ${names} both report missing PPE: each missing item will raise two violations.`;
 }
 
 /** Picker rows: every healthy or degraded runtime model. */

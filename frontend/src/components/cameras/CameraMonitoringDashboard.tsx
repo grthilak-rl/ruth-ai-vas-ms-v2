@@ -41,6 +41,7 @@ import {
   executeToggle,
   pickerModels,
   planToggle,
+  ppeOverlapWarning,
   type ToggleAction,
 } from './pickerState';
 import { useDeviceSync } from '../../state/hooks/useDeviceSync';
@@ -553,6 +554,7 @@ export function CameraMonitoringDashboard({
               runningModelIds={runningModelIds(cell.camera)}
               onPickerOpen={handlePickerOpen}
               pickerError={pickerErrors[cell.camera.id]}
+              pickerWarning={ppeOverlapWarning(availableModels, runningModelIds(cell.camera))}
             />
           );
         })}

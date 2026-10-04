@@ -231,7 +231,16 @@ class HealthService:
             ComponentHealth with status, latency, and model info
         """
         # Import here to avoid circular imports
-        from app.api.internal.ai_runtime import _registered_runtimes
+        from app.api.internal.ai_runtime import _registered_runtimes as _all_runtimes
+        from app.integrations.unified_runtime.config import get_unified_runtime_config
+
+        # The model store runtime (uploaded models) is never "the AI runtime":
+        # system health reflects the built-in runtime only. Without a store
+        # runtime registered this is the full registry, as before.
+        store_runtime_id = get_unified_runtime_config().model_store_runtime_id
+        _registered_runtimes = {
+            rid: reg for rid, reg in _all_runtimes.items() if rid != store_runtime_id
+        }
 
         start_time = time.perf_counter()
 

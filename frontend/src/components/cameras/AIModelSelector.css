@@ -181,6 +181,26 @@
   background: #dbeafe;
 }
 
+.ai-model-selector__warning {
+  margin: 0 0 0.75rem;
+  padding: 0.5rem 0.625rem;
+  border-radius: 0.25rem;
+  font-size: 0.75rem;
+  color: #92400e;
+  background: #fef3c7;
+}
+
+.ai-model-selector__item--with-reason {
+  flex-wrap: wrap;
+}
+
+.ai-model-selector__item-reason {
+  flex-basis: 100%;
+  margin: 0.25rem 0 0;
+  font-size: 0.7rem;
+  color: var(--color-text-secondary, #6b7280);
+}
+
 .ai-model-selector__error {
   margin: 0 0 0.75rem;
   padding: 0.5rem 0.625rem;

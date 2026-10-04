@@ -79,6 +79,9 @@ VIOLATION_TYPE_MAP: dict[str, ViolationType] = {
     "missing_vest": ViolationType.PPE_VIOLATION,
     "missing_goggles": ViolationType.PPE_VIOLATION,
     "missing_mask": ViolationType.PPE_VIOLATION,
+    # Emitted by uploaded (model store) glove models; the built-in PPE model
+    # reports missing gloves as plain "ppe_violation".
+    "missing_gloves": ViolationType.PPE_VIOLATION,
     # Fall — "possible_fall" is a lower-confidence fall, not a separate class.
     # The distinction survives in type_detail and in `confidence`.
     "fall_detected": ViolationType.FALL_DETECTED,

@@ -28,6 +28,8 @@ from app.integrations.vas import (
 )
 from app.integrations.unified_runtime.router import RuntimeRouter
 from app.integrations.unified_runtime.client import UnifiedRuntimeClient
+from app.integrations.unified_runtime.config import get_unified_runtime_config
+from app.integrations.unified_runtime.store_router import StoreAwareRouter
 from app.services.inference_loop import InferenceLoopService, set_inference_loop
 
 logger = get_logger(__name__)
@@ -268,11 +270,23 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
             unified_client = UnifiedRuntimeClient()
             await unified_client.connect()
 
-            # Create runtime router
-            runtime_router = RuntimeRouter(
-                vas_client=_vas_client,
-                unified_runtime_client=unified_client,
-            )
+            # Create runtime router. With a model store runtime configured,
+            # uploaded models go there; built-in models are routed as before.
+            store_runtime_url = get_unified_runtime_config().model_store_runtime_url
+            if store_runtime_url:
+                store_client = UnifiedRuntimeClient(runtime_url=store_runtime_url)
+                await store_client.connect()
+                runtime_router = StoreAwareRouter(
+                    vas_client=_vas_client,
+                    unified_runtime_client=unified_client,
+                    store_runtime_client=store_client,
+                )
+                logger.info("Model store runtime routing enabled", url=store_runtime_url)
+            else:
+                runtime_router = RuntimeRouter(
+                    vas_client=_vas_client,
+                    unified_runtime_client=unified_client,
+                )
 
             # Create and start inference loop
             _inference_loop = InferenceLoopService(

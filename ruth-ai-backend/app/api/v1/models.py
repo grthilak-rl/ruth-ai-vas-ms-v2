@@ -10,7 +10,7 @@ Aligned with F6 §4.3 Models Domain.
 from datetime import datetime, timezone
 
 from fastapi import APIRouter, status
-from sqlalchemy import func, select
+from sqlalchemy import func, or_, select
 
 from app.core.logging import get_logger
 from app.deps import DBSession
@@ -21,6 +21,8 @@ from app.integrations.unified_runtime.client import (
     UnifiedRuntimeConnectionError,
 )
 from app.integrations.unified_runtime.config import get_unified_runtime_config
+from app.services.model_store.enabled import enabled_store_models
+from app.services.model_store.ids import RESERVED_MODEL_IDS
 
 router = APIRouter(tags=["Models"])
 logger = get_logger(__name__)
@@ -36,6 +38,9 @@ logger = get_logger(__name__)
         200: {"model": ModelsStatusResponse, "description": "Models status"},
         500: {"model": ErrorResponse, "description": "Internal server error"},
     },
+    # Omit fields an entry doesn't set: built-in entries set exactly the
+    # original fields, so they serialize as before; store entries add theirs.
+    response_model_exclude_unset=True,
 )
 async def get_models_status(
     db: DBSession,
@@ -155,6 +160,19 @@ async def get_models_status(
             )
         )
 
+    # Uploaded models served by the model store runtime, appended after the
+    # built-in ones. Off (and the response exactly as above) unless
+    # MODEL_STORE_RUNTIME_URL is set.
+    if config.model_store_runtime_url:
+        models.extend(
+            await _store_model_statuses(
+                db,
+                config.model_store_runtime_url,
+                skip=set(production_models),
+                test_model_prefixes=test_model_prefixes,
+            )
+        )
+
     logger.info(
         "Retrieved model statuses",
         count=len(models),
@@ -162,3 +180,102 @@ async def get_models_status(
     )
 
     return ModelsStatusResponse(models=models)
+
+
+#: Short: a hung store runtime must not hold up the model list.
+STORE_RUNTIME_STATUS_TIMEOUT_S = 5.0
+
+
+async def _store_model_statuses(
+    db,
+    store_runtime_url: str,
+    skip: set[str],
+    test_model_prefixes: list[str],
+) -> list[ModelStatusInfo]:
+    """Status entries for store models: installed (enabled/) and reported by
+    the store runtime. Any failure gives no entries, never an error."""
+    try:
+        async with UnifiedRuntimeClient(
+            runtime_url=store_runtime_url, timeout=STORE_RUNTIME_STATUS_TIMEOUT_S
+        ) as client:
+            capabilities = await client.get_capabilities()
+    except Exception as e:  # noqa: BLE001 - the built-in list must still be returned
+        logger.warning("Model store runtime unavailable for status", error=str(e))
+        return []
+
+    installed = enabled_store_models()
+    entries: list[ModelStatusInfo] = []
+    for model_info in capabilities.get("models", []):
+        model_id = model_info.get("model_id")
+        if (
+            not model_id
+            or model_id in skip
+            or model_id in RESERVED_MODEL_IDS
+            or model_id not in installed
+            or any(model_id.startswith(prefix) for prefix in test_model_prefixes)
+            or model_info.get("state") == "invalid"
+        ):
+            continue
+        skip.add(model_id)
+        info = installed[model_id]
+
+        # A store model runs as any entry of a multi-model session (or as a
+        # legacy session's model_id), so count both.
+        uses_model = or_(
+            StreamSession.model_id == model_id,
+            StreamSession.models.contains([{"model_id": model_id}]),
+        )
+        result = await db.execute(
+            select(func.count())
+            .select_from(StreamSession)
+            .where(StreamSession.state == StreamState.LIVE)
+            .where(uses_model)
+        )
+        cameras_active = result.scalar() or 0
+        result = await db.execute(
+            select(StreamSession.started_at)
+            .where(uses_model)
+            .order_by(StreamSession.started_at.desc())
+            .limit(1)
+        )
+        last_started = result.scalar()
+
+        entries.append(
+            ModelStatusInfo(
+                model_id=model_id,
+                version=model_info.get("version", info.version),
+                status=_api_status(model_info.get("state", "unknown"), cameras_active),
+                health=_api_health(model_info.get("state", "unknown"), model_info.get("health", "unknown")),
+                cameras_active=cameras_active,
+                last_inference_at=last_started,
+                started_at=last_started,
+                source="store",
+                display_name=info.display_name,
+                zone_required_rules=list(info.zone_required_rules),
+                all_rules_need_zone=info.all_rules_need_zone,
+                reports_ppe=info.reports_ppe,
+            )
+        )
+    return entries
+
+
+def _api_status(runtime_state: str, cameras_active: int) -> str:
+    """Runtime state -> API status (same mapping as the built-in loop)."""
+    if runtime_state == "ready":
+        return "active" if cameras_active > 0 else "idle"
+    if runtime_state == "loading":
+        return "starting"
+    if runtime_state == "failed":
+        return "error"
+    return "idle"
+
+
+def _api_health(runtime_state: str, runtime_health: str) -> str:
+    """Runtime health -> API health (same mapping as the built-in loop)."""
+    if runtime_health == "healthy":
+        return "healthy"
+    if runtime_health == "degraded":
+        return "degraded"
+    if runtime_health == "unknown":
+        return "healthy" if runtime_state == "ready" else "unhealthy"
+    return "unhealthy"

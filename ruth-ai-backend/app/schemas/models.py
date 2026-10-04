@@ -31,6 +31,20 @@ class ModelStatusInfo(BaseModel):
     )
     started_at: datetime | None = Field(None, description="When model started")
 
+    # Uploaded (model store) models only. Built-in entries never set these,
+    # and the route omits unset fields, so built-in entries are unchanged.
+    source: str | None = Field(None, description="'store' for uploaded models")
+    display_name: str | None = Field(None, description="Name to show (store models)")
+    zone_required_rules: list[str] | None = Field(
+        None, description="Rules that fire only inside a zone of their type"
+    )
+    all_rules_need_zone: bool | None = Field(
+        None, description="True when the model can raise nothing without a zone"
+    )
+    reports_ppe: bool | None = Field(
+        None, description="Reports missing PPE, like the built-in ppe_detection"
+    )
+
 
 class ModelsStatusResponse(BaseModel):
     """Response schema for GET /api/v1/models/status.

@@ -34,6 +34,8 @@ export interface AIModel {
   requiresGeofencing?: boolean;
   /** A change to this model is in flight; the picker locks until it settles. */
   pending?: boolean;
+  /** Why the model can't be enabled here (shown under its row). */
+  disabledReason?: string;
 }
 
 interface AIModelSelectorProps {
@@ -54,6 +56,8 @@ interface AIModelSelectorProps {
   onOpen?: () => void;
   /** Optional. The last change's failure, shown in the panel. */
   error?: string | null;
+  /** Optional. A standing warning about the camera's model combination. */
+  warning?: string | null;
 }
 
 export function AIModelSelector({
@@ -66,6 +70,7 @@ export function AIModelSelector({
   disabled = false,
   onOpen,
   error = null,
+  warning = null,
 }: AIModelSelectorProps) {
   const [isOpen, setIsOpen] = useState(false);
   const [geofenceModalOpen, setGeofenceModalOpen] = useState(false);
@@ -211,7 +216,7 @@ export function AIModelSelector({
                     key={model.id}
                     className={`ai-model-selector__item ${
                       isDisabled ? 'ai-model-selector__item--disabled' : ''
-                    }`}
+                    }${model.disabledReason ? ' ai-model-selector__item--with-reason' : ''}`}
                   >
                     <label className="ai-model-selector__item-content">
                       <input
@@ -232,6 +237,9 @@ export function AIModelSelector({
                         </span>
                       )}
                     </label>
+                    {model.disabledReason && (
+                      <p className="ai-model-selector__item-reason">{model.disabledReason}</p>
+                    )}
                     {model.requiresGeofencing && !isDisabled && (
                       <button
                         type="button"
@@ -248,6 +256,12 @@ export function AIModelSelector({
                 );
               })}
             </div>
+
+            {warning && (
+              <p className="ai-model-selector__warning" role="status">
+                {warning}
+              </p>
+            )}
 
             {error && (
               <p className="ai-model-selector__error" role="alert">

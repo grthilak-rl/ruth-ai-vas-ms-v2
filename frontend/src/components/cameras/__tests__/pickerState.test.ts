@@ -13,6 +13,7 @@ import {
   modelDisplayName,
   pickerModels,
   planToggle,
+  ppeOverlapWarning,
   toAIModel,
   type ToggleAction,
 } from '../pickerState';
@@ -196,5 +197,39 @@ describe('what a toggle does on the server', () => {
   it('propagates a failed call so the picker can show it', async () => {
     const failing = { ...spies(), add: vi.fn(async () => Promise.reject(new Error('409'))) };
     await expect(executeToggle({ kind: 'add', entry: { model_id: 'x' } }, failing)).rejects.toThrow('409');
+  });
+});
+
+describe('uploaded (model store) models in the picker', () => {
+  const builtin = (id: string) => status(id);
+  const store = (id: string, over: Partial<ModelStatusInfo> = {}) =>
+    ({ ...status(id), source: 'store', display_name: id.replace('_', ' ').toUpperCase(), reports_ppe: true, ...over }) as ModelStatusInfo;
+
+  it('use their display name; built-in rows are unchanged', () => {
+    expect(toAIModel(store('hard_hat', { display_name: 'Hard Hat' }), false).name).toBe('Hard Hat');
+    const { pending, ...row } = toAIModel(builtin('ppe_detection'), true);
+    expect(pending).toBe(false);
+    expect(row).toEqual({ id: 'ppe_detection', name: 'Ppe Detection', state: 'active', requiresGeofencing: false });
+  });
+
+  it('a model whose every rule needs a zone is shown but cannot be enabled', () => {
+    const harness = store('harness', { all_rules_need_zone: true, zone_required_rules: ['missing_harness'] });
+    const row = toAIModel(harness, false);
+    expect(row.state).toBe('unavailable');
+    expect(row.disabledReason).toContain('missing_harness');
+    // if it somehow runs already, it can still be switched off
+    expect(toAIModel(harness, true).state).toBe('active');
+  });
+
+  it('warn when built-in PPE and uploaded PPE models run together', () => {
+    const available = [builtin('ppe_detection'), builtin('fall_detection'),
+      store('hard_hat', { display_name: 'Hard Hat' }), store('safety_vest', { display_name: 'Safety Vest' }),
+      store('forklift', { display_name: 'Forklift', reports_ppe: false })];
+    expect(ppeOverlapWarning(available, ['fall_detection', 'hard_hat'])).toBeNull();
+    expect(ppeOverlapWarning(available, ['ppe_detection', 'fall_detection'])).toBeNull();
+    expect(ppeOverlapWarning(available, ['ppe_detection', 'forklift'])).toBeNull();
+    expect(ppeOverlapWarning(available, ['ppe_detection', 'hard_hat', 'safety_vest'])).toBe(
+      'PPE Detection and Hard Hat, Safety Vest both report missing PPE: each missing item will raise two violations.'
+    );
   });
 });

@@ -50,6 +50,8 @@ interface CameraGridCellProps {
   onPickerOpen?: (cameraId: string) => void;
   /** The last picker change's failure for this camera. */
   pickerError?: string | null;
+  /** A standing warning about this camera's model combination. */
+  pickerWarning?: string | null;
 }
 
 export function CameraGridCell({
@@ -67,6 +69,7 @@ export function CameraGridCell({
   runningModelIds,
   onPickerOpen,
   pickerError = null,
+  pickerWarning = null,
 }: CameraGridCellProps) {
   const statusIndicator = useMemo(() => {
     switch (status) {
@@ -196,6 +199,7 @@ export function CameraGridCell({
             modelConfigs={modelConfigs}
             onOpen={onPickerOpen ? () => onPickerOpen(camera.id) : undefined}
             error={pickerError}
+            warning={pickerWarning}
           />
           <button
             type="button"
