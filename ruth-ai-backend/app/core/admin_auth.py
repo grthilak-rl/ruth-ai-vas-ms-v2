@@ -311,15 +311,25 @@ class ClientIPResolver:
     other peer is ignored: it would be client-controlled.
     """
 
-    def __init__(self, trusted_hosts: tuple[str, ...], cache_seconds: float = 60.0) -> None:
+    def __init__(
+        self,
+        trusted_hosts: tuple[str, ...],
+        cache_seconds: float = 60.0,
+        miss_refresh_seconds: float = 5.0,
+    ) -> None:
         self.trusted_hosts = trusted_hosts
         self.cache_seconds = cache_seconds
+        # A peer outside the cached set re-resolves once the cache is this old,
+        # so a recreated frontend container (new IP) is picked up within
+        # seconds instead of after the full cache_seconds.
+        self.miss_refresh_seconds = miss_refresh_seconds
         self._cached_ips: frozenset[str] = frozenset()
         self._cached_at: float | None = None
 
-    async def _trusted_ips(self) -> frozenset[str]:
+    async def _trusted_ips(self, max_age: float | None = None) -> frozenset[str]:
         now = time.monotonic()
-        if self._cached_at is not None and now - self._cached_at < self.cache_seconds:
+        limit = self.cache_seconds if max_age is None else max_age
+        if self._cached_at is not None and now - self._cached_at < limit:
             return self._cached_ips
         loop = asyncio.get_running_loop()
         ips: set[str] = set()
@@ -340,7 +350,12 @@ class ClientIPResolver:
 
     async def resolve(self, request: Request) -> str:
         peer = request.client.host if request.client else "unknown"
-        if not self.trusted_hosts or peer not in await self._trusted_ips():
+        if not self.trusted_hosts:
+            return peer
+        trusted = await self._trusted_ips()
+        if peer not in trusted:
+            trusted = await self._trusted_ips(max_age=self.miss_refresh_seconds)
+        if peer not in trusted:
             return peer
         real_ip = request.headers.get("x-real-ip", "").strip()
         try:

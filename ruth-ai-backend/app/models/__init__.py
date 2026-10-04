@@ -19,6 +19,7 @@ from app.models.enums import (
 )
 from app.models.event import Event
 from app.models.evidence import Evidence
+from app.models.model_store import ModelStoreFile, ModelStoreModel, ModelStoreUpload
 from app.models.stream_session import StreamSession
 from app.models.violation import Violation
 
@@ -43,4 +44,7 @@ __all__ = [
     "Event",
     "Violation",
     "Evidence",
+    "ModelStoreModel",
+    "ModelStoreFile",
+    "ModelStoreUpload",
 ]
