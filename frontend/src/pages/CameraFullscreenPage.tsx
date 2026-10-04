@@ -1,6 +1,7 @@
-import { useState, useEffect, useCallback } from 'react';
+import { useEffect, useCallback, useMemo } from 'react';
 import { LiveVideoPlayer } from '../components/video/LiveVideoPlayer';
-import type { AIModel } from '../components/cameras/AIModelSelector';
+import { modelDisplayName } from '../components/cameras/pickerState';
+import { activeModelIds } from '../state/api/devices.api';
 import type { Device } from '../state';
 import './CameraFullscreenPage.css';
 
@@ -19,6 +20,9 @@ import './CameraFullscreenPage.css';
  * - Opened via fullscreen button from grid cell
  * - Opens in new tab at /cameras/fullscreen/:id
  * - Original dashboard remains open when this tab is closed
+ *
+ * AI detection is read-only here: it lists the models the server says run
+ * on this camera. Models are added and removed from the grid's picker.
  */
 
 interface CameraFullscreenPageProps {
@@ -34,10 +38,11 @@ export function CameraFullscreenPage({
   isError,
   onRetry,
 }: CameraFullscreenPageProps) {
-  // AI model toggles (session-scoped)
-  const [aiModelToggles, setAiModelToggles] = useState<Record<string, boolean>>({
-    fall_detection: true, // Default to enabled
-  });
+  // Models running on this camera, from the server.
+  const runningModels = useMemo(
+    () => (device ? activeModelIds(device.streaming) : []),
+    [device]
+  );
 
   // Update document title
   useEffect(() => {
@@ -49,29 +54,12 @@ export function CameraFullscreenPage({
     };
   }, [device]);
 
-  // Handle AI model toggle
-  const handleModelToggle = useCallback((modelId: string, enabled: boolean) => {
-    setAiModelToggles((prev) => ({
-      ...prev,
-      [modelId]: enabled,
-    }));
-  }, []);
-
   // Handle close
   const handleClose = useCallback(() => {
     window.close();
   }, []);
 
-  // Get AI models for camera (mock for now)
-  const aiModels: AIModel[] = [
-    {
-      id: 'fall_detection',
-      name: 'Fall Detection',
-      state: aiModelToggles['fall_detection'] ? 'active' : 'inactive',
-    },
-  ];
-
-  const isDetectionActive = aiModels.some((m) => m.state === 'active');
+  const isDetectionActive = runningModels.length > 0;
   const showOverlays = isDetectionActive;
   const cameraStatus = device?.is_active ? 'live' : 'offline';
 
@@ -197,23 +185,27 @@ export function CameraFullscreenPage({
           <h3 className="camera-fullscreen-page__info-title">AI DETECTION</h3>
           <div className="camera-fullscreen-page__info-content">
             <div className="camera-fullscreen-page__ai-models">
-              {aiModels.map((model) => (
-                <label key={model.id} className="camera-fullscreen-page__ai-model-item">
-                  <input
-                    type="checkbox"
-                    checked={model.state === 'active'}
-                    onChange={(e) => handleModelToggle(model.id, e.target.checked)}
-                    className="camera-fullscreen-page__ai-model-checkbox"
-                  />
-                  <span className="camera-fullscreen-page__ai-model-name">{model.name}</span>
-                  <span
-                    className={`camera-fullscreen-page__ai-model-status camera-fullscreen-page__ai-model-status--${model.state}`}
-                  >
-                    {model.state === 'active' ? '● Active' : '○ Inactive'}
+              {runningModels.length === 0 ? (
+                <p className="camera-fullscreen-page__ai-model-item">
+                  <span className="camera-fullscreen-page__ai-model-name">No models running</span>
+                  <span className="camera-fullscreen-page__ai-model-status camera-fullscreen-page__ai-model-status--inactive">
+                    ○ Inactive
                   </span>
-                </label>
-              ))}
+                </p>
+              ) : (
+                runningModels.map((modelId) => (
+                  <p key={modelId} className="camera-fullscreen-page__ai-model-item">
+                    <span className="camera-fullscreen-page__ai-model-name">{modelDisplayName(modelId)}</span>
+                    <span className="camera-fullscreen-page__ai-model-status camera-fullscreen-page__ai-model-status--active">
+                      ● Active
+                    </span>
+                  </p>
+                ))
+              )}
             </div>
+            <p className="camera-fullscreen-page__ai-models-note">
+              Add or remove models from the camera grid.
+            </p>
           </div>
         </div>
 

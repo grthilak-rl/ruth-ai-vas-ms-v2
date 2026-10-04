@@ -63,6 +63,12 @@ export const queryKeys = {
     detections: (id: string) => ['devices', 'detections', id] as const,
     /** Newest result of every model on one camera (multi-model sessions). */
     detectionsAll: (id: string) => ['devices', 'detections-all', id] as const,
+    /**
+     * The models running on one camera (GET /devices/{id}/models): the
+     * camera picker's source of truth. Under 'devices' so every device
+     * mutation's invalidation refreshes it too.
+     */
+    models: (id: string) => ['devices', 'models', id] as const,
   },
 
   // Models domain

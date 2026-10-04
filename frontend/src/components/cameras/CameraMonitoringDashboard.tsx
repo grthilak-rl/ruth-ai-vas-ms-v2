@@ -1,4 +1,5 @@
 import { useState, useEffect, useMemo, useCallback } from 'react';
+import { useQueries, useQueryClient } from '@tanstack/react-query';
 import { CameraGridSelector } from './CameraGridSelector';
 import { CameraSelectorDropdown } from './CameraSelectorDropdown';
 import { ShiftConfigDropdown } from './ShiftConfigDropdown';
@@ -25,12 +26,23 @@ import {
   setPaneGridSize,
 } from '../../utils/viewingPanePreferences';
 import { fetchModelsStatus, type ModelStatusInfo } from '../../state/api/models.api';
-import { type StartInferenceRequest } from '../../state/api/devices.api';
+import { type CameraModelsResponse } from '../../state/api/devices.api';
+import { ApiError } from '../../state/api/errors';
+import { queryKeys } from '../../state/queryKeys';
 import {
-  useStartInferenceMutation,
-  useStopInferenceMutation,
-  useUpdateModelConfigMutation,
+  cameraModelsQueryOptions,
+  useAddCameraModelMutation,
+  useUpdateCameraModelMutation,
+  useRemoveCameraModelMutation,
 } from '../../state/hooks/useDevicesQuery';
+import {
+  configsFor,
+  enabledModelIdsFor,
+  executeToggle,
+  pickerModels,
+  planToggle,
+  type ToggleAction,
+} from './pickerState';
 import { useDeviceSync } from '../../state/hooks/useDeviceSync';
 import './CameraMonitoringDashboard.css';
 
@@ -44,7 +56,8 @@ import './CameraMonitoringDashboard.css';
  * - Per-camera AI model toggles
  * - All state variations (loading, connecting, live, offline, error, degraded)
  * - Grid size and selected cameras persist in localStorage
- * - AI model toggles are session-scoped (reset on page reload)
+ * - AI model toggles show the server's state: each one adds or removes one
+ *   model through /devices/{id}/models (see pickerState.ts)
  *
  * States per F7 §8:
  * - Loading: Initial dashboard load
@@ -57,6 +70,13 @@ interface CameraMonitoringDashboardProps {
   isLoading: boolean;
   isError: boolean;
   onRetry: () => void;
+}
+
+/** Operator-facing text for a failed picker change. */
+function pickerErrorMessage(kind: ToggleAction['kind'], modelId: string, error: unknown): string {
+  const verb = kind === 'add' ? 'start' : kind === 'remove' ? 'stop' : 'update';
+  const reason = error instanceof ApiError ? error.message : 'unexpected error';
+  return `Could not ${verb} ${modelId}: ${reason}`;
 }
 
 export function CameraMonitoringDashboard({
@@ -77,14 +97,6 @@ export function CameraMonitoringDashboard({
   const [selectedCameraIds, setSelectedCameraIdsState] = useState<string[]>(() =>
     getSelectedCameraIds()
   );
-
-  // AI model toggles (session-scoped, per F7)
-  // Map of cameraId -> modelId -> enabled
-  const [aiModelToggles, setAiModelToggles] = useState<Record<string, Record<string, boolean>>>({});
-
-  // Model configurations (session-scoped)
-  // Map of cameraId -> modelId -> ModelConfig
-  const [modelConfigs, setModelConfigs] = useState<Record<string, Record<string, ModelConfig>>>({});
 
   // Available AI models from backend
   const [availableModels, setAvailableModels] = useState<ModelStatusInfo[]>([]);
@@ -117,38 +129,6 @@ export function CameraMonitoringDashboard({
     }
     loadModels();
   }, []);
-
-  // Load model configs and toggles from cameras data
-  useEffect(() => {
-    const newToggles: Record<string, Record<string, boolean>> = {};
-    const newConfigs: Record<string, Record<string, ModelConfig>> = {};
-
-    for (const camera of cameras) {
-      // If camera has AI enabled and a model_id, set it as active
-      if (camera.streaming.ai_enabled && camera.streaming.model_id) {
-        newToggles[camera.id] = {
-          ...(newToggles[camera.id] || {}),
-          [camera.streaming.model_id]: true,
-        };
-
-        // If camera has model_config, store it
-        if (camera.streaming.model_config) {
-          newConfigs[camera.id] = {
-            ...(newConfigs[camera.id] || {}),
-            [camera.streaming.model_id]: camera.streaming.model_config as ModelConfig,
-          };
-        }
-      }
-    }
-
-    // Only update if there are changes
-    if (Object.keys(newToggles).length > 0) {
-      setAiModelToggles(prev => ({ ...prev, ...newToggles }));
-    }
-    if (Object.keys(newConfigs).length > 0) {
-      setModelConfigs(prev => ({ ...prev, ...newConfigs }));
-    }
-  }, [cameras]);
 
   // Seed the selection on first run. autoSelectCameras leaves an existing
   // selection alone (beyond trimming to grid capacity), so this can no longer
@@ -186,96 +166,110 @@ export function CameraMonitoringDashboard({
     setSelectedCameraIds(cameraIds);
   };
 
-  // Mutations: each invalidates queryKeys.devices.all on success so the
-  // grid reflects the new ai_enabled / streaming state without waiting
-  // for the 120s devices poll.
-  const startInferenceMutation = useStartInferenceMutation();
-  const stopInferenceMutation = useStopInferenceMutation();
-  const updateModelConfigMutation = useUpdateModelConfigMutation();
+  // Get selected cameras
+  const selectedCameras = useMemo(() => {
+    return cameras.filter((camera) => selectedCameraIds.includes(camera.id));
+  }, [cameras, selectedCameraIds]);
 
-  // Handle AI model toggle
+  // What runs on each camera comes from the server. Cameras the devices list
+  // reports as AI-enabled fetch their model list (configs included);
+  // others read whatever the cache holds, which the picker fills when it
+  // opens. Mutations write their response straight into this cache.
+  const queryClient = useQueryClient();
+  const cameraModelQueries = useQueries({
+    queries: selectedCameras.map((camera) =>
+      cameraModelsQueryOptions(camera.id, camera.streaming.ai_enabled)
+    ),
+  });
+  const serverModels = useMemo(() => {
+    const byCamera: Record<string, CameraModelsResponse | undefined> = {};
+    selectedCameras.forEach((camera, i) => {
+      byCamera[camera.id] = cameraModelQueries[i]?.data;
+    });
+    return byCamera;
+  }, [selectedCameras, cameraModelQueries]);
+
+  const runningModelIds = useCallback(
+    (camera: Device): string[] => enabledModelIdsFor(camera.streaming, serverModels[camera.id]),
+    [serverModels]
+  );
+  const cameraConfigs = useCallback(
+    (camera: Device): Record<string, ModelConfig> => configsFor(camera.streaming, serverModels[camera.id]),
+    [serverModels]
+  );
+
+  // One in-flight change and the last error, per camera. No optimistic
+  // flip: a row shows "Applying" until the server's answer lands.
+  const [pendingModel, setPendingModel] = useState<Record<string, string | undefined>>({});
+  const [pickerErrors, setPickerErrors] = useState<Record<string, string | undefined>>({});
+
+  // Each writes its response (the camera's model list) into the cache and
+  // invalidates queryKeys.devices.all, so tiles, overlays and the picker
+  // follow at once rather than on the 120s devices poll.
+  const addModelMutation = useAddCameraModelMutation();
+  const updateModelMutation = useUpdateCameraModelMutation();
+  const removeModelMutation = useRemoveCameraModelMutation();
+
+  // Handle AI model toggle: one call on /devices/{id}/models per change.
   const handleModelToggle = useCallback(async (cameraId: string, modelId: string, enabled: boolean, config?: ModelConfig) => {
+    const camera = cameras.find((c) => c.id === cameraId);
+    if (!camera || pendingModel[cameraId]) return;
+
+    const action = planToggle(enabled, modelId, runningModelIds(camera), config);
+    if (action.kind === 'noop') return;
+
+    setPendingModel((prev) => ({ ...prev, [cameraId]: modelId }));
+    setPickerErrors((prev) => ({ ...prev, [cameraId]: undefined }));
     try {
-      if (enabled) {
-        // Check if model is already active for this camera
-        const isAlreadyActive = aiModelToggles[cameraId]?.[modelId] === true;
-
-        if (isAlreadyActive && config) {
-          // Model already active - just update the config
-          console.log(`[CameraMonitoring] Updating config for active model ${modelId}`);
-          await updateModelConfigMutation.mutateAsync({ deviceId: cameraId, config });
-        } else {
-          // Start inference with optional config
-          const request: StartInferenceRequest = {
-            model_id: modelId,
-            inference_fps: 10,
-            confidence_threshold: 0.7,
-            model_config: config,
-          };
-
-          await startInferenceMutation.mutateAsync({ deviceId: cameraId, request });
-        }
-
-        // Update local state on success
-        setAiModelToggles((prev: Record<string, Record<string, boolean>>) => ({
-          ...prev,
-          [cameraId]: {
-            ...(prev[cameraId] || {}),
-            [modelId]: true,
-          },
-        }));
-
-        // Store model config if provided
-        if (config) {
-          setModelConfigs((prev: Record<string, Record<string, ModelConfig>>) => ({
-            ...prev,
-            [cameraId]: {
-              ...(prev[cameraId] || {}),
-              [modelId]: config,
-            },
-          }));
-        }
-      } else {
-        // Stop inference
-        await stopInferenceMutation.mutateAsync({ deviceId: cameraId });
-
-        // Update local state on success
-        setAiModelToggles((prev: Record<string, Record<string, boolean>>) => ({
-          ...prev,
-          [cameraId]: {
-            ...(prev[cameraId] || {}),
-            [modelId]: false,
-          },
-        }));
-      }
+      await executeToggle(action, {
+        add: (entry) => addModelMutation.mutateAsync({ deviceId: cameraId, entry }),
+        update: (changes) => updateModelMutation.mutateAsync({ deviceId: cameraId, modelId, changes }),
+        remove: () => removeModelMutation.mutateAsync({ deviceId: cameraId, modelId }),
+      });
     } catch (error) {
-      console.error(`[CameraMonitoring] Failed to ${enabled ? 'start' : 'stop'} inference:`, error);
-      // TODO: Show error toast to user
+      console.error(`[CameraMonitoring] ${action.kind} ${modelId} failed:`, error);
+      setPickerErrors((prev) => ({ ...prev, [cameraId]: pickerErrorMessage(action.kind, modelId, error) }));
+      // Whatever happened, show what the server has now.
+      void queryClient.invalidateQueries({ queryKey: queryKeys.devices.models(cameraId) });
+    } finally {
+      setPendingModel((prev) => ({ ...prev, [cameraId]: undefined }));
     }
-  }, [aiModelToggles, startInferenceMutation, stopInferenceMutation, updateModelConfigMutation]);
+  }, [cameras, pendingModel, runningModelIds, addModelMutation, updateModelMutation, removeModelMutation, queryClient]);
+
+  // Refresh one camera's server state when its picker opens: another
+  // operator may have changed it since the last fetch.
+  const handlePickerOpen = useCallback((cameraId: string) => {
+    void queryClient.fetchQuery(cameraModelsQueryOptions(cameraId));
+  }, [queryClient]);
 
   // chane_tank_monitor: operator confirmed a clicked ROI circle. Merge it into
-  // the model config, persist to the backend (so the headless inference loop
-  // picks it up), and update local state so the overlay scaler uses it too.
+  // that model's config and persist it (so the headless inference loop picks
+  // it up). The cached list is updated first so the overlay uses the new ROI
+  // at once; a failure refetches the server's version.
   const handleRoiConfirm = useCallback(async (
     cameraId: string,
     modelId: string,
     roiCircle: { cx: number; cy: number; r: number },
   ) => {
+    const camera = cameras.find((c) => c.id === cameraId);
+    if (!camera) return;
     const merged: ModelConfig = {
-      ...(modelConfigs[cameraId]?.[modelId] || {}),
+      ...(cameraConfigs(camera)[modelId] || {}),
       roi_circle: roiCircle,
     };
-    setModelConfigs((prev) => ({
-      ...prev,
-      [cameraId]: { ...(prev[cameraId] || {}), [modelId]: merged },
-    }));
+    queryClient.setQueryData<CameraModelsResponse>(queryKeys.devices.models(cameraId), (prev) =>
+      prev
+        ? { ...prev, models: prev.models.map((m) => (m.model_id === modelId ? { ...m, config: merged } : m)) }
+        : prev
+    );
     try {
-      await updateModelConfigMutation.mutateAsync({ deviceId: cameraId, config: merged });
+      await updateModelMutation.mutateAsync({ deviceId: cameraId, modelId, changes: { config: merged } });
     } catch (error) {
       console.error('[CameraMonitoring] Failed to persist ROI config:', error);
+      setPickerErrors((prev) => ({ ...prev, [cameraId]: pickerErrorMessage('update', modelId, error) }));
+      void queryClient.invalidateQueries({ queryKey: queryKeys.devices.models(cameraId) });
     }
-  }, [modelConfigs, updateModelConfigMutation]);
+  }, [cameras, cameraConfigs, queryClient, updateModelMutation]);
 
   // Handle fullscreen
   const handleFullscreen = useCallback(
@@ -285,11 +279,6 @@ export function CameraMonitoringDashboard({
     []
   );
 
-  // Get selected cameras
-  const selectedCameras = useMemo(() => {
-    return cameras.filter((camera) => selectedCameraIds.includes(camera.id));
-  }, [cameras, selectedCameraIds]);
-
   // Unreviewed violations raised during the current shift, per camera.
   // One request covers every tile on the grid; the backend owns both the
   // shift window and the counting, so the number on a card and the shift
@@ -297,67 +286,22 @@ export function CameraMonitoringDashboard({
   const shiftCountsQuery = useShiftViolationCountsQuery(selectedCameraIds);
   const violationCounts = shiftCountsQuery.data?.counts;
 
-  // Convert backend model to frontend AIModel format
-  const convertToAIModel = useCallback(
-    (model: ModelStatusInfo, cameraId: string): AIModel => {
-      const isEnabled = aiModelToggles[cameraId]?.[model.model_id] === true;
-
-      // Determine state based on toggle and backend health
-      let state: AIModel['state'];
-      if (model.health === 'unhealthy' || model.status === 'error') {
-        state = 'unavailable';
-      } else if (model.health === 'degraded') {
-        state = isEnabled ? 'degraded' : 'inactive';
-      } else if (isEnabled) {
-        state = 'active';
-      } else {
-        state = 'inactive';
-      }
-
-      // Create display name - add suffix for clarity
-      let displayName = model.model_id
-        .split('_')
-        .map(word => word.charAt(0).toUpperCase() + word.slice(1))
-        .join(' ');
-
-      // Add suffix to distinguish unified vs container versions
-      if (model.model_id.includes('_container')) {
-        displayName = displayName.replace(' Container', ' (Legacy)');
-      }
-
-      // Check if model requires geo-fencing
-      // Tank overflow monitoring and geo-fencing require geo-fencing configuration
-      const requiresGeofencing = model.model_id === 'tank_overflow_monitoring' || model.model_id === 'geo_fencing';
-
-      return {
-        id: model.model_id,
-        name: displayName,
-        state,
-        requiresGeofencing,
-      };
-    },
-    [aiModelToggles]
-  );
-
-  // Get AI models for a camera
+  // Get AI models for a camera: every healthy or degraded runtime model,
+  // ticked when the server says it runs on this camera.
   const getAIModelsForCamera = useCallback(
-    (cameraId: string): AIModel[] => {
+    (camera: Device): AIModel[] => {
       if (modelsLoading || availableModels.length === 0) {
         return [];
       }
-
-      // Convert all available models to AIModel format
-      return availableModels
-        .filter((model: ModelStatusInfo) => model.health === 'healthy' || model.health === 'degraded')
-        .map((model: ModelStatusInfo) => convertToAIModel(model, cameraId));
+      return pickerModels(availableModels, runningModelIds(camera), pendingModel[camera.id]);
     },
-    [availableModels, modelsLoading, convertToAIModel]
+    [availableModels, modelsLoading, runningModelIds, pendingModel]
   );
 
   // Get detection status for a camera
   const getDetectionStatusForCamera = useCallback(
-    (cameraId: string): 'active' | 'degraded' | 'unavailable' | 'plain' => {
-      const models = getAIModelsForCamera(cameraId);
+    (camera: Device): 'active' | 'degraded' | 'unavailable' | 'plain' => {
+      const models = getAIModelsForCamera(camera);
       const activeModels = models.filter((m) => m.state === 'active');
       const degradedModels = models.filter((m) => m.state === 'degraded');
 
@@ -597,15 +541,18 @@ export function CameraMonitoringDashboard({
               key={cell.camera.id}
               camera={cell.camera}
               status={getCameraStatus(cell.camera)}
-              detectionStatus={getDetectionStatusForCamera(cell.camera.id)}
-              aiModels={getAIModelsForCamera(cell.camera.id)}
+              detectionStatus={getDetectionStatusForCamera(cell.camera)}
+              aiModels={getAIModelsForCamera(cell.camera)}
               violationCount={violationCounts?.[cell.camera.id]}
               onModelToggle={handleModelToggle}
               onRoiConfirm={handleRoiConfirm}
-              modelConfigs={modelConfigs[cell.camera.id]}
+              modelConfigs={cameraConfigs(cell.camera)}
               onFullscreen={handleFullscreen}
               shouldAutoConnect={shouldAutoConnect}
               autoConnectDelayMs={autoConnectDelayMs}
+              runningModelIds={runningModelIds(cell.camera)}
+              onPickerOpen={handlePickerOpen}
+              pickerError={pickerErrors[cell.camera.id]}
             />
           );
         })}

@@ -43,6 +43,13 @@ interface CameraGridCellProps {
   shouldAutoConnect?: boolean;
   /** Stagger delay so N cells don't open WebRTC peers simultaneously. */
   autoConnectDelayMs?: number;
+  /** Models running on this camera, from the server. Defaults to the
+   *  devices list's streaming summary when not given. */
+  runningModelIds?: readonly string[];
+  /** Called when this camera's model picker opens (refresh server state). */
+  onPickerOpen?: (cameraId: string) => void;
+  /** The last picker change's failure for this camera. */
+  pickerError?: string | null;
 }
 
 export function CameraGridCell({
@@ -57,6 +64,9 @@ export function CameraGridCell({
   onFullscreen,
   shouldAutoConnect = false,
   autoConnectDelayMs = 0,
+  runningModelIds,
+  onPickerOpen,
+  pickerError = null,
 }: CameraGridCellProps) {
   const statusIndicator = useMemo(() => {
     switch (status) {
@@ -91,7 +101,13 @@ export function CameraGridCell({
   // not from the picker's local toggles, which can disagree with the backend.
   // The devices query is invalidated on every model add/remove, so this
   // updates immediately rather than on the 120s devices poll.
-  const serverModels = useMemo(() => activeModelIds(camera.streaming), [camera.streaming]);
+  // Keyed on the ids' content, not the array: the parent builds a new array
+  // every render, and a new reference here would redraw the overlay canvas.
+  const runningKey = runningModelIds?.join('\n');
+  const serverModels = useMemo(
+    () => (runningKey !== undefined ? (runningKey ? runningKey.split('\n') : []) : activeModelIds(camera.streaming)),
+    [runningKey, camera.streaming]
+  );
   const isFallDetectionActive = serverModels.includes('fall_detection');
   const isPPEDetectionActive = serverModels.includes('ppe_detection');
   const isTankOverflowActive = serverModels.includes('tank_overflow_monitoring');
@@ -178,6 +194,8 @@ export function CameraGridCell({
             models={aiModels}
             onModelToggle={handleModelToggle}
             modelConfigs={modelConfigs}
+            onOpen={onPickerOpen ? () => onPickerOpen(camera.id) : undefined}
+            error={pickerError}
           />
           <button
             type="button"

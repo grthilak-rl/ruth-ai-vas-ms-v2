@@ -32,6 +32,8 @@ export interface AIModel {
   name: string;
   state: AIModelState;
   requiresGeofencing?: boolean;
+  /** A change to this model is in flight; the picker locks until it settles. */
+  pending?: boolean;
 }
 
 interface AIModelSelectorProps {
@@ -47,6 +49,11 @@ interface AIModelSelectorProps {
    *  Used by Bookmark Monitoring to gate the model picker until a
    *  bookmark is selected. */
   disabled?: boolean;
+  /** Optional. Called when the panel opens, so the caller can refresh the
+   *  camera's server state (another operator may have changed it). */
+  onOpen?: () => void;
+  /** Optional. The last change's failure, shown in the panel. */
+  error?: string | null;
 }
 
 export function AIModelSelector({
@@ -57,6 +64,8 @@ export function AIModelSelector({
   onModelToggle,
   modelConfigs = {},
   disabled = false,
+  onOpen,
+  error = null,
 }: AIModelSelectorProps) {
   const [isOpen, setIsOpen] = useState(false);
   const [geofenceModalOpen, setGeofenceModalOpen] = useState(false);
@@ -79,9 +88,13 @@ export function AIModelSelector({
     }
   }, [isOpen]);
 
+  // One change at a time per camera: the server applies them in order, but
+  // a second click before the first settles would act on a stale picture.
+  const busy = models.some((m) => m.pending);
+
   const handleToggle = (model: AIModel, currentState: AIModelState) => {
     // Only allow toggling if not unavailable
-    if (currentState === 'unavailable') return;
+    if (currentState === 'unavailable' || busy) return;
 
     const isEnabled = currentState === 'active' || currentState === 'degraded';
 
@@ -159,6 +172,7 @@ export function AIModelSelector({
         className="ai-model-selector__trigger"
         onClick={() => {
           if (disabled) return;
+          if (!isOpen) onOpen?.();
           setIsOpen(!isOpen);
         }}
         aria-expanded={disabled ? false : isOpen}
@@ -204,19 +218,26 @@ export function AIModelSelector({
                         type="checkbox"
                         checked={isEnabled}
                         onChange={() => handleToggle(model, model.state)}
-                        disabled={isDisabled}
+                        disabled={isDisabled || busy}
                         className="ai-model-selector__checkbox"
                       />
                       <span className="ai-model-selector__model-name">{model.name}</span>
-                      <span className={`ai-model-selector__state ${getStateClass(model.state)}`}>
-                        {getStateIndicator(model.state)} {getStateLabel(model.state)}
-                      </span>
+                      {model.pending ? (
+                        <span className="ai-model-selector__state ai-model-selector__state--pending">
+                          … Applying
+                        </span>
+                      ) : (
+                        <span className={`ai-model-selector__state ${getStateClass(model.state)}`}>
+                          {getStateIndicator(model.state)} {getStateLabel(model.state)}
+                        </span>
+                      )}
                     </label>
                     {model.requiresGeofencing && !isDisabled && (
                       <button
                         type="button"
                         className="ai-model-selector__config-btn"
                         onClick={() => handleGeofenceSetup(model)}
+                        disabled={busy}
                         aria-label="Setup geo-fence"
                         title={hasConfig ? 'Edit geo-fence configuration' : 'Setup geo-fence configuration'}
                       >
@@ -227,6 +248,12 @@ export function AIModelSelector({
                 );
               })}
             </div>
+
+            {error && (
+              <p className="ai-model-selector__error" role="alert">
+                {error}
+              </p>
+            )}
 
             <div className="ai-model-selector__note">
               <p>Note: Changes apply immediately.</p>

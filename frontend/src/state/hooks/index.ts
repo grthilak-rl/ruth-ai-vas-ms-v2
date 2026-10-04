@@ -28,6 +28,7 @@ export {
   useDeviceQuery,
   useManwaysQuery,
   useUpdateDeviceNamingMutation,
+  cameraModelsQueryOptions,
   useAddCameraModelMutation,
   useUpdateCameraModelMutation,
   useRemoveCameraModelMutation,

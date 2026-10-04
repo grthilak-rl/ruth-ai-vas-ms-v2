@@ -15,6 +15,7 @@ import {
   stopInference,
   updateModelConfig,
   addCameraModel,
+  fetchCameraModels,
   updateCameraModel,
   removeCameraModel,
   updateDeviceNaming,
@@ -110,12 +111,33 @@ export function useUpdateModelConfigMutation() {
 // shows up / disappears on the next render instead of after the 120s poll.
 // ============================================================================
 
+/**
+ * Query options for the models running on one camera, shared by the
+ * camera picker (useQueries over the grid) and its refetch-on-open.
+ *
+ * No polling: the list changes only through the mutations below (which
+ * write their response straight into this cache) or through another
+ * operator, which the picker catches by refetching when it opens.
+ */
+export function cameraModelsQueryOptions(deviceId: string, enabled: boolean = true) {
+  return {
+    queryKey: queryKeys.devices.models(deviceId),
+    queryFn: () => fetchCameraModels(deviceId),
+    enabled,
+    staleTime: 0,
+    retry: false,
+  };
+}
+
 export function useAddCameraModelMutation() {
   const queryClient = useQueryClient();
   return useMutation({
     mutationFn: ({ deviceId, entry }: { deviceId: string; entry: Parameters<typeof addCameraModel>[1] }) =>
       addCameraModel(deviceId, entry),
-    onSuccess: () => {
+    onSuccess: (data, { deviceId }) => {
+      // The response is the camera's full model list: server truth, so the
+      // picker shows it at once instead of waiting for the refetch.
+      queryClient.setQueryData(queryKeys.devices.models(deviceId), data);
       queryClient.invalidateQueries({ queryKey: queryKeys.devices.all });
     },
   });
@@ -133,7 +155,8 @@ export function useUpdateCameraModelMutation() {
       modelId: string;
       changes: Parameters<typeof updateCameraModel>[2];
     }) => updateCameraModel(deviceId, modelId, changes),
-    onSuccess: () => {
+    onSuccess: (data, { deviceId }) => {
+      queryClient.setQueryData(queryKeys.devices.models(deviceId), data);
       queryClient.invalidateQueries({ queryKey: queryKeys.devices.all });
     },
   });
@@ -144,7 +167,8 @@ export function useRemoveCameraModelMutation() {
   return useMutation({
     mutationFn: ({ deviceId, modelId }: { deviceId: string; modelId: string }) =>
       removeCameraModel(deviceId, modelId),
-    onSuccess: () => {
+    onSuccess: (data, { deviceId }) => {
+      queryClient.setQueryData(queryKeys.devices.models(deviceId), data);
       queryClient.invalidateQueries({ queryKey: queryKeys.devices.all });
     },
   });
