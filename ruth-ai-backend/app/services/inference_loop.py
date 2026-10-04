@@ -1061,36 +1061,65 @@ class InferenceLoopService:
             state["was_in_violation"] = False
             state["active_zones"] = set()
 
-    async def _model_pipeline(
+    async def _run_tick_models(
         self,
         session_id: UUID,
         device_id: UUID,
         vas_stream_id: str,
-        entry: Dict[str, Any],
-        is_primary: bool,
+        due: list[Dict[str, Any]],
+        primary: Optional[str],
         frame: Any,
         fetch_seconds: float,
         confidence_threshold: float,
-    ) -> bool:
-        """One model on the tick's shared frame: infer -> publish -> rules.
+    ) -> list[Any]:
+        """Run the tick's due models on the shared frame, fastest first.
 
-        The tick runs one pipeline per due model concurrently, so a fast
-        model's result is published as soon as its own inference returns,
-        never after a slower model's. Raises only if the inference fails.
+        Inferences run one after another in order of measured latency, so a
+        fast model's GPU work never shares the device with a slow model's.
+        Sent together, they finish together: live, fall took 87 ms alone but
+        ~350 ms when sent alongside PPE. Each result is published the moment
+        its own inference returns; its violation rules then run in the
+        background while the next model infers.
+
+        Returns one outcome per entry of ``due`` (same order): True/False for
+        published / not usable, or the exception the inference raised.
         """
-        model_id = entry["model_id"]
-        result = await self._run_model(session_id, device_id, vas_stream_id, entry, frame, fetch_seconds)
-        published = self._publish_model_result(device_id, model_id, is_primary, result)
-        if published:
+        order = sorted(range(len(due)), key=lambda i: self._budget.latency_for(due[i]["model_id"]))
+        outcomes: list[Any] = [None] * len(due)
+        rule_tasks: list[tuple[str, asyncio.Task]] = []
+        for i in order:
+            entry = due[i]
+            model_id = entry["model_id"]
             try:
-                await self._apply_violation_rules(
-                    session_id, device_id, vas_stream_id, model_id, result, confidence_threshold
+                result = await self._run_model(
+                    session_id, device_id, vas_stream_id, entry, frame, fetch_seconds
                 )
+            except asyncio.CancelledError:
+                raise
+            except Exception as e:
+                outcomes[i] = e
+                continue
+            published = self._publish_model_result(device_id, model_id, model_id == primary, result)
+            outcomes[i] = published
+            if published:
+                rule_tasks.append((
+                    model_id,
+                    asyncio.create_task(
+                        self._apply_violation_rules(
+                            session_id, device_id, vas_stream_id, model_id, result, confidence_threshold
+                        )
+                    ),
+                ))
+        # The tick ends only when every model's rules are done, so the next
+        # tick never overlaps a violation write of this one.
+        for model_id, task in rule_tasks:
+            try:
+                await task
             except asyncio.CancelledError:
                 raise
             except Exception as e:  # the result is already published; log, don't back off
                 logger.error(f"Result processing failed: {e}", session_id=str(session_id), model_id=model_id)
-        return published
+        return outcomes
 
     async def _add_session_counter(self, session_id: UUID, column_name: str, amount: int) -> None:
         """Atomic +amount on a stream_sessions counter (multi-model ticks write
@@ -1131,7 +1160,8 @@ class InferenceLoopService:
         time advances by its own interval (an accumulator, so its average rate
         stays exact). Every run therefore lands on the fastest model's tick:
         while the fastest model is running there are no solo frame reads for
-        slower models.
+        slower models. Within a tick, models infer fastest-first, one at a
+        time (see _run_tick_models).
         """
         stop = stop or asyncio.Event()
         me = asyncio.current_task()
@@ -1203,15 +1233,9 @@ class InferenceLoopService:
                     continue
                 tick_errors = 0
 
-                outcomes = await asyncio.gather(
-                    *(
-                        self._model_pipeline(
-                            session_id, device_id, vas_stream_id, e, e["model_id"] == primary,
-                            frame, fetch_seconds, confidence_threshold,
-                        )
-                        for e in due
-                    ),
-                    return_exceptions=True,
+                outcomes = await self._run_tick_models(
+                    session_id, device_id, vas_stream_id, due, primary,
+                    frame, fetch_seconds, confidence_threshold,
                 )
                 published = 0
                 for e, outcome in zip(due, outcomes, strict=True):

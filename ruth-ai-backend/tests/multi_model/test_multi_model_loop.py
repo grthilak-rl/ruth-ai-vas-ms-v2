@@ -440,14 +440,57 @@ async def test_g9_slower_models_only_on_fastest_models_ticks(sm):
     finally:
         await stop_loop(loop)
 
+    # Only frames read inside the measured window: the tick in flight when the
+    # loop stops is cancelled part-way, and since all three fakes have the same
+    # latency, fastest-first may have started another model before fall.
+    window = {f["frame"] for f in runtime.fetches if t0 <= f["t"] < t1}
     by_frame: dict = {}
     for c in runtime.calls:
-        by_frame.setdefault(c["frame"], set()).add(c["model_id"])
+        if c["frame"] in window:
+            by_frame.setdefault(c["frame"], set()).add(c["model_id"])
     # (c) zero solo reads: every frame read ran the fastest model
+    assert len(by_frame) >= 20
     assert all("fall_detection" in models for models in by_frame.values())
-    assert len(runtime.fetches) == len(runtime.calls_for("fall_detection"))
+    assert len(window) == len([c for c in runtime.calls_for("fall_detection") if c["frame"] in window])
     # and the slower models keep their own average rates (accumulator), +-20%
     elapsed = t1 - t0
     for model_id, fps in (("ppe_detection", 7.0), ("geo_fencing", 3.0)):
         rate = (counts1[model_id] - counts0.get(model_id, 0)) / elapsed
         assert abs(rate - fps) / fps < 0.2, (model_id, rate)
+
+
+# =============================================================================
+# M1.2: fastest-first on shared ticks
+# =============================================================================
+
+
+async def test_g10_fastest_first_by_measured_latency_not_entry_order(sm):
+    device_id = await make_device(sm)
+    # The slow model is added FIRST: order must come from measured latency.
+    await edit(sm, "add", device_id, {"model_id": "ppe_detection"})
+    await edit(sm, "add", device_id, {"model_id": "fall_detection"})
+    runtime = FakeRuntime(lambda m, n: result(False), latency={"fall_detection": 0.01, "ppe_detection": 0.12})
+    loop = make_loop(sm, runtime)
+    events: list = []
+    _record_publishes(loop, events)
+    await loop.start()
+    try:
+        await wait_for(lambda: runtime.count["ppe_detection"] >= 12)
+    finally:
+        await stop_loop(loop)
+
+    fetch_at = {f["frame"]: f["t"] for f in runtime.fetches}
+    calls = {(c["model_id"], c["frame"]): c for c in runtime.calls if "end" in c}
+    published = {(e[2], e[3]): e[1] for e in events}
+    shared = sorted(f for (m, f) in calls if m == "ppe_detection" and ("fall_detection", f) in calls)
+    warm = shared[3:]  # first ticks: latencies not yet measured (both default)
+    assert len(warm) >= 6
+    for frame in warm:
+        fall, ppe = calls[("fall_detection", frame)], calls[("ppe_detection", frame)]
+        assert fall["t"] < ppe["t"]  # fastest first
+        assert ppe["t"] >= fall["end"]  # one at a time: never overlapping on the GPU
+        # fall's frame-to-publish on a shared tick ~ its solo latency (10 ms)
+        assert published[("fall_detection", frame)] - fetch_at[frame] < 0.01 + 0.02
+        assert published[("fall_detection", frame)] < ppe["t"] + 0.001  # published before PPE even starts
+    assert runtime.max_in_flight["fall_detection"] == 1
+    assert runtime.max_in_flight["ppe_detection"] == 1
