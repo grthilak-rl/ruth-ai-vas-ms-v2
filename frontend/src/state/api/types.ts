@@ -401,6 +401,13 @@ export interface DeviceStreaming {
 
   /** Model configuration - MAY be null */
   model_config: Record<string, unknown> | null;
+
+  /**
+   * Every model running on this camera (model_id is the first). Optional:
+   * absent on backends older than multi-model sessions; use
+   * activeModelIds(streaming), which falls back to [model_id].
+   */
+  models?: string[];
 }
 
 /**

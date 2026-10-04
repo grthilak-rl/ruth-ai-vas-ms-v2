@@ -61,6 +61,8 @@ export const queryKeys = {
      * showing that camera shares a single poll and a single cache entry.
      */
     detections: (id: string) => ['devices', 'detections', id] as const,
+    /** Newest result of every model on one camera (multi-model sessions). */
+    detectionsAll: (id: string) => ['devices', 'detections-all', id] as const,
   },
 
   // Models domain

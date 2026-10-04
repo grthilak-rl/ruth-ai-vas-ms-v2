@@ -71,6 +71,26 @@ export interface LatestDetectionResponse {
   age_ms: number;
 }
 
+/** One model's newest result, as returned by GET /devices/{id}/detections. */
+export type DetectionEntry = Omit<LatestDetectionResponse, 'device_id'> & { device_id?: string };
+
+export interface DeviceDetectionsResponse {
+  device_id: string;
+  /** One entry per model that has produced a result; [] when none. */
+  detections: DetectionEntry[];
+}
+
+/**
+ * Fetch the newest result of EVERY model running on a device.
+ *
+ * Answers 200 with an empty list when nothing is running, so there is no 404
+ * case to special-case.
+ */
+export async function fetchDetectionsAll(deviceId: string): Promise<DetectionEntry[]> {
+  const response = await apiGet<DeviceDetectionsResponse>(`${DEVICES_PATH}/${deviceId}/detections`);
+  return Array.isArray(response?.detections) ? response.detections : [];
+}
+
 /**
  * Fetch the newest detection result for a device.
  *

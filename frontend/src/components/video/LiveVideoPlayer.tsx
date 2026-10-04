@@ -2,17 +2,14 @@ import { useState, useRef, useCallback, useEffect, useMemo } from 'react';
 import type { MouseEvent as ReactMouseEvent } from 'react';
 import { VideoErrorBoundary } from './VideoErrorBoundary';
 import { connectToStream, disconnectStream, type WebRTCConnection } from '../../services/webrtc';
-import { type FallDetectionResult, drawFallDetections } from '../../services/fallDetection';
-import {
-  type PPEDetectionResult,
-  type RawUnifiedPPEResponse,
-  drawPPEDetections,
-  transformAPIResponse as transformPPEResponse,
-} from '../../services/ppeDetection';
-import { type TankDetectionResult, drawTankDetections } from '../../services/tankDetection';
-import { type ChaneTankResult, drawChaneTankMonitor } from '../../services/chaneTankMonitor';
+import { drawFallDetections } from '../../services/fallDetection';
+import { drawPPEDetections } from '../../services/ppeDetection';
+import { drawTankDetections } from '../../services/tankDetection';
+import { drawChaneTankMonitor } from '../../services/chaneTankMonitor';
+import { overlayStylesFor } from '../../services/overlayStyle';
 import { estimateRadiusFromClick } from '../../services/roiRayCast';
-import { useCameraDetections } from '../../state/hooks/useCameraDetections';
+import { useCameraDetectionsAll } from '../../state/hooks/useCameraDetectionsAll';
+import { fanOutDetections } from './detectionFanOut';
 import './LiveVideoPlayer.css';
 
 /**
@@ -46,7 +43,9 @@ interface LiveVideoPlayerProps {
   streamId?: string | null;
   isDetectionActive?: boolean;
   showOverlays?: boolean;
+  /** @deprecated No longer gates drawing (see enabledModels); kept so existing callers compile. */
   isFallDetectionEnabled?: boolean;
+  /** @deprecated No longer gates drawing (see enabledModels); kept so existing callers compile. */
   isPPEDetectionEnabled?: boolean;
   isTankOverflowEnabled?: boolean;
   isChaneTankEnabled?: boolean;
@@ -56,6 +55,13 @@ interface LiveVideoPlayerProps {
   /** chane_tank_monitor: commit an operator-clicked ROI circle (intrinsic px). */
   onChaneRoiConfirm?: (roi: { cx: number; cy: number; r: number }) => void;
   geofenceZones?: GeofenceZone[];
+  /**
+   * Models whose detections may be drawn, from the camera's server-side state
+   * (streaming.models). When omitted, every model the backend returns results
+   * for is drawn — what fullscreen and camera detail rely on. The is*Enabled
+   * flags still drive the non-detection features (geofence zones, chane ROI).
+   */
+  enabledModels?: readonly string[] | null;
   /**
    * When true, connect to the live stream automatically on mount /
    * when this prop flips on, instead of waiting for the user to
@@ -88,8 +94,6 @@ export function LiveVideoPlayer({
   streamId: _streamId,
   isDetectionActive = true,
   showOverlays = true,
-  isFallDetectionEnabled = true,
-  isPPEDetectionEnabled = false,
   isTankOverflowEnabled = false,
   isChaneTankEnabled = false,
   isGeofencingEnabled = false,
@@ -97,6 +101,7 @@ export function LiveVideoPlayer({
   chaneTankRoiCircle,
   onChaneRoiConfirm,
   geofenceZones,
+  enabledModels,
   shouldAutoConnect = false,
   autoConnectDelayMs = 0,
   chromeless = false,
@@ -117,68 +122,16 @@ export function LiveVideoPlayer({
   //
   // The hook is keyed by device, so several tiles showing one camera share a
   // single poll.
-  const { detection } = useCameraDetections(deviceId, isDetectionActive);
+  const { detections } = useCameraDetectionsAll(deviceId, isDetectionActive);
 
-  // Fan the one backend result out to the per-model shapes the draw effect
-  // below already expects. Only the model that actually ran has a result, so
-  // at most one of these is non-null. Memoised because the draw effect
-  // depends on them by reference and would otherwise re-run every render.
-  const { fallDetection, ppeDetection, tankDetection, chaneTankDetection } = useMemo(() => {
-    const empty = {
-      fallDetection: null as FallDetectionResult | null,
-      ppeDetection: null as PPEDetectionResult | null,
-      tankDetection: null as TankDetectionResult | null,
-      chaneTankDetection: null as ChaneTankResult | null,
-    };
-    if (!detection?.result) return empty;
-
-    const raw = detection.result as Record<string, unknown>;
-    const frameWidth = detection.frame_width ?? undefined;
-    const frameHeight = detection.frame_height ?? undefined;
-
-    switch (detection.model_id) {
-      case 'fall_detection':
-        // Boxes are in the model's 640x640 space; drawFallDetections scales
-        // by MODEL_SIZE, so no coordinate work is needed. The defaults mirror
-        // what the old client-side path applied before handing results on —
-        // the renderer assumes `detections` is always an array.
-        return {
-          ...empty,
-          fallDetection: {
-            ...(raw as unknown as FallDetectionResult),
-            detections: (raw.detections as FallDetectionResult['detections']) ?? [],
-            confidence: (raw.confidence as number) ?? 0,
-            videoWidth: frameWidth,
-            videoHeight: frameHeight,
-          },
-        };
-      case 'ppe_detection':
-        // MUST go through the same transform the browser-side path used. The
-        // runtime returns flat {item, status, bbox} rows; drawPPEDetections
-        // destructures {person_bbox, ppe_items, violations, missing_ppe} off
-        // each element and calls violations.length. Passing the raw response
-        // through crashes the render on the first PPE result.
-        //
-        // Frame geometry comes from the backend's tapped frame rather than
-        // this <video> element, since PPE reports in frame pixels and the two
-        // are not necessarily the same size.
-        return {
-          ...empty,
-          ppeDetection: transformPPEResponse(
-            raw as unknown as RawUnifiedPPEResponse,
-            'full',
-            frameWidth,
-            frameHeight
-          ),
-        };
-      case 'tank_overflow_monitoring':
-        return { ...empty, tankDetection: raw as unknown as TankDetectionResult };
-      case 'chane_tank_monitor':
-        return { ...empty, chaneTankDetection: raw as unknown as ChaneTankResult };
-      default:
-        return empty;
-    }
-  }, [detection]);
+  // Fan every model's result out to the per-model shapes the draw effect
+  // below expects (see detectionFanOut.ts). One model fills exactly the slot
+  // the single-result path used to; several models fill several. Memoised
+  // because the draw effect depends on the slots by reference.
+  const { fallDetection, ppeDetection, tankDetection, chaneTankDetection } = useMemo(
+    () => fanOutDetections(detections, enabledModels),
+    [detections, enabledModels]
+  );
   // chane_tank_monitor click-to-set-ROI: provisional circle (intrinsic px),
   // not committed until the operator confirms.
   const [provisionalRoi, setProvisionalRoi] = useState<{ cx: number; cy: number; r: number } | null>(null);
@@ -219,10 +172,17 @@ export function LiveVideoPlayer({
     const canvas = canvasRef.current;
     const video = videoRef.current;
 
-    const hasFallDetection = fallDetection && isFallDetectionEnabled;
-    const hasPPEDetection = ppeDetection && isPPEDetectionEnabled;
-    const hasTankDetection = tankDetection && isTankOverflowEnabled && tankDetection.level_percent !== undefined;
-    const hasChaneTankDetection = chaneTankDetection && isChaneTankEnabled && chaneTankDetection.fill_percentage !== undefined;
+    // Which models draw is decided by the fan-out (server-side model list, or
+    // everything the backend returned), not by per-model flags.
+    const hasFallDetection = !!fallDetection;
+    const hasPPEDetection = !!ppeDetection;
+    const hasTankDetection = !!tankDetection && tankDetection.level_percent !== undefined;
+    const hasChaneTankDetection = !!chaneTankDetection && chaneTankDetection.fill_percentage !== undefined;
+    // Two or more models on one frame: label prefixes / line styles tell them
+    // apart (services/overlayStyle.ts). One model: no style, unchanged output.
+    const styles = overlayStylesFor(
+      [hasFallDetection, hasPPEDetection, hasTankDetection, hasChaneTankDetection].filter(Boolean).length
+    );
     const hasGeofenceZones = isGeofencingEnabled && geofenceZones && geofenceZones.length > 0;
 
     // Debug logging
@@ -268,24 +228,26 @@ export function LiveVideoPlayer({
     ctx.clearRect(0, 0, canvas.width, canvas.height);
 
     // Draw fall detections if enabled and available
-    if (hasFallDetection && fallDetection.detections && fallDetection.detections.length > 0) {
+    if (hasFallDetection && fallDetection!.detections && fallDetection!.detections.length > 0) {
       drawFallDetections(
         ctx,
-        fallDetection.detections,
+        fallDetection!.detections,
         canvas.width,
         canvas.height,
+        styles.fall,
       );
     }
 
     // Draw PPE detections if enabled and available
-    if (hasPPEDetection && ppeDetection.detections && ppeDetection.detections.length > 0) {
+    if (hasPPEDetection && ppeDetection!.detections && ppeDetection!.detections.length > 0) {
       drawPPEDetections(
         ctx,
-        ppeDetection.detections,
+        ppeDetection!.detections,
         canvas.width,
         canvas.height,
-        ppeDetection.videoWidth,
-        ppeDetection.videoHeight
+        ppeDetection!.videoWidth,
+        ppeDetection!.videoHeight,
+        styles.ppe
       );
     }
 
@@ -402,7 +364,7 @@ export function LiveVideoPlayer({
         ctx.restore();
       }
     }
-  }, [fallDetection, ppeDetection, tankDetection, chaneTankDetection, provisionalRoi, showOverlays, isDetectionActive, isFallDetectionEnabled, isPPEDetectionEnabled, isTankOverflowEnabled, isChaneTankEnabled, isGeofencingEnabled, tankCorners, geofenceZones]);
+  }, [fallDetection, ppeDetection, tankDetection, chaneTankDetection, provisionalRoi, showOverlays, isDetectionActive, isTankOverflowEnabled, isGeofencingEnabled, tankCorners, geofenceZones]);
 
   // Cleanup function
   const cleanup = useCallback(async () => {

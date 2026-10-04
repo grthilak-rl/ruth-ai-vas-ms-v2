@@ -401,6 +401,25 @@ export async function apiPost<T>(
   return result.data;
 }
 
+/**
+ * DELETE request
+ *
+ * Used for removing a sub-resource (e.g. one model from a camera).
+ */
+export async function apiDelete<T>(
+  path: string,
+  options: RequestOptions = {}
+): Promise<T> {
+  const url = buildApiUrl(path);
+
+  const result = await fetchWithRetry<T>(url, {
+    method: 'DELETE',
+    headers: buildHeaders(options.headers),
+  }, options);
+
+  return result.data;
+}
+
 // ============================================================================
 // Re-export error types for consumers
 // ============================================================================

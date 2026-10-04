@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { LiveVideoPlayer } from '../video/LiveVideoPlayer';
 import { useDevicesQuery, deviceDisplayName } from '../../state';
 import type { Device } from '../../state';
+import { activeModelIds } from '../../state/api/devices.api';
 import type { ModelConfig } from '../../types/geofencing';
 import { getSelectedCameraIds } from '../../utils/cameraGridPreferences';
 import {
@@ -276,7 +277,7 @@ function ViewingPaneTile({ camera, tileIndex, onClear }: ViewingPaneTileProps) {
   // decides whether the backend is producing detections at all, so it is the
   // right thing to gate the overlay on — and it means the wall shows overlays
   // correctly even when opened in a fresh browser that never touched a toggle.
-  const activeModelId = streaming.ai_enabled ? streaming.model_id : null;
+  const activeModels = activeModelIds(streaming);
   const modelConfig = (streaming.model_config ?? undefined) as ModelConfig | undefined;
 
   return (
@@ -290,13 +291,12 @@ function ViewingPaneTile({ camera, tileIndex, onClear }: ViewingPaneTileProps) {
         // Stagger by tile position so 16 tiles don't open 16 WebRTC peers in
         // the same tick — the same 500ms spacing the monitoring grid uses.
         autoConnectDelayMs={tileIndex * 500}
-        isDetectionActive={Boolean(activeModelId)}
-        showOverlays={Boolean(activeModelId)}
-        isFallDetectionEnabled={activeModelId === 'fall_detection'}
-        isPPEDetectionEnabled={activeModelId === 'ppe_detection'}
-        isTankOverflowEnabled={activeModelId === 'tank_overflow_monitoring'}
-        isChaneTankEnabled={activeModelId === 'chane_tank_monitor'}
-        isGeofencingEnabled={activeModelId === 'geo_fencing'}
+        isDetectionActive={activeModels.length > 0}
+        showOverlays={activeModels.length > 0}
+        enabledModels={activeModels}
+        isTankOverflowEnabled={activeModels.includes('tank_overflow_monitoring')}
+        isChaneTankEnabled={activeModels.includes('chane_tank_monitor')}
+        isGeofencingEnabled={activeModels.includes('geo_fencing')}
         tankCorners={modelConfig?.tank_corners}
         chaneTankRoiCircle={modelConfig?.roi_circle}
         geofenceZones={modelConfig?.zones}

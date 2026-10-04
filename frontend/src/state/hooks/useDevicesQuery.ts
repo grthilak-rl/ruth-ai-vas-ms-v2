@@ -14,6 +14,9 @@ import {
   startInference,
   stopInference,
   updateModelConfig,
+  addCameraModel,
+  updateCameraModel,
+  removeCameraModel,
   updateDeviceNaming,
   fetchManways,
   deriveDisplayName,
@@ -94,6 +97,53 @@ export function useUpdateModelConfigMutation() {
   return useMutation({
     mutationFn: ({ deviceId, config }: { deviceId: string; config: ModelConfig }) =>
       updateModelConfig(deviceId, config),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: queryKeys.devices.all });
+    },
+  });
+}
+
+// ============================================================================
+// Several models per camera. Every success invalidates queryKeys.devices.all,
+// which covers the device list/detail (streaming.models, the server-driven
+// overlay flags) and both detection queries, so a model added or removed
+// shows up / disappears on the next render instead of after the 120s poll.
+// ============================================================================
+
+export function useAddCameraModelMutation() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: ({ deviceId, entry }: { deviceId: string; entry: Parameters<typeof addCameraModel>[1] }) =>
+      addCameraModel(deviceId, entry),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: queryKeys.devices.all });
+    },
+  });
+}
+
+export function useUpdateCameraModelMutation() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: ({
+      deviceId,
+      modelId,
+      changes,
+    }: {
+      deviceId: string;
+      modelId: string;
+      changes: Parameters<typeof updateCameraModel>[2];
+    }) => updateCameraModel(deviceId, modelId, changes),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: queryKeys.devices.all });
+    },
+  });
+}
+
+export function useRemoveCameraModelMutation() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: ({ deviceId, modelId }: { deviceId: string; modelId: string }) =>
+      removeCameraModel(deviceId, modelId),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: queryKeys.devices.all });
     },

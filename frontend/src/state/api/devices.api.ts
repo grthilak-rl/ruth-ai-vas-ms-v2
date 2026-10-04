@@ -16,8 +16,8 @@
  * - Handle stream state in both uppercase and lowercase
  */
 
-import { apiGet, apiPost, apiPatch } from './client';
-import type { Device, DevicesListResponse, StreamState } from './types';
+import { apiDelete, apiGet, apiPost, apiPatch } from './client';
+import type { Device, DeviceStreaming, DevicesListResponse, StreamState } from './types';
 import { isDevice, isDevicesListResponse, assertResponse } from './validators';
 import type { ModelConfig } from '../../types/geofencing';
 
@@ -366,3 +366,62 @@ export function isStreamLive(device: Device): boolean {
 // ============================================================================
 
 export type { Device, DevicesListResponse, DeviceStreaming, StreamState } from './types';
+
+// ============================================================================
+// Several models per camera (GET/POST/PATCH/DELETE /devices/{id}/models)
+// ============================================================================
+
+/**
+ * Model ids running on a camera, from the server's own state.
+ *
+ * Prefers streaming.models (multi-model sessions); falls back to the single
+ * model_id for older backends and legacy sessions. Use this, not the
+ * monitoring page's local toggles, to decide what to draw.
+ */
+export function activeModelIds(streaming: DeviceStreaming | null | undefined): string[] {
+  if (!streaming?.ai_enabled) return [];
+  if (Array.isArray(streaming.models) && streaming.models.length > 0) return streaming.models;
+  return streaming.model_id ? [streaming.model_id] : [];
+}
+
+export interface CameraModelEntry {
+  model_id: string;
+  model_version: string | null;
+  config: ModelConfig | null;
+  fps_override: number | null;
+  target_fps: number;
+}
+
+export interface CameraModelsResponse {
+  device_id: string;
+  session_id: string | null;
+  models_revision: number;
+  models: CameraModelEntry[];
+}
+
+/** GET /api/v1/devices/{id}/models */
+export async function fetchCameraModels(deviceId: string): Promise<CameraModelsResponse> {
+  return apiGet<CameraModelsResponse>(`${DEVICES_PATH}/${deviceId}/models`);
+}
+
+/** POST /api/v1/devices/{id}/models: add a model (starts inference if none). */
+export async function addCameraModel(
+  deviceId: string,
+  entry: { model_id: string; model_version?: string; config?: ModelConfig; fps_override?: number }
+): Promise<CameraModelsResponse> {
+  return apiPost<CameraModelsResponse>(`${DEVICES_PATH}/${deviceId}/models`, entry);
+}
+
+/** PATCH /api/v1/devices/{id}/models/{model_id}: change config / fps_override. */
+export async function updateCameraModel(
+  deviceId: string,
+  modelId: string,
+  changes: { config?: ModelConfig; fps_override?: number | null }
+): Promise<CameraModelsResponse> {
+  return apiPatch<CameraModelsResponse>(`${DEVICES_PATH}/${deviceId}/models/${modelId}`, changes);
+}
+
+/** DELETE /api/v1/devices/{id}/models/{model_id}: remove one (last = stop). */
+export async function removeCameraModel(deviceId: string, modelId: string): Promise<CameraModelsResponse> {
+  return apiDelete<CameraModelsResponse>(`${DEVICES_PATH}/${deviceId}/models/${modelId}`);
+}

@@ -11,7 +11,7 @@
 // Client & Error Handling
 // ============================================================================
 
-export { apiGet, apiGetFull, apiPatch, apiPost, apiPut, ApiError } from './client';
+export { apiDelete, apiGet, apiGetFull, apiPatch, apiPost, apiPut, ApiError } from './client';
 export type { RequestOptions, RequestResult, ApiErrorCategory } from './client';
 
 export {
@@ -137,8 +137,13 @@ export {
   getDetectionStatusLabel,
   normalizeStreamState,
   isStreamLive,
+  activeModelIds,
+  fetchCameraModels,
+  addCameraModel,
+  updateCameraModel,
+  removeCameraModel,
 } from './devices.api';
-export type { CameraStatus, DetectionStatus } from './devices.api';
+export type { CameraStatus, DetectionStatus, CameraModelEntry, CameraModelsResponse } from './devices.api';
 
 // ============================================================================
 // Models API
@@ -212,11 +217,14 @@ export type {
 
 export {
   fetchLatestDetections,
+  fetchDetectionsAll,
 } from './detections.api';
 export type {
   DetectionBox,
   DetectionResult,
   LatestDetectionResponse,
+  DetectionEntry,
+  DeviceDetectionsResponse,
 } from './detections.api';
 
 export {

@@ -28,6 +28,9 @@ export {
   useDeviceQuery,
   useManwaysQuery,
   useUpdateDeviceNamingMutation,
+  useAddCameraModelMutation,
+  useUpdateCameraModelMutation,
+  useRemoveCameraModelMutation,
 } from './useDevicesQuery';
 
 export {
@@ -79,6 +82,7 @@ export {
 } from './useBookmarksQuery';
 
 export { useCameraDetections } from './useCameraDetections';
+export { useCameraDetectionsAll } from './useCameraDetectionsAll';
 
 export {
   useShiftScheduleQuery,

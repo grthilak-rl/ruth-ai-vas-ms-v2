@@ -4,6 +4,8 @@
  * Detects: hardhat, vest, gloves, goggles, boots, mask (violation only)
  */
 
+import type { OverlayStyle } from './overlayStyle';
+
 export interface PPEBoundingBox {
   x1: number;
   y1: number;
@@ -399,7 +401,8 @@ export function drawPPEDetections(
   canvasWidth: number,
   canvasHeight: number,
   videoWidth?: number,
-  videoHeight?: number
+  videoHeight?: number,
+  style?: OverlayStyle
 ): void {
   // IMPORTANT: Coordinates from the API are in the VIDEO frame dimensions,
   // NOT in 640x640 model space. We need to scale from video dimensions to canvas dimensions.
@@ -428,18 +431,21 @@ export function drawPPEDetections(
     // Draw person bounding box
     ctx.strokeStyle = hasViolations ? PPE_COLORS.violation : PPE_COLORS.person;
     ctx.lineWidth = 3;
+    if (style?.lineDash) ctx.setLineDash(style.lineDash);
     ctx.strokeRect(px1, py1, px2 - px1, py2 - py1);
+    if (style?.lineDash) ctx.setLineDash([]);
 
     // Draw person label
-    const personLabel = hasViolations
+    const personLabel = (style?.labelPrefix ?? '') + (hasViolations
       ? `Person ${personIdx + 1} - PPE VIOLATION`
-      : `Person ${personIdx + 1} - PPE OK`;
+      : `Person ${personIdx + 1} - PPE OK`);
+    const labelY = py1 + (style?.labelOffsetY ?? 0);
     ctx.font = 'bold 14px sans-serif';
     const textWidth = ctx.measureText(personLabel).width;
     ctx.fillStyle = hasViolations ? PPE_COLORS.violation : PPE_COLORS.person;
-    ctx.fillRect(px1, py1 - 22, textWidth + 10, 22);
+    ctx.fillRect(px1, labelY - 22, textWidth + 10, 22);
     ctx.fillStyle = '#ffffff';
-    ctx.fillText(personLabel, px1 + 5, py1 - 6);
+    ctx.fillText(personLabel, px1 + 5, labelY - 6);
 
     // Draw detected PPE items
     const ppeKeys = ['hardhat', 'vest', 'gloves', 'goggles', 'boots', 'mask'] as const;

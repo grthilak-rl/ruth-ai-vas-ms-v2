@@ -4,6 +4,7 @@ import { AIModelSelector, type AIModel } from './AIModelSelector';
 import { deviceDisplayName } from '../../state';
 import { CameraNamingEditor } from './CameraNamingEditor';
 import type { Device } from '../../state';
+import { activeModelIds } from '../../state/api/devices.api';
 import type { ModelConfig } from '../../types/geofencing';
 import './CameraGridCell.css';
 
@@ -86,12 +87,16 @@ export function CameraGridCell({
   const isDetectionActive = detectionStatus === 'active' || detectionStatus === 'degraded';
   const showOverlays = detectionStatus === 'active';
 
-  // Determine which detection types are active
-  const isFallDetectionActive = aiModels.find(m => m.id === 'fall_detection')?.state === 'active';
-  const isPPEDetectionActive = aiModels.find(m => m.id === 'ppe_detection')?.state === 'active';
-  const isTankOverflowActive = aiModels.find(m => m.id === 'tank_overflow_monitoring')?.state === 'active';
-  const isChaneTankActive = aiModels.find(m => m.id === 'chane_tank_monitor')?.state === 'active';
-  const isGeofencingActive = aiModels.find(m => m.id === 'geo_fencing')?.state === 'active';
+  // Which models run on this camera comes from the server (streaming.models),
+  // not from the picker's local toggles, which can disagree with the backend.
+  // The devices query is invalidated on every model add/remove, so this
+  // updates immediately rather than on the 120s devices poll.
+  const serverModels = useMemo(() => activeModelIds(camera.streaming), [camera.streaming]);
+  const isFallDetectionActive = serverModels.includes('fall_detection');
+  const isPPEDetectionActive = serverModels.includes('ppe_detection');
+  const isTankOverflowActive = serverModels.includes('tank_overflow_monitoring');
+  const isChaneTankActive = serverModels.includes('chane_tank_monitor');
+  const isGeofencingActive = serverModels.includes('geo_fencing');
 
   // Get tank overflow configuration (corners)
   const tankOverflowConfig = modelConfigs['tank_overflow_monitoring'];
@@ -132,6 +137,7 @@ export function CameraGridCell({
           isTankOverflowEnabled={isTankOverflowActive}
           isChaneTankEnabled={isChaneTankActive}
           isGeofencingEnabled={isGeofencingActive}
+          enabledModels={serverModels}
           tankCorners={tankCorners}
           chaneTankRoiCircle={chaneTankRoiCircle}
           onChaneRoiConfirm={

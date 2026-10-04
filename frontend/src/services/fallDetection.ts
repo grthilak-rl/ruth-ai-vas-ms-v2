@@ -3,6 +3,8 @@
  * Extracts frames from video element and sends to unified AI runtime via backend API
  */
 
+import type { OverlayStyle } from './overlayStyle';
+
 export interface Keypoint {
   x: number;
   y: number;
@@ -355,6 +357,7 @@ export function drawFallDetections(
   detections: Detection[],
   canvasWidth: number,
   canvasHeight: number,
+  style?: OverlayStyle,
 ): void {
   const scaleX = canvasWidth / MODEL_SIZE;
   const scaleY = canvasHeight / MODEL_SIZE;
@@ -370,16 +373,19 @@ export function drawFallDetections(
 
     ctx.strokeStyle = isFallen ? '#ef4444' : '#22c55e';
     ctx.lineWidth = 3;
+    if (style?.lineDash) ctx.setLineDash(style.lineDash);
     ctx.strokeRect(sx1, sy1, sx2 - sx1, sy2 - sy1);
+    if (style?.lineDash) ctx.setLineDash([]);
 
-    const label = isFallen ? `Person ${idx + 1} - FALL` : `Person ${idx + 1}`;
+    const label = (style?.labelPrefix ?? '') + (isFallen ? `Person ${idx + 1} - FALL` : `Person ${idx + 1}`);
+    const labelY = sy1 + (style?.labelOffsetY ?? 0);
     ctx.font = 'bold 14px sans-serif';
     const textWidth = ctx.measureText(label).width;
     ctx.fillStyle = isFallen ? '#ef4444' : '#22c55e';
-    ctx.fillRect(sx1, sy1 - 22, textWidth + 10, 22);
+    ctx.fillRect(sx1, labelY - 22, textWidth + 10, 22);
 
     ctx.fillStyle = '#ffffff';
-    ctx.fillText(label, sx1 + 5, sy1 - 6);
+    ctx.fillText(label, sx1 + 5, labelY - 6);
 
     if (detection.keypoints && detection.keypoints.length >= 17) {
       const keypoints = detection.keypoints;
