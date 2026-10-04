@@ -1,7 +1,9 @@
 /**
  * Admin area styles (Model Management)
  *
- * Same palette and spacing as the Settings and Forbidden pages.
+ * Same palette and spacing as the Settings pages. Light only, like the rest
+ * of the app: there is no dark theme, so no prefers-color-scheme overrides
+ * (they turned the headings near-white on the white page).
  */
 
 .admin-page {
@@ -145,30 +147,241 @@
   background-color: #e8f0fe;
 }
 
-/* Placeholder */
+/* Shared bits */
 
-.admin-placeholder {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  min-height: 200px;
+.admin-page > .admin-card + .admin-card,
+.admin-page > .admin-card + section,
+.admin-page > form + section {
+  margin-top: 1rem;
 }
 
-.admin-placeholder__text {
+.admin-muted {
   margin: 0;
-  font-size: 1rem;
+  font-size: 0.875rem;
   color: #666;
 }
 
-@media (prefers-color-scheme: dark) {
-  .admin-page__title,
-  .admin-card__title {
-    color: #f0f0f0;
-  }
+.admin-mono {
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 0.8125rem;
+}
 
-  .admin-page__subtitle,
-  .admin-card__subtitle,
-  .admin-placeholder__text {
-    color: #999;
-  }
+.admin-back {
+  display: inline-block;
+  margin-bottom: 0.75rem;
+  font-size: 0.875rem;
+  color: #1a73e8;
+  text-decoration: none;
+}
+
+.admin-button--danger {
+  background-color: #b3261e;
+}
+
+.admin-button--danger:hover:not(:disabled) {
+  background-color: #8c1d18;
+}
+
+.admin-button--link {
+  padding: 0.25rem 0.5rem;
+  color: #1a73e8;
+  background: none;
+}
+
+.admin-button--link:hover:not(:disabled) {
+  background-color: #e8f0fe;
+}
+
+/* New model form */
+
+.admin-new-model {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-end;
+  gap: 0.75rem;
+}
+
+.admin-new-model__field {
+  flex: 1;
+  min-width: 240px;
+}
+
+.admin-new-model__error {
+  flex-basis: 100%;
+}
+
+/* Tables */
+
+.admin-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.875rem;
+}
+
+.admin-table th {
+  padding: 0.5rem 0.75rem;
+  text-align: left;
+  font-weight: 500;
+  color: #666;
+  border-bottom: 1px solid #e0e0e0;
+}
+
+.admin-table td {
+  padding: 0.625rem 0.75rem;
+  border-bottom: 1px solid #f0f0f0;
+  color: #1a1a1a;
+  vertical-align: middle;
+}
+
+.admin-table a {
+  color: #1a73e8;
+  text-decoration: none;
+  font-weight: 500;
+}
+
+.admin-sha {
+  max-width: 220px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.admin-badge {
+  display: inline-block;
+  padding: 0.125rem 0.5rem;
+  font-size: 0.75rem;
+  font-weight: 500;
+  border-radius: 999px;
+  background-color: #f0f0f0;
+  color: #555;
+}
+
+.admin-badge--uploaded {
+  background-color: #e6f4ea;
+  color: #137333;
+}
+
+/* Uploader */
+
+.admin-uploader {
+  margin-top: 1rem;
+  margin-bottom: 1rem;
+}
+
+.admin-dropzone {
+  padding: 1.75rem 1rem;
+  text-align: center;
+  border: 2px dashed #ccc;
+  border-radius: 8px;
+  cursor: pointer;
+  transition: border-color 0.15s ease, background-color 0.15s ease;
+}
+
+.admin-dropzone:hover,
+.admin-dropzone:focus-visible,
+.admin-dropzone--active {
+  border-color: #1a73e8;
+  background-color: #f5f9ff;
+  outline: none;
+}
+
+.admin-dropzone__text {
+  margin: 0 0 0.25rem 0;
+  font-size: 0.9375rem;
+  color: #333;
+}
+
+.admin-dropzone__hint {
+  margin: 0;
+  font-size: 0.8125rem;
+  color: #888;
+}
+
+.admin-interrupted {
+  margin-top: 1rem;
+  padding: 0.75rem;
+  background-color: #fff8e1;
+  border-radius: 6px;
+  font-size: 0.875rem;
+}
+
+.admin-interrupted__title {
+  margin: 0 0 0.5rem 0;
+  font-weight: 600;
+  color: #7a5b00;
+}
+
+.admin-interrupted__row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.75rem;
+}
+
+.admin-queue {
+  margin: 1rem 0 0 0;
+  padding: 0;
+  list-style: none;
+}
+
+.admin-queue__item {
+  padding: 0.625rem 0;
+  border-bottom: 1px solid #f0f0f0;
+}
+
+.admin-queue__head {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  font-size: 0.875rem;
+}
+
+.admin-queue__name {
+  flex: 1;
+  font-weight: 500;
+  color: #1a1a1a;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.admin-queue__size,
+.admin-queue__state {
+  color: #666;
+  white-space: nowrap;
+}
+
+.admin-queue__item--done .admin-queue__state {
+  color: #137333;
+}
+
+.admin-queue__item--error .admin-queue__state,
+.admin-queue__item--invalid .admin-queue__state {
+  color: #b3261e;
+}
+
+.admin-queue__message {
+  margin: 0.25rem 0 0 0;
+  font-size: 0.8125rem;
+  color: #666;
+  word-break: break-all;
+}
+
+.admin-queue__item--error .admin-queue__message,
+.admin-queue__item--invalid .admin-queue__message {
+  color: #b3261e;
+}
+
+.admin-progress {
+  margin-top: 0.375rem;
+  height: 6px;
+  background-color: #eee;
+  border-radius: 3px;
+  overflow: hidden;
+}
+
+.admin-progress__bar {
+  height: 100%;
+  background-color: #1a73e8;
+  transition: width 0.2s ease;
 }

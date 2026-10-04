@@ -59,6 +59,25 @@ server {
         proxy_read_timeout 180s;  # Increased for chat LLM queries
     }
 
+    # Model store chunk uploads (admin Model Management) — ONLY the chunk
+    # PUT path. A regex location wins over the /api/ prefix above, so this
+    # is the single place the body limit is raised; every other /api/ route
+    # keeps nginx's default 1 MB. Chunks are 16 MiB (backend-enforced).
+    # (Quoted: nginx requires it for a regex containing { }.)
+    location ~ "^/api/v1/admin/model-store/uploads/[0-9a-fA-F-]{36}/chunks/[0-9]{1,6}$" {
+        client_max_body_size 17m;
+        proxy_request_buffering off;
+        proxy_pass http://ruth-ai-vas-backend:8080;
+        proxy_http_version 1.1;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+        proxy_connect_timeout 30s;
+        proxy_send_timeout 300s;
+        proxy_read_timeout 300s;
+    }
+
     # Proxy internal endpoints
     location /internal/ {
         proxy_pass http://ruth-ai-vas-backend:8080;

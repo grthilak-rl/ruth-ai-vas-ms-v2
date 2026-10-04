@@ -155,6 +155,9 @@ export async function adminFetch<T>(path: string, init: RequestInit = {}): Promi
   if (!response.ok) {
     throw await errorFromResponse(response);
   }
+  if (response.status === 204) {
+    return undefined as T;
+  }
   return (await response.json()) as T;
 }
 
@@ -195,4 +198,147 @@ export async function adminLogin(username: string, password: string): Promise<Ad
 
 export function fetchAdminMe(): Promise<AdminMe> {
   return adminFetch<AdminMe>(`${ADMIN_API_PREFIX}/me`);
+}
+
+// ============================================================================
+// Model store (/api/v1/admin/model-store)
+// ============================================================================
+
+const STORE = `${ADMIN_API_PREFIX}/model-store`;
+
+export interface StoreFile {
+  id: string;
+  filename: string;
+  size_bytes: number;
+  sha256: string;
+  uploaded_at: string;
+  uploaded_by: string | null;
+  status: 'uploaded';
+}
+
+export interface StoreUpload {
+  id: string;
+  model_pk: string;
+  filename: string;
+  size_bytes: number;
+  chunk_size: number;
+  total_chunks: number;
+  received_chunks: number[];
+  status: string;
+  error: string | null;
+  client_last_modified: number | null;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface StoreModelSummary {
+  id: string;
+  model_id: string;
+  display_name: string;
+  state: string;
+  model_id_editable: boolean;
+  file_count: number;
+  total_bytes: number;
+  status: 'no_files' | 'uploaded';
+  created_at: string;
+  created_by: string | null;
+}
+
+export interface StoreModelDetail extends StoreModelSummary {
+  files: StoreFile[];
+  active_uploads: StoreUpload[];
+}
+
+export function listStoreModels(): Promise<StoreModelSummary[]> {
+  return adminFetch<{ models: StoreModelSummary[] }>(`${STORE}/models`).then((r) => r.models);
+}
+
+export function createStoreModel(displayName: string): Promise<StoreModelDetail> {
+  return adminFetch<StoreModelDetail>(`${STORE}/models`, {
+    method: 'POST',
+    body: JSON.stringify({ display_name: displayName }),
+  });
+}
+
+export function getStoreModel(modelPk: string): Promise<StoreModelDetail> {
+  return adminFetch<StoreModelDetail>(`${STORE}/models/${modelPk}`);
+}
+
+export function deleteStoreModel(modelPk: string): Promise<void> {
+  return adminFetch<void>(`${STORE}/models/${modelPk}`, { method: 'DELETE' });
+}
+
+export function deleteStoreFile(modelPk: string, fileId: string): Promise<void> {
+  return adminFetch<void>(`${STORE}/models/${modelPk}/files/${fileId}`, { method: 'DELETE' });
+}
+
+export function initUpload(
+  modelPk: string,
+  file: { name: string; size: number; lastModified: number }
+): Promise<StoreUpload> {
+  return adminFetch<StoreUpload>(`${STORE}/models/${modelPk}/uploads`, {
+    method: 'POST',
+    body: JSON.stringify({
+      filename: file.name,
+      size_bytes: file.size,
+      last_modified: file.lastModified,
+    }),
+  });
+}
+
+export function completeUpload(uploadId: string): Promise<{ upload_id: string; file: StoreFile }> {
+  return adminFetch(`${STORE}/uploads/${uploadId}/complete`, { method: 'POST' });
+}
+
+export function abortUpload(uploadId: string): Promise<void> {
+  return adminFetch<void>(`${STORE}/uploads/${uploadId}`, { method: 'DELETE' });
+}
+
+/**
+ * PUT one chunk with byte-level progress. XMLHttpRequest rather than fetch:
+ * fetch exposes no upload progress. Same auth and 401 handling as adminFetch.
+ */
+export function putChunk(
+  uploadId: string,
+  index: number,
+  data: Blob,
+  onProgress: (loadedBytes: number) => void,
+  signal?: AbortSignal
+): Promise<void> {
+  const token = getAdminToken();
+  if (!token) {
+    redirectToAdminLogin();
+    return Promise.reject(new AdminApiError(401, 'Not signed in'));
+  }
+  return new Promise((resolve, reject) => {
+    const xhr = new XMLHttpRequest();
+    xhr.open('PUT', buildApiUrl(`${STORE}/uploads/${uploadId}/chunks/${index}`));
+    xhr.setRequestHeader('Authorization', `Bearer ${token}`);
+    xhr.setRequestHeader('Content-Type', 'application/octet-stream');
+    xhr.timeout = 300_000;
+    xhr.upload.onprogress = (event) => onProgress(event.loaded);
+    xhr.onload = () => {
+      if (xhr.status >= 200 && xhr.status < 300) {
+        resolve();
+        return;
+      }
+      if (xhr.status === 401) {
+        clearAdminToken();
+        redirectToAdminLogin();
+      }
+      let message = xhr.statusText || `HTTP ${xhr.status}`;
+      try {
+        const body = JSON.parse(xhr.responseText);
+        if (typeof body?.detail?.message === 'string') message = body.detail.message;
+      } catch {
+        // Non-JSON body (e.g. nginx 413 page).
+      }
+      reject(new AdminApiError(xhr.status, message));
+    };
+    xhr.onerror = () => reject(new AdminApiError(0, 'Network error'));
+    xhr.ontimeout = () => reject(new AdminApiError(0, 'Upload timed out'));
+    xhr.onabort = () => reject(new AdminApiError(0, 'Cancelled'));
+    signal?.addEventListener('abort', () => xhr.abort(), { once: true });
+    xhr.send(data);
+  });
 }

@@ -18,7 +18,12 @@ import {
   ModelStatusPage,
   ForbiddenPage,
 } from './pages';
-import { AdminLogin, ModelManagementPage, RequireAdminToken } from './pages/admin';
+import {
+  AdminLogin,
+  ModelDetailPage,
+  ModelManagementPage,
+  RequireAdminToken,
+} from './pages/admin';
 
 /**
  * Application Router (E11 Role-Protected)
@@ -156,6 +161,14 @@ export const router = createBrowserRouter([
         element: (
           <RequireAdminToken>
             <ModelManagementPage />
+          </RequireAdminToken>
+        ),
+      },
+      {
+        path: 'admin/models/:modelPk',
+        element: (
+          <RequireAdminToken>
+            <ModelDetailPage />
           </RequireAdminToken>
         ),
       },
