@@ -14,14 +14,16 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     curl \
     && rm -rf /var/lib/apt/lists/*
 
-# Install pip and upgrade
-RUN pip install --no-cache-dir --upgrade pip setuptools wheel
-
 # Copy dependency files and README (required by hatch build)
-COPY pyproject.toml README.md ./
+COPY pyproject.toml README.md constraints.txt ./
 
-# Install dependencies
-RUN pip install --no-cache-dir .
+# Install pip and upgrade (pinned to the versions in the running image).
+# Constrained too: wheel depends on packaging, which would otherwise float.
+RUN pip install --no-cache-dir --upgrade -c constraints.txt pip==26.1.2 setuptools==79.0.1 wheel==0.46.3
+
+# Install dependencies. constraints.txt pins every transitive dependency to
+# what production runs; pyproject.toml ranges alone let a rebuild drift.
+RUN pip install --no-cache-dir -c constraints.txt .
 
 # ============================================
 # Production image
