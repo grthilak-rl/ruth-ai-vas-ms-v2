@@ -801,9 +801,6 @@ class InferenceLoopService:
     # to its list or entries bumps models_revision, which restarts its task
     # with the new configuration through the same handover.
 
-    # Run a model that is due within this fraction of its interval on the
-    # current tick, so slower models ride on faster models' frame reads.
-    _DUE_TOLERANCE = 0.25
     _MAX_TICK_ERRORS = 10
     _STOP_TIMEOUT = 10.0
 
@@ -993,31 +990,26 @@ class InferenceLoopService:
             self._budget.record_latency(entry["model_id"], fetch_seconds + clock() - started)
         return result
 
-    async def _process_model_result(
+    def _publish_model_result(
         self,
-        session_id: UUID,
         device_id: UUID,
-        vas_stream_id: str,
         model_id: str,
         is_primary: bool,
         result: Dict[str, Any],
-        confidence_threshold: float,
-    ) -> None:
-        """Publish one model's result and apply the violation rules.
+    ) -> bool:
+        """Make one model's result visible to /detections, immediately.
 
-        The violation rules are the single-model loop's, verbatim, with the
-        state keyed by (session, model) instead of session.
+        Synchronous on purpose: no DB write or other await sits between a
+        model's inference returning and its result being readable. Returns
+        True for a usable result (it then counts towards frames_processed).
         """
         if not (result.get("status") == "success" and result.get("result")):
-            return
-        await self._increment_session_counter(session_id, "frames_processed")
-
-        inference_result = result["result"]
+            return False
         entry = {
             "device_id": str(device_id),
             "model_id": model_id,
             "model_version": result.get("model_version"),
-            "result": inference_result,
+            "result": result["result"],
             "frame_width": result.get("frame_width"),
             "frame_height": result.get("frame_height"),
             "captured_at": asyncio.get_event_loop().time(),
@@ -1025,7 +1017,20 @@ class InferenceLoopService:
         self._latest_model_detections[(device_id, model_id)] = entry
         if is_primary:
             self._latest_detections[device_id] = entry
+        return True
 
+    async def _apply_violation_rules(
+        self,
+        session_id: UUID,
+        device_id: UUID,
+        vas_stream_id: str,
+        model_id: str,
+        result: Dict[str, Any],
+        confidence_threshold: float,
+    ) -> None:
+        """The single-model loop's violation rules, verbatim, with the state
+        keyed by (session, model) instead of session."""
+        inference_result = result["result"]
         key = (session_id, model_id)
         state = self._model_violation_state.setdefault(
             key,
@@ -1056,6 +1061,60 @@ class InferenceLoopService:
             state["was_in_violation"] = False
             state["active_zones"] = set()
 
+    async def _model_pipeline(
+        self,
+        session_id: UUID,
+        device_id: UUID,
+        vas_stream_id: str,
+        entry: Dict[str, Any],
+        is_primary: bool,
+        frame: Any,
+        fetch_seconds: float,
+        confidence_threshold: float,
+    ) -> bool:
+        """One model on the tick's shared frame: infer -> publish -> rules.
+
+        The tick runs one pipeline per due model concurrently, so a fast
+        model's result is published as soon as its own inference returns,
+        never after a slower model's. Raises only if the inference fails.
+        """
+        model_id = entry["model_id"]
+        result = await self._run_model(session_id, device_id, vas_stream_id, entry, frame, fetch_seconds)
+        published = self._publish_model_result(device_id, model_id, is_primary, result)
+        if published:
+            try:
+                await self._apply_violation_rules(
+                    session_id, device_id, vas_stream_id, model_id, result, confidence_threshold
+                )
+            except asyncio.CancelledError:
+                raise
+            except Exception as e:  # the result is already published; log, don't back off
+                logger.error(f"Result processing failed: {e}", session_id=str(session_id), model_id=model_id)
+        return published
+
+    async def _add_session_counter(self, session_id: UUID, column_name: str, amount: int) -> None:
+        """Atomic +amount on a stream_sessions counter (multi-model ticks write
+        frames_processed once per tick rather than once per model). Failures
+        are swallowed, like _increment_session_counter."""
+        if amount <= 0:
+            return
+        column = getattr(StreamSession, column_name)
+        try:
+            async with self._db() as db:
+                await db.execute(
+                    update(StreamSession)
+                    .where(StreamSession.id == session_id)
+                    .values({column_name: column + amount})
+                )
+                await db.commit()
+        except Exception as e:
+            logger.debug(
+                "Failed to add to stream_session counter",
+                session_id=str(session_id),
+                column_name=column_name,
+                error=str(e),
+            )
+
     async def _multi_inference_task(
         self,
         session_id: UUID,
@@ -1065,7 +1124,15 @@ class InferenceLoopService:
         confidence_threshold: float,
         stop: Optional[asyncio.Event] = None,
     ) -> None:
-        """Run several models on one camera, one frame-tap read per tick."""
+        """Run several models on one camera, one frame-tap read per tick.
+
+        Tick grid: the tick period is the fastest model's interval. A model
+        runs on a tick when it is due within half a tick, then its next due
+        time advances by its own interval (an accumulator, so its average rate
+        stays exact). Every run therefore lands on the fastest model's tick:
+        while the fastest model is running there are no solo frame reads for
+        slower models.
+        """
         stop = stop or asyncio.Event()
         me = asyncio.current_task()
         clock = asyncio.get_event_loop().time
@@ -1074,7 +1141,14 @@ class InferenceLoopService:
         consumers = [(session_id, m) for m in model_ids]
         for consumer in consumers:
             self._budget.register(consumer)
+        logger.info(
+            "Multi-model task registered with GPU budget",
+            session_id=str(session_id),
+            models=model_ids,
+            budget_consumers=self._budget.active_count,
+        )
         next_due = {m: clock() for m in model_ids}
+        next_tick = clock()
         model_errors = {m: 0 for m in model_ids}
         tick_errors = 0
 
@@ -1086,14 +1160,15 @@ class InferenceLoopService:
                 and self._session_tasks.get(session_id) is me
             ):
                 now = clock()
+                if now < next_tick:
+                    await self._sleep_unless_stopped(stop, next_tick - now)
+                    continue
+
                 intervals = {e["model_id"]: self._multi_interval(e) for e in entries}
-                due = [
-                    e for e in entries
-                    if next_due[e["model_id"]] - now
-                    <= self._DUE_TOLERANCE * intervals[e["model_id"]]
-                ]
+                base = min(intervals.values())
+                next_tick = now + base
+                due = [e for e in entries if next_due[e["model_id"]] - now <= base / 2]
                 if not due:
-                    await self._sleep_unless_stopped(stop, min(next_due.values()) - now)
                     continue
 
                 if self.vas_stream_is_paused(str(device_id)) or not vas_stream_id:
@@ -1101,7 +1176,6 @@ class InferenceLoopService:
                         logger.warning("No VAS stream ID for session", session_id=str(session_id))
                     for e in due:
                         next_due[e["model_id"]] = now + intervals[e["model_id"]]
-                    await self._sleep_unless_stopped(stop, min(intervals[e["model_id"]] for e in due))
                     continue
 
                 # One frame-tap read for every model due on this tick.
@@ -1122,22 +1196,25 @@ class InferenceLoopService:
                     if tick_errors >= self._MAX_TICK_ERRORS:
                         logger.error("Max consecutive errors reached, stopping task", session_id=str(session_id))
                         break
-                    backoff = min(max(1.0, min(intervals.values()) * (2 ** tick_errors)), 15)
+                    backoff = min(max(1.0, base * (2 ** tick_errors)), 15)
+                    next_tick = now + backoff
                     for e in due:
                         next_due[e["model_id"]] = now + backoff
-                    await self._sleep_unless_stopped(stop, backoff)
                     continue
                 tick_errors = 0
 
                 outcomes = await asyncio.gather(
                     *(
-                        self._run_model(session_id, device_id, vas_stream_id, e, frame, fetch_seconds)
+                        self._model_pipeline(
+                            session_id, device_id, vas_stream_id, e, e["model_id"] == primary,
+                            frame, fetch_seconds, confidence_threshold,
+                        )
                         for e in due
                     ),
                     return_exceptions=True,
                 )
-                succeeded = []
-                for e, outcome in zip(due, outcomes):
+                published = 0
+                for e, outcome in zip(due, outcomes, strict=True):
                     m = e["model_id"]
                     if isinstance(outcome, BaseException):
                         if isinstance(outcome, asyncio.CancelledError):
@@ -1152,32 +1229,14 @@ class InferenceLoopService:
                         next_due[m] = now + min(max(1.0, intervals[m] * (2 ** model_errors[m])), 15)
                         continue
                     model_errors[m] = 0
-                    next_due[m] = now + intervals[m]
-                    succeeded.append((m, outcome))
+                    advanced = next_due[m] + intervals[m]
+                    # Accumulate (exact average rate), but never queue catch-up
+                    # runs after a pause or a backoff.
+                    next_due[m] = advanced if advanced > now else now + intervals[m]
+                    published += int(bool(outcome))
 
-                # Each model's results (detections, violation write) are
-                # independent, so process them concurrently: one model's
-                # violation write must not delay the camera's other models.
-                processed = await asyncio.gather(
-                    *(
-                        self._process_model_result(
-                            session_id, device_id, vas_stream_id, m, m == primary, outcome, confidence_threshold
-                        )
-                        for m, outcome in succeeded
-                    ),
-                    return_exceptions=True,
-                )
-                for (m, _), failure in zip(succeeded, processed):
-                    if isinstance(failure, asyncio.CancelledError):
-                        raise failure
-                    if isinstance(failure, BaseException):
-                        logger.error(
-                            f"Result processing failed: {failure}",
-                            session_id=str(session_id),
-                            model_id=m,
-                        )
-
-                await self._sleep_unless_stopped(stop, min(next_due.values()) - clock())
+                # One counter write per tick, after every result is published.
+                await self._add_session_counter(session_id, "frames_processed", published)
         finally:
             for consumer in consumers:
                 self._budget.unregister(consumer)

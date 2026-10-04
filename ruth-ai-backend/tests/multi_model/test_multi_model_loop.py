@@ -332,3 +332,122 @@ async def test_g6_legacy_camera_untouched_by_neighbour(sm):
         await stop_loop(loop)
     assert {c["kind"] for c in runtime.calls_for("fall_detection")} == {"legacy"}
     assert runtime.fetches  # the multi camera used the shared-frame path
+
+
+# =============================================================================
+# M1.1: per-model publication, publish-then-count, tick alignment
+# =============================================================================
+
+
+def _record_publishes(loop, sink: list) -> None:
+    original = loop._publish_model_result
+
+    def wrapper(device_id, model_id, is_primary, result):
+        ok = original(device_id, model_id, is_primary, result)
+        sink.append(("publish", asyncio.get_event_loop().time(), model_id, result.get("frame_id"), ok))
+        return ok
+
+    loop._publish_model_result = wrapper
+
+
+def _record_counters(loop, sink: list) -> None:
+    original = loop._add_session_counter
+
+    async def wrapper(session_id, column_name, amount):
+        sink.append(("counter", asyncio.get_event_loop().time(), column_name, amount))
+        await original(session_id, column_name, amount)
+
+    loop._add_session_counter = wrapper
+
+
+async def test_g7_fast_model_never_waits_for_slow_model(sm):
+    device_id = await make_device(sm)
+    await edit(sm, "add", device_id, {"model_id": "fall_detection"})
+    await edit(sm, "add", device_id, {"model_id": "ppe_detection", "fps_override": 10.0})
+    runtime = FakeRuntime(lambda m, n: result(False), latency={"fall_detection": 0.005, "ppe_detection": 0.15})
+    loop = make_loop(sm, runtime)
+    events: list = []
+    _record_publishes(loop, events)
+    await loop.start()
+    try:
+        await wait_for(lambda: runtime.count["ppe_detection"] >= 6)
+    finally:
+        await stop_loop(loop)
+
+    published = {(e[2], e[3]): e[1] for e in events if e[0] == "publish"}
+    ends = {(c["model_id"], c["frame"]): c["end"] for c in runtime.calls if "end" in c}
+    shared = [f for (m, f) in published if m == "ppe_detection" and ("fall_detection", f) in published]
+    assert len(shared) >= 5
+    for frame in shared:
+        fall_published = published[("fall_detection", frame)]
+        # (a) fall is readable before the slow model on the same frame finishes...
+        assert fall_published < ends[("ppe_detection", frame)]
+        # ...and right after its own inference returns.
+        assert fall_published - ends[("fall_detection", frame)] < 0.02
+
+
+async def test_g8_publish_before_counter_and_one_counter_write_per_tick(sm):
+    device_id = await make_device(sm)
+    await edit(sm, "add", device_id, {"model_id": "fall_detection"})
+    await edit(sm, "add", device_id, {"model_id": "ppe_detection", "fps_override": 10.0})
+    runtime = FakeRuntime(lambda m, n: result(False))
+    loop = make_loop(sm, runtime)
+    events: list = []
+    _record_publishes(loop, events)
+    _record_counters(loop, events)
+    await loop.start()
+    try:
+        await wait_for(lambda: runtime.count["ppe_detection"] >= 6)
+    finally:
+        await stop_loop(loop)
+
+    # Walk the event log: each tick is its publishes followed by exactly one
+    # frames_processed write for that many results, all on one frame.
+    ticks, current = [], []
+    for event in events:
+        if event[0] == "publish":
+            current.append(event)
+        else:
+            ticks.append((current, event))
+            current = []
+    assert len(ticks) >= 10
+    for publishes, counter in ticks:
+        assert counter[2] == "frames_processed"
+        assert counter[3] == len(publishes)  # one write per tick, counting the tick's results
+        assert len({p[3] for p in publishes}) == 1  # all from the same frame read
+        assert all(p[1] <= counter[1] for p in publishes)  # (b) published before the write
+    total = sum(counter[3] for _, counter in ticks)
+    async with sm() as db:
+        row = (await db.execute(select(StreamSession).where(StreamSession.device_id == device_id))).scalar_one()
+    assert row.frames_processed == total
+
+
+async def test_g9_slower_models_only_on_fastest_models_ticks(sm):
+    device_id = await make_device(sm)
+    await edit(sm, "add", device_id, {"model_id": "fall_detection"})  # 50 fps (fastest)
+    await edit(sm, "add", device_id, {"model_id": "ppe_detection", "fps_override": 7.0})
+    await edit(sm, "add", device_id, {"model_id": "geo_fencing", "fps_override": 3.0})
+    runtime = FakeRuntime(lambda m, n: result(False))
+    loop = make_loop(sm, runtime)
+    await loop.start()
+    try:
+        await asyncio.sleep(0.3)  # past cold start
+        t0 = asyncio.get_event_loop().time()
+        counts0 = dict(runtime.count)
+        await asyncio.sleep(3.0)
+        t1 = asyncio.get_event_loop().time()
+        counts1 = dict(runtime.count)
+    finally:
+        await stop_loop(loop)
+
+    by_frame: dict = {}
+    for c in runtime.calls:
+        by_frame.setdefault(c["frame"], set()).add(c["model_id"])
+    # (c) zero solo reads: every frame read ran the fastest model
+    assert all("fall_detection" in models for models in by_frame.values())
+    assert len(runtime.fetches) == len(runtime.calls_for("fall_detection"))
+    # and the slower models keep their own average rates (accumulator), +-20%
+    elapsed = t1 - t0
+    for model_id, fps in (("ppe_detection", 7.0), ("geo_fencing", 3.0)):
+        rate = (counts1[model_id] - counts0.get(model_id, 0)) / elapsed
+        assert abs(rate - fps) / fps < 0.2, (model_id, rate)

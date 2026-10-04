@@ -49,8 +49,13 @@ class FakeRuntime:
     an exact call count).
     """
 
-    def __init__(self, script: Callable[[str, int], dict | None], latency: float = 0.005):
+    def __init__(
+        self,
+        script: Callable[[str, int], dict | None],
+        latency: float | dict[str, float] = 0.005,
+    ):
         self.script = script
+        # One latency for every model, or per model_id (default 0.005 s).
         self.latency = latency
         self.calls: list[dict[str, Any]] = []
         self.fetches: list[dict[str, Any]] = []
@@ -68,28 +73,30 @@ class FakeRuntime:
         self.count[model_id] += 1
         if self.on_call is not None:
             self.on_call(model_id, n)
-        self.calls.append(
-            {"kind": kind, "model_id": model_id, "n": n, "config": config, "t": self._now(), "frame": frame_id}
-        )
+        call = {"kind": kind, "model_id": model_id, "n": n, "config": config, "t": self._now(), "frame": frame_id}
+        self.calls.append(call)
         result = self.script(model_id, n)
         if result is None:
             await asyncio.Event().wait()  # park forever; the test stops the loop
         self.in_flight[model_id] += 1
         self.max_in_flight[model_id] = max(self.max_in_flight[model_id], self.in_flight[model_id])
+        latency = self.latency.get(model_id, 0.005) if isinstance(self.latency, dict) else self.latency
         try:
-            await asyncio.sleep(self.latency)
+            await asyncio.sleep(latency)
         finally:
             self.in_flight[model_id] -= 1
+        call["end"] = self._now()
         return {
             "request_id": str(uuid.uuid4()),
             "status": "success",
             "model_id": model_id,
             "model_version": "1.0.0",
-            "inference_time_ms": self.latency * 1000,
+            "inference_time_ms": latency * 1000,
             "result": result,
             "error": None,
             "frame_width": 1920,
             "frame_height": 1080,
+            "frame_id": frame_id,  # lets tests tie a published result to its tick
         }
 
     # Legacy single-model path (unchanged API).
