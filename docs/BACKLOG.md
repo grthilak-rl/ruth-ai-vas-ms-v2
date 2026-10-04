@@ -5,6 +5,145 @@ investigation. Newest first.
 
 ---
 
+## BL-8 · Fullscreen camera page shows only the video
+
+**Status:** parked (work on fullscreen later) · **Found:** 2026-10-04 (M3
+live check, step 7) · **Area:** frontend, `pages/CameraFullscreenPage.*`
+
+**Finding.** Opening a camera fullscreen (⤢ on a grid tile →
+`/cameras/fullscreen/:id`) shows only the video feed. The page's code
+renders a header (close button, status) and an info panel below the video
+(camera info, the AI detection list — read-only since M3 — and today's
+violations), but none of it appeared. Not investigated; one lead:
+`.camera-fullscreen-page` is a `100vh` flex column and the video container
+is `flex: 1`, so the info panel may be pushed off-screen or clipped.
+
+Related, from the M3 check:
+- The page's device data is fetched once, with no polling; it refreshes
+  only on tab focus after 30 s (app-wide `staleTime`) or on reload, so the
+  AI list can lag changes made in the grid.
+- "Today's violations" is a static placeholder ("No violations detected
+  today", count 0).
+
+**Proposal.** When fullscreen is picked up: make the header and info panel
+visible (layout fix, check at common viewport sizes), decide whether the
+AI list polls (e.g. with the devices list interval) and wire the violations
+section to real data.
+
+---
+
+## BL-7 · Multi-model overlay styling should count only models that drew person boxes
+
+**Status:** parked · **Found:** 2026-10-04 (M3 live check) · **Area:** frontend overlay
+
+**Finding.** `LiveVideoPlayer.tsx:177-184` applies the multi-model styles
+(label prefixes, PPE dashed box, PPE label one row up) when **two or more of
+fall, PPE, tank and chane have a result** this frame. Geo is never counted
+(its zones are drawn separately; its person boxes aren't drawn), so fall +
+geo is correctly unstyled. Two cases are not:
+- tank and chane count although they draw no person labels: fall + tank
+  prefixes fall's labels with nothing to tell them apart from;
+- a result with nothing in it still counts: fall + PPE with no PPE person
+  still prefixes fall's labels.
+
+**Proposal.** Count only models that draw person boxes **and** have at least
+one to draw this frame (today: fall and PPE). Single-model output stays
+identical (golden tests in `components/video/__tests__` must keep passing);
+add cases for fall + tank, fall + empty PPE, fall + PPE with persons.
+
+---
+
+## BL-6 · Geo/tank setup modal: rectangle mode, loaded zones, edits overwritten
+
+**Status:** parked · **Found:** 2026-10-04 (M3 live check) · **Area:**
+frontend, `GeofenceSetupModal.tsx`, `VideoCanvas.tsx`, `ROICanvas.tsx`
+(unchanged since `2722551`; not caused by M2/M3)
+
+**Findings.**
+1. **Rectangle mode looks broken.** The drag works and stores 4 corners
+   (TL, TR, BR, BL), enabling Apply, but `ROICanvas.tsx:44-47` draws from
+   `corners[0]` to the *last* corner (BL): a zero-width rectangle, so the box
+   disappears on release.
+2. **Mouse-up off the image leaves the drag stuck** (`isDrawing` stays true);
+   there is no handler for leaving the canvas or a window-level mouse-up.
+3. **A saved zone looks empty when the modal opens.** The zone is loaded
+   (`initialConfig` → corners), but the modal always opens in Rectangle mode,
+   which draws it with the same bug as a sliver; switching to Manual calls
+   Reset and erases it ("Click the top-left corner").
+4. **Edits can be overwritten.** The modal re-reads `initialConfig` in an
+   effect keyed on its reference, so a refetch that changes the camera's
+   config while the modal is open replaces the points being edited.
+
+**Proposal.**
+- Draw a 4-point zone as a polygon in both modes (or rectangle from
+  `corners[0]` to `corners[2]`).
+- End the drag on leaving the image (or a window mouse-up).
+- Open in Manual mode when a saved zone exists, Rectangle only for an
+  axis-aligned rectangle; a mode switch keeps a loaded zone, only Reset clears.
+- Read the initial config once per opening.
+- Display/editing only: the saved config format is unchanged. Used by
+  geo_fencing and tank_overflow_monitoring setup, so it needs sign-off under
+  the existing-paths constraint.
+
+---
+
+## BL-5 · Runtime serializes all inference across cameras (blocking call in an async handler)
+
+**Status:** parked — revisit after Model Store Step 5 · **Found:** 2026-10-04 ·
+**Area:** AI runtime (existing path)
+
+**Finding.** `ai/server/routes/inference.py:310` (`async def submit_inference`)
+calls `sandbox_manager.execute(...)` synchronously at line 379. That blocks
+the runtime's event loop for the whole inference, so the runtime serves **one
+request at a time across all cameras and models**, even though the container
+runs with `MAX_CONCURRENT_INFERENCES=10` and `ai/runtime/concurrency.py`
+defines per-model limits. Runtime logs show it directly: a request is only
+"received" after the previous one "completed".
+
+**Measurements (2026-10-04, demo camera fall+PPE while DEMO-CAMERA2 ran PPE).**
+Attributed exactly via the runtime's per-request logs (`stream_id`,
+`model_id`), joined with the backend's frame reads:
+
+| | Median |
+|---|---|
+| Fall alone: frame read → fall response | 110 ms (136 ticks) |
+| Fall alone: wait before the runtime receives the request | 21 ms |
+| Fall alone: runtime `inference_time_ms` | 72 ms |
+| Fall+PPE: frame read → first response | **415 ms** (190 ticks) |
+| Fall+PPE: wait before the runtime receives the fall request | **344 ms** |
+| Fall+PPE: PPE response after fall's | 287 ms |
+| PPE `inference_time_ms` (either camera) | ~370 ms |
+
+Within a tick the M1.2 order is correct (fall first in 170 of 190 ticks); the
+delay is the fall request queuing behind **another camera's** 370 ms PPE
+inside the runtime. The M1.2 live check (first response ≤ max(1.5× solo,
+solo + 40 ms)) therefore fails whenever another camera is inferring, for a
+reason outside the backend loop.
+
+Per-model publish rates in that window: fall 1.98/s alone, then fall 1.16/s
+and PPE 1.19/s together, with DEMO-CAMERA2's PPE also running.
+
+**Impact.** Every added camera or model lengthens every other model's
+latency by the full duration of whatever is ahead of it; a slow uploaded
+model would delay all built-in ones. Running uploaded models alongside
+built-in ones (Step 5) makes this more visible.
+
+**Proposal (to evaluate after Step 5).**
+- Run the blocking `execute` off the event loop (`await
+  asyncio.to_thread(...)` or a bounded executor), so `MAX_CONCURRENT_INFERENCES`
+  and the per-model limits in `concurrency.py` actually apply.
+- Measure GPU behaviour with true concurrency (contention may lengthen each
+  inference; the gain is that a fast model no longer waits for a slow one).
+- Optionally a priority or per-model queue so fast models are never queued
+  behind slow ones.
+- This changes an existing runtime path used by all 5 models: needs explicit
+  sign-off and a before/after latency run per model.
+
+Tools: `check_fastest_first_rt.py` (scratch) reproduces the table above from
+`docker logs` of the backend and runtime.
+
+---
+
 ## BL-4 · `stop-inference` returns 500 when there is nothing to stop
 
 **Status:** parked · **Found:** 2026-10-04 · **Area:** backend, existing router
