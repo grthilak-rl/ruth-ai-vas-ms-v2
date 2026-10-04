@@ -29,6 +29,10 @@ dependencies = [
     # identical across both services.
     "opencv-python-headless==4.9.0.80",
     "numpy>=1.26.0,<2.0.0",
+    # Admin login (app/core/admin_auth.py). PyJWT was already installed as a
+    # redis dependency; declared explicitly so admin auth never relies on that.
+    "PyJWT==2.13.0",
+    "bcrypt==5.0.0",
 ]
 
 [project.optional-dependencies]

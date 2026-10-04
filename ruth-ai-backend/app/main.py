@@ -18,6 +18,7 @@ from app import __version__
 from app.api.internal import events as internal_events
 from app.api.internal import ai_runtime as internal_ai_runtime
 from app.api.v1 import (
+    admin,
     ai,
     analytics,
     bookmark_analyses,
@@ -85,6 +86,7 @@ def create_application() -> FastAPI:
     app.include_router(
         bookmark_analyses.bookmark_subresource_router, prefix="/api/v1"
     )
+    app.include_router(admin.router, prefix="/api/v1")
 
     # Internal endpoints (no authentication for vertical slice)
     app.include_router(internal_events.router, prefix="/internal")
