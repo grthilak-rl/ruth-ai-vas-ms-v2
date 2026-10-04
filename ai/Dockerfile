@@ -76,6 +76,7 @@ ARG VARIANT=cpu
 # Copy requirements
 COPY requirements.txt /tmp/requirements.txt
 COPY requirements-gpu.txt /tmp/requirements-gpu.txt
+COPY constraints-gpu.txt /tmp/constraints-gpu.txt
 
 # Install Python packages based on variant.
 #
@@ -104,6 +105,12 @@ COPY requirements-gpu.txt /tmp/requirements-gpu.txt
 # which under PEP 440 also matches the local version "2.1.2+cu121" — so pointing
 # a CPU build at this directory could silently install the CUDA build into a
 # slim CPU image. It resolves from its own cpu index instead.
+#
+# The gpu branch passes -c constraints-gpu.txt to BOTH installs. The torch
+# wheel pass resolves torch's own deps (triton, sympy, networkx, ...) before
+# the requirements pass runs, so constraining only the second pass would leave
+# those free to drift. torch itself is not in the constraints file; it is still
+# installed by file path exactly as before.
 RUN --mount=type=cache,target=/root/.cache/pip,sharing=locked \
     --mount=type=bind,source=wheels,target=/tmp/wheels \
     if [ "$VARIANT" = "cpu" ]; then \
@@ -111,11 +118,11 @@ RUN --mount=type=cache,target=/root/.cache/pip,sharing=locked \
     elif [ "$VARIANT" = "gpu" ]; then \
         if ls /tmp/wheels/torch-*.whl >/dev/null 2>&1; then \
             echo "Installing torch from local wheelhouse:" /tmp/wheels/torch-*.whl; \
-            pip install /tmp/wheels/torch-*.whl; \
+            pip install -c /tmp/constraints-gpu.txt /tmp/wheels/torch-*.whl; \
         else \
             echo "No local torch wheel found; resolving torch from the index."; \
         fi; \
-        pip install --find-links=/tmp/wheels -r /tmp/requirements-gpu.txt; \
+        pip install --find-links=/tmp/wheels -c /tmp/constraints-gpu.txt -r /tmp/requirements-gpu.txt; \
     elif [ "$VARIANT" = "jetson" ]; then \
         # Jetson has PyTorch pre-installed, install remaining deps
         pip install --find-links=/tmp/wheels \
@@ -191,6 +198,11 @@ ENV METRICS_UPDATE_INTERVAL_SECONDS=15
 
 # Observability
 ENV REQUEST_ID_HEADER=X-Request-ID
+
+# Never let ultralytics pip-install packages at runtime. Production already
+# can't (site-packages and $HOME are not writable by the ruth user); this makes
+# a missing module fail immediately instead of after a pip attempt.
+ENV YOLO_AUTOINSTALL=False
 
 # =============================================================================
 # Container Configuration
