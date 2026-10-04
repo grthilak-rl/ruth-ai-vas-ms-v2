@@ -12,7 +12,7 @@ import uuid
 from datetime import datetime
 from typing import TYPE_CHECKING
 
-from sqlalchemy import DateTime, Float, ForeignKey, Integer, String
+from sqlalchemy import DateTime, Float, ForeignKey, Index, Integer, String, text
 from sqlalchemy.dialects.postgresql import ENUM, JSONB, UUID
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
@@ -49,6 +49,17 @@ class StreamSession(Base, TimestampMixin):
     """
 
     __tablename__ = "stream_sessions"
+    __table_args__ = (
+        # At most one active session per device, enforced by the database
+        # (migration stream_sessions_one_active). start_stream maps a
+        # violation to StreamAlreadyActiveError.
+        Index(
+            "uq_stream_sessions_device_active",
+            "device_id",
+            unique=True,
+            postgresql_where=text("state IN ('starting', 'live', 'stopping')"),
+        ),
+    )
 
     # Primary key
     id: Mapped[uuid.UUID] = mapped_column(
@@ -101,6 +112,24 @@ class StreamSession(Base, TimestampMixin):
         JSONB,
         nullable=True,
         comment="Model-specific configuration (ROI, thresholds, etc.)",
+    )
+
+    # Several models on one camera (migration stream_session_models).
+    # NULL = legacy single-model session: model_id/model_config above, run by
+    # the original loop. When set, a list of
+    # {model_id, model_version, config, fps_override}; model_id/model_version/
+    # model_config above then mirror models[0] so existing readers stay right.
+    models: Mapped[list[dict] | None] = mapped_column(
+        JSONB,
+        nullable=True,
+        comment="Models run on this session; NULL = legacy single model_id",
+    )
+    models_revision: Mapped[int] = mapped_column(
+        Integer,
+        nullable=False,
+        default=0,
+        server_default="0",
+        comment="Bumped on every change to models; triggers a task restart",
     )
 
     # Stream state

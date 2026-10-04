@@ -1,0 +1,513 @@
+{
+  "calls": [
+    {
+      "config": {
+        "zones": [
+          {
+            "id": "z1",
+            "points": [
+              [
+                0,
+                0
+              ],
+              [
+                10,
+                0
+              ],
+              [
+                10,
+                10
+              ]
+            ]
+          }
+        ]
+      },
+      "kind": "legacy",
+      "model_id": "fall_detection",
+      "n": 0
+    },
+    {
+      "config": {
+        "zones": [
+          {
+            "id": "z1",
+            "points": [
+              [
+                0,
+                0
+              ],
+              [
+                10,
+                0
+              ],
+              [
+                10,
+                10
+              ]
+            ]
+          }
+        ]
+      },
+      "kind": "legacy",
+      "model_id": "fall_detection",
+      "n": 1
+    },
+    {
+      "config": {
+        "zones": [
+          {
+            "id": "z1",
+            "points": [
+              [
+                0,
+                0
+              ],
+              [
+                10,
+                0
+              ],
+              [
+                10,
+                10
+              ]
+            ]
+          }
+        ]
+      },
+      "kind": "legacy",
+      "model_id": "fall_detection",
+      "n": 2
+    },
+    {
+      "config": {
+        "zones": [
+          {
+            "id": "z1",
+            "points": [
+              [
+                0,
+                0
+              ],
+              [
+                10,
+                0
+              ],
+              [
+                10,
+                10
+              ]
+            ]
+          }
+        ]
+      },
+      "kind": "legacy",
+      "model_id": "fall_detection",
+      "n": 3
+    },
+    {
+      "config": {
+        "zones": [
+          {
+            "id": "z1",
+            "points": [
+              [
+                0,
+                0
+              ],
+              [
+                10,
+                0
+              ],
+              [
+                10,
+                10
+              ]
+            ]
+          }
+        ]
+      },
+      "kind": "legacy",
+      "model_id": "fall_detection",
+      "n": 4
+    },
+    {
+      "config": {
+        "zones": [
+          {
+            "id": "z1",
+            "points": [
+              [
+                0,
+                0
+              ],
+              [
+                10,
+                0
+              ],
+              [
+                10,
+                10
+              ]
+            ]
+          }
+        ]
+      },
+      "kind": "legacy",
+      "model_id": "fall_detection",
+      "n": 5
+    },
+    {
+      "config": {
+        "zones": [
+          {
+            "id": "z1",
+            "points": [
+              [
+                0,
+                0
+              ],
+              [
+                10,
+                0
+              ],
+              [
+                10,
+                10
+              ]
+            ]
+          }
+        ]
+      },
+      "kind": "legacy",
+      "model_id": "fall_detection",
+      "n": 6
+    },
+    {
+      "config": {
+        "zones": [
+          {
+            "id": "z1",
+            "points": [
+              [
+                0,
+                0
+              ],
+              [
+                10,
+                0
+              ],
+              [
+                10,
+                10
+              ]
+            ]
+          }
+        ]
+      },
+      "kind": "legacy",
+      "model_id": "fall_detection",
+      "n": 7
+    },
+    {
+      "config": {
+        "zones": [
+          {
+            "id": "z1",
+            "points": [
+              [
+                0,
+                0
+              ],
+              [
+                10,
+                0
+              ],
+              [
+                10,
+                10
+              ]
+            ]
+          }
+        ]
+      },
+      "kind": "legacy",
+      "model_id": "fall_detection",
+      "n": 8
+    },
+    {
+      "config": {
+        "zones": [
+          {
+            "id": "z1",
+            "points": [
+              [
+                0,
+                0
+              ],
+              [
+                10,
+                0
+              ],
+              [
+                10,
+                10
+              ]
+            ]
+          }
+        ]
+      },
+      "kind": "legacy",
+      "model_id": "fall_detection",
+      "n": 9
+    }
+  ],
+  "counters": {
+    "frames_processed": 9,
+    "violations_count": 3
+  },
+  "max_in_flight": {
+    "fall_detection": 1
+  },
+  "violations": [
+    {
+      "bounding_boxes": [
+        {
+          "confidence": 0.81,
+          "frame_height": 1080,
+          "frame_width": 1920,
+          "height": 200,
+          "label": "fall_detected",
+          "width": 100,
+          "x": 10,
+          "y": 20
+        }
+      ],
+      "confidence": 0.81,
+      "model_id": "fall_detection",
+      "model_version": "1.0.0",
+      "status": "open",
+      "type": "fall_detected",
+      "type_detail": null
+    },
+    {
+      "bounding_boxes": [
+        {
+          "confidence": 0.8400000000000001,
+          "frame_height": 1080,
+          "frame_width": 1920,
+          "height": 200,
+          "label": "fall_detected",
+          "width": 100,
+          "x": 10,
+          "y": 20
+        }
+      ],
+      "confidence": 0.8400000000000001,
+      "model_id": "fall_detection",
+      "model_version": "1.0.0",
+      "status": "open",
+      "type": "fall_detected",
+      "type_detail": null
+    },
+    {
+      "bounding_boxes": [
+        {
+          "confidence": 0.88,
+          "frame_height": 1080,
+          "frame_width": 1920,
+          "height": 200,
+          "label": "fall_detected",
+          "width": 100,
+          "x": 10,
+          "y": 20
+        }
+      ],
+      "confidence": 0.88,
+      "model_id": "fall_detection",
+      "model_version": "1.0.0",
+      "status": "open",
+      "type": "fall_detected",
+      "type_detail": null
+    }
+  ],
+  "visible_detection_at_each_call": [
+    null,
+    {
+      "device_id": "<device>",
+      "frame_height": 1080,
+      "frame_width": 1920,
+      "model_id": "fall_detection",
+      "model_version": "1.0.0",
+      "result": {
+        "confidence": 0.1,
+        "detections": [],
+        "violation_detected": false,
+        "violation_type": null
+      }
+    },
+    {
+      "device_id": "<device>",
+      "frame_height": 1080,
+      "frame_width": 1920,
+      "model_id": "fall_detection",
+      "model_version": "1.0.0",
+      "result": {
+        "confidence": 0.81,
+        "detections": [
+          {
+            "bbox": [
+              10,
+              20,
+              110,
+              220
+            ],
+            "confidence": 0.81
+          }
+        ],
+        "violation_detected": true,
+        "violation_type": "fall_detected"
+      }
+    },
+    {
+      "device_id": "<device>",
+      "frame_height": 1080,
+      "frame_width": 1920,
+      "model_id": "fall_detection",
+      "model_version": "1.0.0",
+      "result": {
+        "confidence": 0.8200000000000001,
+        "detections": [
+          {
+            "bbox": [
+              10,
+              20,
+              110,
+              220
+            ],
+            "confidence": 0.8200000000000001
+          }
+        ],
+        "violation_detected": true,
+        "violation_type": "fall_detected"
+      }
+    },
+    {
+      "device_id": "<device>",
+      "frame_height": 1080,
+      "frame_width": 1920,
+      "model_id": "fall_detection",
+      "model_version": "1.0.0",
+      "result": {
+        "confidence": 0.1,
+        "detections": [],
+        "violation_detected": false,
+        "violation_type": null
+      }
+    },
+    {
+      "device_id": "<device>",
+      "frame_height": 1080,
+      "frame_width": 1920,
+      "model_id": "fall_detection",
+      "model_version": "1.0.0",
+      "result": {
+        "confidence": 0.8400000000000001,
+        "detections": [
+          {
+            "bbox": [
+              10,
+              20,
+              110,
+              220
+            ],
+            "confidence": 0.8400000000000001
+          }
+        ],
+        "violation_detected": true,
+        "violation_type": "fall_detected"
+      }
+    },
+    {
+      "device_id": "<device>",
+      "frame_height": 1080,
+      "frame_width": 1920,
+      "model_id": "fall_detection",
+      "model_version": "1.0.0",
+      "result": {
+        "confidence": 0.8500000000000001,
+        "detections": [
+          {
+            "bbox": [
+              10,
+              20,
+              110,
+              220
+            ],
+            "confidence": 0.8500000000000001
+          }
+        ],
+        "violation_detected": true,
+        "violation_type": "fall_detected"
+      }
+    },
+    {
+      "device_id": "<device>",
+      "frame_height": 1080,
+      "frame_width": 1920,
+      "model_id": "fall_detection",
+      "model_version": "1.0.0",
+      "result": {
+        "confidence": 0.8600000000000001,
+        "detections": [
+          {
+            "bbox": [
+              10,
+              20,
+              110,
+              220
+            ],
+            "confidence": 0.8600000000000001
+          }
+        ],
+        "violation_detected": true,
+        "violation_type": "fall_detected"
+      }
+    },
+    {
+      "device_id": "<device>",
+      "frame_height": 1080,
+      "frame_width": 1920,
+      "model_id": "fall_detection",
+      "model_version": "1.0.0",
+      "result": {
+        "confidence": 0.1,
+        "detections": [],
+        "violation_detected": false,
+        "violation_type": null
+      }
+    },
+    {
+      "device_id": "<device>",
+      "frame_height": 1080,
+      "frame_width": 1920,
+      "model_id": "fall_detection",
+      "model_version": "1.0.0",
+      "result": {
+        "confidence": 0.88,
+        "detections": [
+          {
+            "bbox": [
+              10,
+              20,
+              110,
+              220
+            ],
+            "confidence": 0.88
+          }
+        ],
+        "violation_detected": true,
+        "violation_type": "fall_detected"
+      }
+    }
+  ]
+}

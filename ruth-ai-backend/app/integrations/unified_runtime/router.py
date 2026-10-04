@@ -17,7 +17,7 @@ from app.integrations.vas import VASClient
 
 from .config import should_use_unified_runtime
 from .client import UnifiedRuntimeClient
-from .frame_fetcher import FrameFetcher
+from .frame_fetcher import FrameData, FrameFetcher
 
 logger = get_logger(__name__)
 
@@ -218,6 +218,71 @@ class RuntimeRouter:
         # actually saw. Callers persist them alongside any bounding boxes so
         # the review overlay can map box coordinates onto a snapshot even when
         # the snapshot was captured at a different resolution.
+        return {
+            "request_id": str(response.request_id),
+            "status": response.status,
+            "model_id": response.model_id,
+            "model_version": response.model_version,
+            "inference_time_ms": response.inference_time_ms,
+            "result": response.result,
+            "error": response.error,
+            "frame_width": frame_data.width,
+            "frame_height": frame_data.height,
+        }
+
+    # -------------------------------------------------------------------------
+    # Shared-frame path (multi-model sessions)
+    # -------------------------------------------------------------------------
+    # A camera running several models reads the frame tap once per tick and
+    # sends that same frame to each model that is due. submit_inference above
+    # (fetch + infer in one call) is unchanged and still serves every
+    # single-model session.
+
+    async def fetch_frame(
+        self,
+        stream_id: UUID,
+        device_id: Optional[UUID] = None,
+    ) -> FrameData:
+        """Fetch and encode the latest frame once, for several models."""
+        return await self.frame_fetcher.fetch_and_encode(
+            device_id=device_id,
+            stream_id=stream_id,
+        )
+
+    async def submit_inference_with_frame(
+        self,
+        model_id: str,
+        frame_data: FrameData,
+        stream_id: UUID,
+        device_id: Optional[UUID] = None,
+        model_version: Optional[str] = None,
+        timestamp: Optional[datetime] = None,
+        priority: int = 0,
+        metadata: Optional[Dict[str, Any]] = None,
+        config: Optional[Dict[str, Any]] = None,
+    ) -> Dict[str, Any]:
+        """Run one model on an already-fetched frame.
+
+        Same routing and the same result shape as submit_inference.
+        """
+        decision = self.decide_routing(model_id)
+        if decision.target != RoutingTarget.UNIFIED_RUNTIME:
+            raise ValueError(f"Unsupported routing target: {decision.target}")
+
+        response = await self.unified_runtime_client.submit_inference(
+            model_id=model_id,
+            frame_base64=frame_data.base64_data,
+            stream_id=stream_id,
+            device_id=device_id,
+            model_version=model_version,
+            frame_format=frame_data.format,
+            frame_width=frame_data.width,
+            frame_height=frame_data.height,
+            timestamp=timestamp or datetime.utcnow(),
+            priority=priority,
+            metadata=metadata,
+            config=config,
+        )
         return {
             "request_id": str(response.request_id),
             "status": response.status,

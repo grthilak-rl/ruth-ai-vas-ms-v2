@@ -135,6 +135,7 @@ async def list_devices(
                     ai_enabled=stream_status.get("active", False)
                     and stream_status.get("model_id") is not None,
                     model_id=stream_status.get("model_id"),
+                    models=stream_status.get("models") or [],
                     ai_model_config=stream_status.get("model_config"),
                 ),
             )
@@ -372,6 +373,7 @@ async def get_device(
             state=stream_status_dict.get("state"),
             ai_enabled=stream_status_dict["active"] and stream_status_dict.get("model_id") is not None,
             model_id=stream_status_dict.get("model_id"),
+            models=stream_status_dict.get("models") or [],
             ai_model_config=stream_status_dict.get("model_config"),
         ),
         last_synced_at=device.last_synced_at,

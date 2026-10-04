@@ -207,6 +207,26 @@ class InferenceBudget:
         """Seconds to wait between inferences for one camera."""
         return 1.0 / self.fps_for(model_id)
 
+    # Multi-model sessions register one consumer per (session, model) rather
+    # than one per session, so active_count counts every model stream sharing
+    # the GPU. With no multi-model session, consumers == sessions and the
+    # single-model pacing above is exactly what it was.
+
+    def fps_for_consumer(self, model_id: str, desired_fps: float) -> float:
+        """fps for one model on a multi-model camera, capped at what it asks for.
+
+        Same fair-share rule as fps_for, but the cap is the model's own desired
+        rate (recommended_fps or a per-camera override) instead of TARGET_FPS.
+        MIN_FPS is a floor on the *schedule*, not a guarantee: see the module
+        notes on saturation.
+        """
+        n = max(1, self.active_count)
+        latency = self.latency_for(model_id)
+        if latency <= 0:
+            return desired_fps
+        fair_share_fps = MAX_GPU_UTILIZATION / (n * latency)
+        return max(MIN_FPS, min(desired_fps, fair_share_fps))
+
 
 class InferenceLoopService:
     """
@@ -264,6 +284,31 @@ class InferenceLoopService:
         # and dropped when the device's session stops.
         self._latest_detections: Dict[UUID, Dict[str, Any]] = {}
 
+        # --- Multi-model sessions (stream_sessions.models) -------------------
+        # Sessions whose `models` is NULL never touch any of this: they run
+        # _inference_task exactly as before.
+        #
+        # Per-session task bookkeeping:
+        #   {"kind": "legacy"|"multi", "revision": int|None, "model_id": str}
+        self._task_meta: Dict[UUID, Dict[str, Any]] = {}
+        # Sessions whose task is being swapped right now; _main_loop skips them
+        # so it can't start a second task in the middle of the handover.
+        self._handovers: set = set()
+        # Violation writes in progress per session. A handover cancels the old
+        # task only when this is 0, i.e. never between a violation's commit and
+        # the duplicate-suppression state update that follows it.
+        self._violation_writes: Dict[UUID, int] = {}
+        # Duplicate-suppression state per (session_id, model_id).
+        self._model_violation_state: Dict[tuple, Dict[str, Any]] = {}
+        # Newest result per (device_id, model_id). The session's first model is
+        # also published to _latest_detections, so /detections/latest keeps
+        # working for every camera.
+        self._latest_model_detections: Dict[tuple, Dict[str, Any]] = {}
+        # Cooperative stop for multi-model tasks: a handover sets the event
+        # and the task exits after finishing its current tick, so no DB write
+        # or inference is ever cancelled half-way.
+        self._task_stop: Dict[UUID, asyncio.Event] = {}
+
         # VAS stream-state cache populated by VASEventConsumer.
         # Maps stream_id/room_id (string) -> "active" | "paused".
         self._vas_stream_state: Dict[str, str] = {}
@@ -310,7 +355,11 @@ class InferenceLoopService:
         self._running = False
 
         # Cancel all session tasks
-        for session_id, task in self._session_tasks.items():
+        # Iterate a snapshot: each cancelled task's own exit cleanup removes
+        # its entry from _session_tasks, which would otherwise raise
+        # "dictionary changed size during iteration" and skip cancelling the
+        # main loop below.
+        for session_id, task in list(self._session_tasks.items()):
             task.cancel()
             try:
                 await task
@@ -345,8 +394,21 @@ class InferenceLoopService:
                     # Start tasks for new sessions
                     active_session_ids = {s.id for s in active_sessions}
                     for session in active_sessions:
+                        if session.id in self._handovers:
+                            continue
                         if session.id not in self._session_tasks:
-                            self._start_session_task(session)
+                            if session.models is None:
+                                self._start_session_task(session)
+                                self._task_meta[session.id] = {
+                                    "kind": "legacy",
+                                    "revision": None,
+                                    "model_id": session.model_id,
+                                }
+                            else:
+                                self._start_multi_task(session)
+                        elif session.models is not None and self._needs_handover(session):
+                            self._handovers.add(session.id)
+                            asyncio.create_task(self._handover(session))
 
                     # Stop tasks for sessions that are no longer active
                     for session_id in list(self._session_tasks.keys()):
@@ -397,6 +459,10 @@ class InferenceLoopService:
             device_id = self._session_devices.pop(session_id, None)
             if device_id is not None:
                 self._latest_detections.pop(device_id, None)
+                self._clear_model_detections(device_id)
+            self._task_meta.pop(session_id, None)
+            self._task_stop.pop(session_id, None)
+            self._clear_model_violation_state(session_id)
             logger.info("Stopped inference task", session_id=str(session_id))
 
     async def _inference_task(
@@ -699,6 +765,433 @@ class InferenceLoopService:
         payload["age_ms"] = age_ms
         return payload
 
+    def get_latest_detections(self, device_id: UUID) -> list[Dict[str, Any]]:
+        """Newest result per model for a device (multi-model aware).
+
+        A multi-model session returns one entry per model that has produced a
+        result; a legacy session returns its single entry; none -> [].
+        """
+        now = asyncio.get_event_loop().time()
+        entries = [
+            entry
+            for (dev, _model), entry in self._latest_model_detections.items()
+            if dev == device_id
+        ]
+        if not entries and device_id in self._latest_detections:
+            entries = [self._latest_detections[device_id]]
+        out = []
+        for entry in entries:
+            payload = {k: v for k, v in entry.items() if k != "captured_at"}
+            payload["age_ms"] = int((now - entry["captured_at"]) * 1000)
+            out.append(payload)
+        return sorted(out, key=lambda p: p["model_id"])
+
+    # =========================================================================
+    # Multi-model sessions
+    # =========================================================================
+    #
+    # A session whose `models` column is set (even with one entry) runs
+    # _multi_inference_task: per tick it reads the frame tap ONCE and runs only
+    # the models that are due, each on its own interval (fps_override, else the
+    # model's recommended_fps capped at TARGET_FPS, then the GPU budget).
+    #
+    # Sessions with models = NULL run _inference_task, unchanged. The only path
+    # between the two is legacy -> multi, when a model is added to a legacy
+    # session; a multi session stays multi (also at 1 model), and every change
+    # to its list or entries bumps models_revision, which restarts its task
+    # with the new configuration through the same handover.
+
+    # Run a model that is due within this fraction of its interval on the
+    # current tick, so slower models ride on faster models' frame reads.
+    _DUE_TOLERANCE = 0.25
+    _MAX_TICK_ERRORS = 10
+    _STOP_TIMEOUT = 10.0
+
+    @staticmethod
+    async def _sleep_unless_stopped(stop: asyncio.Event, seconds: float) -> None:
+        if seconds <= 0 or stop.is_set():
+            return
+        try:
+            await asyncio.wait_for(stop.wait(), timeout=seconds)
+        except asyncio.TimeoutError:
+            pass
+
+    @staticmethod
+    def _entries(session: StreamSession) -> list[Dict[str, Any]]:
+        return [dict(e) for e in (session.models or []) if e.get("model_id")]
+
+    def _needs_handover(self, session: StreamSession) -> bool:
+        meta = self._task_meta.get(session.id)
+        if meta is None or meta["kind"] == "legacy":
+            return True
+        return meta["revision"] != session.models_revision
+
+    def _multi_interval(self, entry: Dict[str, Any]) -> float:
+        from app.services.model_rates import desired_fps
+
+        fps = self._budget.fps_for_consumer(
+            entry["model_id"], desired_fps(entry, TARGET_FPS)
+        )
+        return 1.0 / fps
+
+    def _clear_model_detections(self, device_id: UUID, keep: Optional[set] = None) -> None:
+        for key in [k for k in self._latest_model_detections if k[0] == device_id]:
+            if keep is None or key[1] not in keep:
+                del self._latest_model_detections[key]
+
+    def _clear_model_violation_state(self, session_id: UUID, keep: Optional[set] = None) -> None:
+        for key in [k for k in self._model_violation_state if k[0] == session_id]:
+            if keep is None or key[1] not in keep:
+                del self._model_violation_state[key]
+
+    def _start_multi_task(self, session: StreamSession) -> None:
+        entries = self._entries(session)
+        stop = asyncio.Event()
+        self._task_stop[session.id] = stop
+        task = asyncio.create_task(
+            self._multi_inference_task(
+                session_id=session.id,
+                device_id=session.device_id,
+                vas_stream_id=session.vas_stream_id,
+                entries=entries,
+                confidence_threshold=session.confidence_threshold or 0.7,
+                stop=stop,
+            )
+        )
+        self._session_tasks[session.id] = task
+        self._session_devices[session.id] = session.device_id
+        self._task_meta[session.id] = {
+            "kind": "multi",
+            "revision": session.models_revision,
+            "model_id": entries[0]["model_id"] if entries else session.model_id,
+        }
+        logger.info(
+            "Started multi-model inference task",
+            session_id=str(session.id),
+            models=[e["model_id"] for e in entries],
+            revision=session.models_revision,
+        )
+
+    async def _handover(self, session: StreamSession) -> None:
+        """Swap a session's task for one matching its current models.
+
+        Ordering guarantees:
+          - no double run: the old task has fully exited (cleanup included)
+            before the new one is created, and _main_loop skips the session
+            meanwhile;
+          - no duplicate violation: the old task is cancelled only when no
+            violation write is in flight, and duplicate-suppression state is
+            carried over per model;
+          - no gap: the new task runs its first tick immediately, and the last
+            detections are restored so overlays don't blink.
+        """
+        session_id = session.id
+        device_id = session.device_id
+        try:
+            old_task = self._session_tasks.get(session_id)
+            old_meta = self._task_meta.get(session_id) or {}
+            saved_device = self._latest_detections.get(device_id)
+            saved_models = {
+                k: v for k, v in self._latest_model_detections.items() if k[0] == device_id
+            }
+
+            if old_task is not None and not old_task.done():
+                stop = self._task_stop.get(session_id)
+                if old_meta.get("kind") == "multi" and stop is not None:
+                    # Cooperative: the old task finishes its current tick
+                    # (inference, detections, violation writes) and exits.
+                    stop.set()
+                    finished, _ = await asyncio.wait({old_task}, timeout=self._STOP_TIMEOUT)
+                    if not finished:  # safety net only; logged
+                        logger.warning("Multi-model task did not stop in time; cancelling",
+                                       session_id=str(session_id))
+                        old_task.cancel()
+                        await asyncio.wait({old_task})
+                else:
+                    # Legacy task (unmodified code, no stop hook): cancel at a
+                    # safe point, never between a violation's commit and the
+                    # duplicate-suppression update that follows it. No await
+                    # between the check and cancel().
+                    while self._violation_writes.get(session_id, 0) > 0:
+                        await asyncio.sleep(0.005)
+                    old_task.cancel()
+                    await asyncio.wait({old_task})
+
+            entries = self._entries(session)
+            model_ids = {e["model_id"] for e in entries}
+
+            # Carry duplicate-suppression state across the swap.
+            if old_meta.get("kind") == "legacy":
+                legacy_state = self._violation_state.get(session_id)
+                legacy_model = old_meta.get("model_id")
+                if legacy_state is not None and legacy_model in model_ids:
+                    self._model_violation_state[(session_id, legacy_model)] = {
+                        "was_in_violation": legacy_state["was_in_violation"],
+                        "last_violation_time": legacy_state["last_violation_time"],
+                        "active_zones": set(legacy_state["active_zones"]),
+                    }
+            self._clear_model_violation_state(session_id, keep=model_ids)
+
+            if not self._running or not entries:
+                return
+
+            # Install the new task (synchronously: nothing can interleave).
+            self._start_multi_task(session)
+
+            # Restore detections the old task's cleanup dropped, for models
+            # that are still running, so overlays carry on seamlessly.
+            for key, value in saved_models.items():
+                if key[1] in model_ids:
+                    self._latest_model_detections.setdefault(key, value)
+            if saved_device is not None and saved_device.get("model_id") in model_ids:
+                if (device_id, saved_device["model_id"]) not in self._latest_model_detections:
+                    self._latest_model_detections[(device_id, saved_device["model_id"])] = saved_device
+            primary = entries[0]["model_id"]
+            primary_entry = self._latest_model_detections.get((device_id, primary))
+            if primary_entry is not None:
+                self._latest_detections.setdefault(device_id, primary_entry)
+
+            logger.info(
+                "Handed over inference task",
+                session_id=str(session_id),
+                from_kind=old_meta.get("kind"),
+                from_revision=old_meta.get("revision"),
+                to_revision=session.models_revision,
+                models=sorted(model_ids),
+            )
+        except Exception as e:  # pragma: no cover - logged, _main_loop retries
+            logger.error(f"Inference task handover failed: {e}", session_id=str(session_id), exc_info=True)
+        finally:
+            self._handovers.discard(session_id)
+
+    async def _run_model(
+        self,
+        session_id: UUID,
+        device_id: UUID,
+        vas_stream_id: str,
+        entry: Dict[str, Any],
+        frame: Any,
+        fetch_seconds: float,
+    ) -> Dict[str, Any]:
+        """One model on the shared frame, under the GPU-concurrency semaphore."""
+        clock = asyncio.get_event_loop().time
+        async with self._gpu_slots:
+            started = clock()
+            result = await self._runtime_router.submit_inference_with_frame(
+                model_id=entry["model_id"],
+                frame_data=frame,
+                stream_id=UUID(vas_stream_id),
+                device_id=device_id,
+                model_version=entry.get("model_version"),
+                timestamp=datetime.now(timezone.utc),
+                priority=5,
+                metadata={"session_id": str(session_id)},
+                config=entry.get("config"),
+            )
+            # Same accounting as single-model sessions: the budget's latency
+            # includes the frame fetch (see MAX_GPU_UTILIZATION).
+            self._budget.record_latency(entry["model_id"], fetch_seconds + clock() - started)
+        return result
+
+    async def _process_model_result(
+        self,
+        session_id: UUID,
+        device_id: UUID,
+        vas_stream_id: str,
+        model_id: str,
+        is_primary: bool,
+        result: Dict[str, Any],
+        confidence_threshold: float,
+    ) -> None:
+        """Publish one model's result and apply the violation rules.
+
+        The violation rules are the single-model loop's, verbatim, with the
+        state keyed by (session, model) instead of session.
+        """
+        if not (result.get("status") == "success" and result.get("result")):
+            return
+        await self._increment_session_counter(session_id, "frames_processed")
+
+        inference_result = result["result"]
+        entry = {
+            "device_id": str(device_id),
+            "model_id": model_id,
+            "model_version": result.get("model_version"),
+            "result": inference_result,
+            "frame_width": result.get("frame_width"),
+            "frame_height": result.get("frame_height"),
+            "captured_at": asyncio.get_event_loop().time(),
+        }
+        self._latest_model_detections[(device_id, model_id)] = entry
+        if is_primary:
+            self._latest_detections[device_id] = entry
+
+        key = (session_id, model_id)
+        state = self._model_violation_state.setdefault(
+            key,
+            {"was_in_violation": False, "last_violation_time": None, "active_zones": set()},
+        )
+        violation_detected = inference_result.get("violation_detected", False)
+        confidence = inference_result.get("confidence", 0.0)
+
+        if violation_detected and confidence >= confidence_threshold:
+            detections = inference_result.get("detections", [])
+            current_zones = {d.get("zone_id") for d in detections if d.get("in_zone")}
+            new_zones = current_zones - state["active_zones"]
+            if not state["was_in_violation"] or new_zones:
+                await self._create_violation(
+                    session_id=session_id,
+                    device_id=device_id,
+                    model_id=model_id,
+                    model_version=result.get("model_version", "1.0.0"),
+                    inference_result=inference_result,
+                    vas_stream_id=vas_stream_id,
+                    frame_width=result.get("frame_width"),
+                    frame_height=result.get("frame_height"),
+                )
+                state["last_violation_time"] = datetime.now(timezone.utc)
+            state["was_in_violation"] = True
+            state["active_zones"] = current_zones
+        else:
+            state["was_in_violation"] = False
+            state["active_zones"] = set()
+
+    async def _multi_inference_task(
+        self,
+        session_id: UUID,
+        device_id: UUID,
+        vas_stream_id: Optional[str],
+        entries: list[Dict[str, Any]],
+        confidence_threshold: float,
+        stop: Optional[asyncio.Event] = None,
+    ) -> None:
+        """Run several models on one camera, one frame-tap read per tick."""
+        stop = stop or asyncio.Event()
+        me = asyncio.current_task()
+        clock = asyncio.get_event_loop().time
+        model_ids = [e["model_id"] for e in entries]
+        primary = model_ids[0] if model_ids else None
+        consumers = [(session_id, m) for m in model_ids]
+        for consumer in consumers:
+            self._budget.register(consumer)
+        next_due = {m: clock() for m in model_ids}
+        model_errors = {m: 0 for m in model_ids}
+        tick_errors = 0
+
+        try:
+            while (
+                entries
+                and self._running
+                and not stop.is_set()
+                and self._session_tasks.get(session_id) is me
+            ):
+                now = clock()
+                intervals = {e["model_id"]: self._multi_interval(e) for e in entries}
+                due = [
+                    e for e in entries
+                    if next_due[e["model_id"]] - now
+                    <= self._DUE_TOLERANCE * intervals[e["model_id"]]
+                ]
+                if not due:
+                    await self._sleep_unless_stopped(stop, min(next_due.values()) - now)
+                    continue
+
+                if self.vas_stream_is_paused(str(device_id)) or not vas_stream_id:
+                    if not vas_stream_id:
+                        logger.warning("No VAS stream ID for session", session_id=str(session_id))
+                    for e in due:
+                        next_due[e["model_id"]] = now + intervals[e["model_id"]]
+                    await self._sleep_unless_stopped(stop, min(intervals[e["model_id"]] for e in due))
+                    continue
+
+                # One frame-tap read for every model due on this tick.
+                try:
+                    fetch_started = clock()
+                    frame = await self._runtime_router.fetch_frame(
+                        stream_id=UUID(vas_stream_id), device_id=device_id
+                    )
+                    fetch_seconds = clock() - fetch_started
+                except asyncio.CancelledError:
+                    raise
+                except Exception as e:
+                    tick_errors += 1
+                    logger.error(
+                        f"Frame fetch failed (attempt {tick_errors}): {e}",
+                        session_id=str(session_id),
+                    )
+                    if tick_errors >= self._MAX_TICK_ERRORS:
+                        logger.error("Max consecutive errors reached, stopping task", session_id=str(session_id))
+                        break
+                    backoff = min(max(1.0, min(intervals.values()) * (2 ** tick_errors)), 15)
+                    for e in due:
+                        next_due[e["model_id"]] = now + backoff
+                    await self._sleep_unless_stopped(stop, backoff)
+                    continue
+                tick_errors = 0
+
+                outcomes = await asyncio.gather(
+                    *(
+                        self._run_model(session_id, device_id, vas_stream_id, e, frame, fetch_seconds)
+                        for e in due
+                    ),
+                    return_exceptions=True,
+                )
+                succeeded = []
+                for e, outcome in zip(due, outcomes):
+                    m = e["model_id"]
+                    if isinstance(outcome, BaseException):
+                        if isinstance(outcome, asyncio.CancelledError):
+                            raise outcome
+                        model_errors[m] += 1
+                        logger.error(
+                            f"Inference error (attempt {model_errors[m]}): {outcome}",
+                            session_id=str(session_id),
+                            model_id=m,
+                        )
+                        # Back off this model only; the others keep running.
+                        next_due[m] = now + min(max(1.0, intervals[m] * (2 ** model_errors[m])), 15)
+                        continue
+                    model_errors[m] = 0
+                    next_due[m] = now + intervals[m]
+                    succeeded.append((m, outcome))
+
+                # Each model's results (detections, violation write) are
+                # independent, so process them concurrently: one model's
+                # violation write must not delay the camera's other models.
+                processed = await asyncio.gather(
+                    *(
+                        self._process_model_result(
+                            session_id, device_id, vas_stream_id, m, m == primary, outcome, confidence_threshold
+                        )
+                        for m, outcome in succeeded
+                    ),
+                    return_exceptions=True,
+                )
+                for (m, _), failure in zip(succeeded, processed):
+                    if isinstance(failure, asyncio.CancelledError):
+                        raise failure
+                    if isinstance(failure, BaseException):
+                        logger.error(
+                            f"Result processing failed: {failure}",
+                            session_id=str(session_id),
+                            model_id=m,
+                        )
+
+                await self._sleep_unless_stopped(stop, min(next_due.values()) - clock())
+        finally:
+            for consumer in consumers:
+                self._budget.unregister(consumer)
+            # Only clean up if this task is still the session's task; a
+            # handover installs the replacement only after this has run.
+            if self._task_stop.get(session_id) is stop:
+                self._task_stop.pop(session_id, None)
+            if self._session_tasks.get(session_id) is me:
+                self._session_tasks.pop(session_id, None)
+                self._task_meta.pop(session_id, None)
+                self._session_devices.pop(session_id, None)
+                self._latest_detections.pop(device_id, None)
+                self._clear_model_detections(device_id)
+
     async def _increment_session_counter(
         self,
         session_id: UUID,
@@ -767,6 +1260,40 @@ class InferenceLoopService:
             frame_width: Width of the inferenced frame (for overlay mapping)
             frame_height: Height of the inferenced frame (for overlay mapping)
         """
+        # Marks "a violation write is in progress" for this session; a
+        # multi-model handover waits for it to drop to 0 before cancelling the
+        # old task (see _handover). No effect on what gets written.
+        self._violation_writes[session_id] = self._violation_writes.get(session_id, 0) + 1
+        try:
+            await self._create_violation_unguarded(
+                session_id=session_id,
+                device_id=device_id,
+                model_id=model_id,
+                model_version=model_version,
+                inference_result=inference_result,
+                vas_stream_id=vas_stream_id,
+                frame_width=frame_width,
+                frame_height=frame_height,
+            )
+        finally:
+            remaining = self._violation_writes.get(session_id, 1) - 1
+            if remaining > 0:
+                self._violation_writes[session_id] = remaining
+            else:
+                self._violation_writes.pop(session_id, None)
+
+    async def _create_violation_unguarded(
+        self,
+        session_id: UUID,
+        device_id: UUID,
+        model_id: str,
+        model_version: str,
+        inference_result: Dict[str, Any],
+        vas_stream_id: Optional[str] = None,
+        frame_width: Optional[int] = None,
+        frame_height: Optional[int] = None,
+    ) -> None:
+        """Body of _create_violation (unchanged); call _create_violation instead."""
         try:
             async with self._db() as db:
                 # Get device name

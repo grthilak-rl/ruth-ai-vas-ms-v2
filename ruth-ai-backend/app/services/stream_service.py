@@ -27,6 +27,7 @@ from typing import Any
 from uuid import UUID
 
 from sqlalchemy import and_, select
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.logging import get_logger
@@ -150,7 +151,25 @@ class StreamService:
             started_at=datetime.now(timezone.utc),
         )
         self._db.add(session)
-        await self._db.flush()
+        try:
+            await self._db.flush()
+        except IntegrityError as exc:
+            # A concurrent start for this device inserted its session between
+            # the check above and this insert; the partial unique index
+            # (uq_stream_sessions_device_active) rejected ours. Same outcome
+            # as the check itself: StreamAlreadyActiveError (-> 409).
+            if "uq_stream_sessions_device_active" not in str(exc.orig):
+                raise
+            await self._db.rollback()
+            winner = await self._get_active_session(device_id)
+            logger.warning(
+                "Concurrent stream start lost the race",
+                device_id=str(device_id),
+                winner_session_id=str(winner.id) if winner else None,
+            )
+            raise StreamAlreadyActiveError(
+                device_id, winner.id if winner else "unknown"
+            ) from None
 
         logger.info(
             "Created stream session",
@@ -616,6 +635,9 @@ class StreamService:
             "state": session.state.value,
             "model_id": session.model_id,
             "model_config": session.model_config,
+            "models": [e.get("model_id") for e in session.models]
+            if session.models
+            else [session.model_id],
         }
 
     # -------------------------------------------------------------------------
@@ -644,6 +666,14 @@ class StreamService:
             raise StreamNotActiveError(device_id)
 
         session.model_config = model_config
+        if session.models:
+            # Multi-model session: model_config mirrors models[0], so keep the
+            # list in step and bump the revision so the running task picks the
+            # change up. Legacy sessions (models IS NULL) are unaffected.
+            entries = [dict(e) for e in session.models]
+            entries[0]["config"] = model_config
+            session.models = entries
+            session.models_revision = (session.models_revision or 0) + 1
 
         logger.info(
             "Updated model_config",

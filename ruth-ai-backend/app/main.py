@@ -23,6 +23,7 @@ from app.api.v1 import (
     analytics,
     bookmark_analyses,
     chat,
+    device_models,
     devices,
     events,
     hardware,
@@ -87,6 +88,7 @@ def create_application() -> FastAPI:
         bookmark_analyses.bookmark_subresource_router, prefix="/api/v1"
     )
     app.include_router(admin.router, prefix="/api/v1")
+    app.include_router(device_models.router, prefix="/api/v1")
 
     # Internal endpoints (no authentication for vertical slice)
     app.include_router(internal_events.router, prefix="/internal")

@@ -31,6 +31,10 @@ class DeviceStreaming(BaseModel):
     state: str | None = Field(None, description="AI session state (live, stopped, etc.)")
     ai_enabled: bool = Field(False, description="Whether AI detection is enabled")
     model_id: str | None = Field(None, description="AI model being used")
+    models: list[str] = Field(
+        default_factory=list,
+        description="Every model running on this camera (model_id is the first)",
+    )
     # Note: Named ai_model_config to avoid conflict with Pydantic's reserved 'model_config'
     # but serialized as 'model_config' in JSON for API compatibility
     ai_model_config: dict | None = Field(
