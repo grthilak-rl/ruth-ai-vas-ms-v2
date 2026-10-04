@@ -18,6 +18,7 @@ import {
   ModelStatusPage,
   ForbiddenPage,
 } from './pages';
+import { AdminLogin, ModelManagementPage, RequireAdminToken } from './pages/admin';
 
 /**
  * Application Router (E11 Role-Protected)
@@ -142,6 +143,21 @@ export const router = createBrowserRouter([
       {
         path: 'forbidden',
         element: <ForbiddenPage />,
+      },
+
+      // Admin area (Model Management). Gated by its own server-issued admin
+      // token (sessionStorage), not by the UI role in AuthContext.
+      {
+        path: 'admin/login',
+        element: <AdminLogin />,
+      },
+      {
+        path: 'admin/models',
+        element: (
+          <RequireAdminToken>
+            <ModelManagementPage />
+          </RequireAdminToken>
+        ),
       },
     ],
   },

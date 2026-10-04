@@ -106,6 +106,16 @@ export function TopNav() {
             Settings
           </NavLink>
         )}
+
+        {/* Model Management - visible to all; the page has its own admin login */}
+        <NavLink
+          to="/admin/models"
+          className={({ isActive }) =>
+            `top-nav__link ${isActive ? 'top-nav__link--active' : ''}`
+          }
+        >
+          Model Management
+        </NavLink>
       </nav>
 
       <div className="top-nav__status">
