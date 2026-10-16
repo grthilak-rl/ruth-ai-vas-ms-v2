@@ -1,5 +1,10 @@
+import { useCallback, useState } from 'react';
 import { CameraMonitoringDashboard } from '../components/cameras/CameraMonitoringDashboard';
 import { useDevicesQuery } from '../state';
+import {
+  getShowDisabledCameras,
+  setShowDisabledCameras,
+} from '../utils/cameraGridPreferences';
 
 /**
  * Cameras Page (F2 Path: /cameras)
@@ -13,6 +18,7 @@ import { useDevicesQuery } from '../state';
  * - Per-camera AI model toggles
  * - Live video feeds with detection overlays
  * - Fullscreen mode opens in new tab
+ * - "Show disabled cameras" toggle, off by default
  *
  * States per F7 §8:
  * - Loading: Skeleton loaders
@@ -20,7 +26,21 @@ import { useDevicesQuery } from '../state';
  * - Error: Friendly message + retry
  */
 export function CamerasPage() {
-  const { data: devicesData, isLoading, isError, refetch } = useDevicesQuery();
+  // Cameras an operator retired in VAS are hidden unless asked for. This
+  // page owns the choice because it owns the query; every other view in the
+  // product gets the filtered list unconditionally. Persisted per browser so
+  // an operator who needs to see a decommissioned unit does not have to
+  // re-tick it on every visit.
+  const [showDisabled, setShowDisabled] = useState(getShowDisabledCameras);
+
+  const { data: devicesData, isLoading, isError, refetch } = useDevicesQuery({
+    includeDisabled: showDisabled,
+  });
+
+  const handleShowDisabledChange = useCallback((show: boolean) => {
+    setShowDisabled(show);
+    setShowDisabledCameras(show);
+  }, []);
 
   return (
     <div className="page-container">
@@ -29,6 +49,8 @@ export function CamerasPage() {
         isLoading={isLoading}
         isError={isError}
         onRetry={() => refetch()}
+        showDisabled={showDisabled}
+        onShowDisabledChange={handleShowDisabledChange}
       />
     </div>
   );

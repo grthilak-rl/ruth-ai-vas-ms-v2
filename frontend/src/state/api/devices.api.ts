@@ -36,10 +36,17 @@ const DEVICE_SYNC_PATH = '/internal/sync/devices';
 /**
  * Fetch devices list
  *
- * Returns all registered cameras/devices.
+ * Returns registered cameras/devices. The server hides cameras an operator
+ * disabled in VAS unless `includeDisabled` is set, so the default list is
+ * the one every monitoring view wants.
  */
-export async function fetchDevices(): Promise<DevicesListResponse> {
-  const response = await apiGet<unknown>(DEVICES_PATH);
+export async function fetchDevices(
+  options: { includeDisabled?: boolean } = {}
+): Promise<DevicesListResponse> {
+  const path = options.includeDisabled
+    ? `${DEVICES_PATH}?include_disabled=true`
+    : DEVICES_PATH;
+  const response = await apiGet<unknown>(path);
   return assertResponse(response, isDevicesListResponse, 'DevicesListResponse');
 }
 
@@ -245,11 +252,12 @@ export function deriveDisplayName(
  *
  * Uses video_live field (VAS video stream status) for Online/Offline display.
  *
- * | is_active | streaming.video_live | Display     |
- * |-----------|----------------------|-------------|
- * | true      | true                 | "Live"      |
- * | true      | false                | "Offline"   |
- * | false     | any                  | "Disabled"  |
+ * | enabled | is_active | streaming.video_live | Display     |
+ * |---------|-----------|----------------------|-------------|
+ * | false   | any       | any                  | "Disabled"  |
+ * | true    | true      | true                 | "Live"      |
+ * | true    | true      | false                | "Offline"   |
+ * | true    | false     | any                  | "Disabled"  |
  */
 export type CameraStatus = 'live' | 'offline' | 'disabled';
 
@@ -257,8 +265,16 @@ export type CameraStatus = 'live' | 'offline' | 'disabled';
  * Derive camera status from device
  *
  * Uses video_live (VAS video stream status), not active (AI inference status).
+ *
+ * `enabled === false` is checked first and separately from `is_active`:
+ * both render as "Disabled", but only the former means an operator retired
+ * the camera on purpose. These cameras appear at all only when the list was
+ * fetched with include_disabled.
  */
 export function getCameraStatus(device: Device): CameraStatus {
+  if (device.enabled === false) {
+    return 'disabled';
+  }
   if (!device.is_active) {
     return 'disabled';
   }

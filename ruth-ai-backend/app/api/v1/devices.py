@@ -18,11 +18,12 @@ from fastapi.responses import Response
 from pydantic import BaseModel, Field
 
 from app.core.cache import (
-    DEVICES_LIST_CACHE_KEY,
+    DEVICES_LIST_CACHE_KEYS,
     DEVICES_LIST_CACHE_TTL_SECONDS,
     cache_delete,
     cache_get_json,
     cache_set_json,
+    devices_list_cache_key,
 )
 from app.core.logging import get_logger
 from app.deps import DeviceServiceDep, StreamServiceDep, VASClientDep
@@ -61,7 +62,11 @@ logger = get_logger(__name__)
     response_model=DeviceListResponse,
     status_code=status.HTTP_200_OK,
     summary="List devices",
-    description="Returns all registered devices/cameras.",
+    description=(
+        "Returns registered devices/cameras. Cameras an operator has "
+        "disabled in VAS are hidden by default; pass include_disabled=true "
+        "to see them."
+    ),
     responses={
         500: {"model": ErrorResponse, "description": "Internal server error"},
     },
@@ -70,15 +75,25 @@ async def list_devices(
     device_service: DeviceServiceDep,
     stream_service: StreamServiceDep,
     active_only: bool = True,
+    include_disabled: bool = False,
     skip: int = 0,
     limit: int = 100,
 ) -> DeviceListResponse:
     """List all devices.
 
+    `include_disabled` defaults to False, so every camera list in the
+    product hides retired cameras without each caller opting in. A disabled
+    camera is one an operator explicitly switched off in VAS (a finished
+    campaign, a physically removed unit) — it is durable policy, unlike
+    `is_active`, which VAS resets on every boot. Hiding it is purely a view
+    concern: the device row stays, and archived violations still resolve
+    their camera.
+
     Args:
         device_service: Injected DeviceService
         stream_service: Injected StreamService
         active_only: Only return active devices
+        include_disabled: Also return cameras disabled in VAS
         skip: Pagination offset
         limit: Maximum results
 
@@ -88,25 +103,35 @@ async def list_devices(
     # Short-TTL Redis cache absorbs the burst of identical concurrent
     # requests this endpoint gets (multiple frontend components mount
     # useDevicesQuery on the same page render). We cache only the
-    # default shape — that's what the frontend always sends — so a
-    # single cache key suffices; mutations that change the response
-    # (start/stop inference, model-config update, device sync) call
-    # cache_delete on that key.
+    # default shapes — that's what the frontend always sends — one key per
+    # include_disabled variant, since they return different lists. Mutations
+    # that change the response (start/stop inference, model-config update,
+    # device sync) drop every variant.
     is_cacheable_shape = active_only is True and skip == 0 and limit == 100
+    cache_key = devices_list_cache_key(include_disabled=include_disabled)
     if is_cacheable_shape:
-        cached = await cache_get_json(DEVICES_LIST_CACHE_KEY)
+        cached = await cache_get_json(cache_key)
         if cached is not None:
-            logger.debug("devices list cache hit")
+            logger.debug("devices list cache hit", include_disabled=include_disabled)
             return DeviceListResponse.model_validate(cached)
 
     devices = await device_service.list_devices(
         active_only=active_only,
+        include_disabled=include_disabled,
         skip=skip,
         limit=limit,
     )
-    total = await device_service.count_devices(active_only=active_only)
+    total = await device_service.count_devices(
+        active_only=active_only,
+        include_disabled=include_disabled,
+    )
 
-    logger.info("Listing devices", total=total, active_only=active_only)
+    logger.info(
+        "Listing devices",
+        total=total,
+        active_only=active_only,
+        include_disabled=include_disabled,
+    )
 
     # Bulk-fetch streaming status: 1 VAS call + 1 DB query for all devices,
     # instead of N VAS calls + N DB queries.
@@ -125,6 +150,7 @@ async def list_devices(
                 manway=d.manway,
                 in_out=d.in_out,
                 is_active=d.is_active,
+                enabled=d.enabled,
                 streaming=DeviceStreaming(
                     # VAS video status
                     video_live=stream_status.get("video_live", False),
@@ -144,7 +170,7 @@ async def list_devices(
     response = DeviceListResponse(items=items, total=total)
     if is_cacheable_shape:
         await cache_set_json(
-            DEVICES_LIST_CACHE_KEY,
+            cache_key,
             response.model_dump(mode="json"),
             DEVICES_LIST_CACHE_TTL_SECONDS,
         )
@@ -295,7 +321,7 @@ async def update_device_naming(
     # The devices list is Redis-cached; without this the grid would keep
     # serving the old display_name for the whole TTL and the save would look
     # like it silently failed.
-    await cache_delete(DEVICES_LIST_CACHE_KEY)
+    await cache_delete(*DEVICES_LIST_CACHE_KEYS)
 
     logger.info(
         "Device naming updated",
@@ -482,7 +508,7 @@ async def start_inference(
 
     # Invalidate devices-list cache so the next /devices request reflects
     # the new session immediately instead of waiting on TTL expiry.
-    await cache_delete(DEVICES_LIST_CACHE_KEY)
+    await cache_delete(*DEVICES_LIST_CACHE_KEYS)
 
     return InferenceStartResponse(
         session_id=session.id,
@@ -563,7 +589,7 @@ async def stop_inference(
         session_id=str(session.id),
     )
 
-    await cache_delete(DEVICES_LIST_CACHE_KEY)
+    await cache_delete(*DEVICES_LIST_CACHE_KEYS)
 
     return InferenceStopResponse(
         session_id=session.id,
@@ -626,7 +652,7 @@ async def update_model_config(
         model_id=session.model_id,
     )
 
-    await cache_delete(DEVICES_LIST_CACHE_KEY)
+    await cache_delete(*DEVICES_LIST_CACHE_KEYS)
 
     return ModelConfigUpdateResponse(
         session_id=session.id,

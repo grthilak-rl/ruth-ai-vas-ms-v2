@@ -233,7 +233,7 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
         )
     else:
         try:
-            from app.core.cache import DEVICES_LIST_CACHE_KEY, cache_delete
+            from app.core.cache import DEVICES_LIST_CACHE_KEYS, cache_delete
             from app.services.device_service import DeviceService
 
             db_gen = get_db_session()
@@ -254,7 +254,7 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
             # Device set may have changed; invalidate the cached
             # /api/v1/devices response so the first frontend poll
             # after boot sees the fresh data.
-            await cache_delete(DEVICES_LIST_CACHE_KEY)
+            await cache_delete(*DEVICES_LIST_CACHE_KEYS)
         except Exception as e:
             logger.warning(
                 "Device auto-sync at startup failed — continuing without it. "

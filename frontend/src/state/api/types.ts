@@ -466,6 +466,19 @@ export interface Device {
   /** Whether camera is registered as active */
   is_active: boolean;
 
+  /**
+   * Durable operator policy from VAS: may this camera run at all?
+   *
+   * Distinct from `is_active`, which VAS resets on every boot and so cannot
+   * express intent. False means an operator retired the camera. Lists hide
+   * these by default — only a request with `include_disabled` returns them,
+   * so in most views every device here has `enabled: true`.
+   *
+   * Optional: a backend predating this field omits it, and absent should
+   * read as enabled rather than hiding every camera.
+   */
+  enabled?: boolean;
+
   /** Streaming and inference status */
   streaming: DeviceStreaming;
 }

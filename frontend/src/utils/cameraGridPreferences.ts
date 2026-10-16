@@ -4,6 +4,7 @@
  * Manages localStorage persistence for:
  * - Grid size preference (1x1 through 5x5)
  * - Selected cameras for the grid
+ * - Whether to show cameras disabled in VAS (off by default)
  *
  * Per F7 specification:
  * - Grid size persists across sessions (localStorage)
@@ -15,7 +16,34 @@ export type GridSize = 1 | 2 | 3 | 4 | 5;
 
 const STORAGE_KEY_GRID_SIZE = 'ruth-ai-camera-grid-size';
 const STORAGE_KEY_SELECTED_CAMERAS = 'ruth-ai-selected-cameras';
+const STORAGE_KEY_SHOW_DISABLED = 'ruth-ai-show-disabled-cameras';
 const DEFAULT_GRID_SIZE: GridSize = 2; // 2x2 grid as default per F7
+
+/**
+ * Whether camera lists should include cameras disabled in VAS.
+ *
+ * Defaults to false: a disabled camera is one an operator deliberately
+ * retired (a finished campaign, a unit physically removed), and leaving
+ * them in the grid makes the live cameras harder to find. Opt-in rather
+ * than opt-out, and remembered per browser so nobody has to re-hide them
+ * every morning.
+ */
+export function getShowDisabledCameras(): boolean {
+  try {
+    return localStorage.getItem(STORAGE_KEY_SHOW_DISABLED) === 'true';
+  } catch (error) {
+    console.warn('[GridPreferences] Failed to read show-disabled:', error);
+    return false;
+  }
+}
+
+export function setShowDisabledCameras(show: boolean): void {
+  try {
+    localStorage.setItem(STORAGE_KEY_SHOW_DISABLED, String(show));
+  } catch (error) {
+    console.warn('[GridPreferences] Failed to save show-disabled:', error);
+  }
+}
 
 /**
  * Get the saved grid size preference

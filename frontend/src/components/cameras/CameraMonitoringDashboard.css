@@ -343,3 +343,26 @@
 .camera-monitoring-dashboard__viewing-pane-button:hover {
   background-color: #1765cc;
 }
+
+/* Retired-camera visibility.
+ *
+ * Styled as a quiet toolbar control, not a prominent filter: the default
+ * (hidden) is right almost always, and the checkbox exists for the
+ * occasional look back at a decommissioned unit.
+ */
+.camera-monitoring-dashboard__show-disabled {
+  display: inline-flex;
+  flex-shrink: 0;
+  gap: 0.375rem;
+  align-items: center;
+  font-size: 0.8125rem;
+  font-weight: 500;
+  color: #5f6368;
+  cursor: pointer;
+  user-select: none;
+}
+
+.camera-monitoring-dashboard__show-disabled input {
+  margin: 0;
+  cursor: pointer;
+}

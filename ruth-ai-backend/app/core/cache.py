@@ -68,4 +68,27 @@ async def cache_delete(*keys: str) -> None:
 
 # Well-known cache keys.
 DEVICES_LIST_CACHE_KEY = "ruth:devices:list"
+
+#: The devices list is cached per response shape, and `include_disabled`
+#: changes the response. One key per variant: a shared key would let an
+#: operator who ticked "show disabled cameras" poison the default list for
+#: everyone else for the TTL.
+DEVICES_LIST_CACHE_KEY_WITH_DISABLED = "ruth:devices:list:with-disabled"
+
+#: Every devices-list key, for invalidation. Mutations that change the
+#: response must drop all variants, not just the one they happened to read.
+DEVICES_LIST_CACHE_KEYS = (
+    DEVICES_LIST_CACHE_KEY,
+    DEVICES_LIST_CACHE_KEY_WITH_DISABLED,
+)
+
 DEVICES_LIST_CACHE_TTL_SECONDS = 5
+
+
+def devices_list_cache_key(*, include_disabled: bool) -> str:
+    """Cache key for the default devices-list shape."""
+    return (
+        DEVICES_LIST_CACHE_KEY_WITH_DISABLED
+        if include_disabled
+        else DEVICES_LIST_CACHE_KEY
+    )

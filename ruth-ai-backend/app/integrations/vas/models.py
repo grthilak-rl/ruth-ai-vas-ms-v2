@@ -115,6 +115,14 @@ class Device(BaseModel):
     description: str | None = None
     rtsp_url: str | None = None
     is_active: bool = False
+    # Durable operator policy from VAS, distinct from is_active (which VAS
+    # resets to False on every boot). VAS has always sent this on
+    # GET /api/v1/devices; Ruth used to drop it, and so had no way to know a
+    # camera had been retired. Mirrored onto Device.enabled by the sync.
+    #
+    # Defaults True so a VAS old enough not to send the field is read as
+    # "everything enabled" rather than hiding every camera.
+    enabled: bool = True
     location: str | None = None
     # Structured naming (VAS phase 1). VAS is the source of truth: it owns
     # these fields and derives display_name. Ruth mirrors them on sync and

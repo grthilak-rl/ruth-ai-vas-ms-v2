@@ -149,6 +149,9 @@ class DeviceService:
                 in_out=vas_device.in_out,
                 display_name=vas_device.display_name,
                 is_active=vas_device.is_active,
+                # Durable operator policy, owned by VAS. Mirrored, never
+                # written by Ruth — see Device.enabled.
+                enabled=vas_device.enabled,
                 last_synced_at=now,
             )
             self._db.add(device)
@@ -166,6 +169,7 @@ class DeviceService:
             device.in_out = vas_device.in_out
             device.display_name = vas_device.display_name
             device.is_active = vas_device.is_active
+            device.enabled = vas_device.enabled
             device.last_synced_at = now
             logger.debug(
                 "Updated device",
@@ -362,13 +366,20 @@ class DeviceService:
         self,
         *,
         active_only: bool = True,
+        include_disabled: bool = False,
         skip: int = 0,
         limit: int = 100,
     ) -> list[Device]:
         """List devices with optional filtering.
 
+        `include_disabled` defaults to False: a camera an operator retired in
+        VAS is excluded unless explicitly asked for. That is the behaviour
+        every camera list in the product wants, so it is the default here
+        rather than something each caller has to remember.
+
         Args:
             active_only: Only return active devices
+            include_disabled: Also include cameras disabled in VAS
             skip: Pagination offset
             limit: Maximum results
 
@@ -379,15 +390,28 @@ class DeviceService:
 
         if active_only:
             stmt = stmt.where(Device.is_active.is_(True))
+        if not include_disabled:
+            stmt = stmt.where(Device.enabled.is_(True))
 
         result = await self._db.execute(stmt)
         return list(result.scalars().all())
 
-    async def count_devices(self, *, active_only: bool = True) -> int:
+    async def count_devices(
+        self,
+        *,
+        active_only: bool = True,
+        include_disabled: bool = False,
+    ) -> int:
         """Count devices.
+
+        Filters must match list_devices exactly: the two together produce
+        `items` and `total` of one response, and a total that counted
+        cameras the list omitted would make the UI claim cameras it never
+        showed.
 
         Args:
             active_only: Only count active devices
+            include_disabled: Also count cameras disabled in VAS
 
         Returns:
             Device count
@@ -397,6 +421,8 @@ class DeviceService:
         stmt = select(func.count()).select_from(Device)
         if active_only:
             stmt = stmt.where(Device.is_active.is_(True))
+        if not include_disabled:
+            stmt = stmt.where(Device.enabled.is_(True))
 
         result = await self._db.execute(stmt)
         return result.scalar_one()
@@ -443,6 +469,7 @@ class DeviceService:
         device.description = vas_device.description
         device.location = vas_device.location
         device.is_active = vas_device.is_active
+        device.enabled = vas_device.enabled
         device.last_synced_at = datetime.now(timezone.utc)
 
         return device

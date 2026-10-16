@@ -65,7 +65,21 @@ class Device(BaseModel):
     )
     manway: str | None = Field(None, description="Grouping key from VAS, e.g. TANK5")
     in_out: str | None = Field(None, description="IN or OUT, if set in VAS")
-    is_active: bool = Field(..., description="Whether device is active")
+    is_active: bool = Field(
+        ...,
+        description=(
+            "Transient liveness, mirrored from VAS (which resets it on every "
+            "boot). Not a policy flag — see `enabled`."
+        ),
+    )
+    enabled: bool = Field(
+        True,
+        description=(
+            "Durable operator policy from VAS: may this camera run at all? "
+            "False means an operator retired it. Lists hide these by default; "
+            "GET /devices?include_disabled=true returns them."
+        ),
+    )
     streaming: DeviceStreaming = Field(..., description="Streaming and inference status")
 
     model_config = {"from_attributes": True}

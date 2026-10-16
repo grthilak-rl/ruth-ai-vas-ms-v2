@@ -234,12 +234,15 @@ export function isDeviceStreaming(value: unknown): value is DeviceStreaming {
 export function isDevice(value: unknown): value is Device {
   if (!isObject(value)) return false;
 
-  const { id, name, is_active, streaming } = value;
+  const { id, name, is_active, enabled, streaming } = value;
 
   return (
     isString(id) &&
     isString(name) &&
     isBoolean(is_active) &&
+    // Optional: older backends omit it, and absent must stay valid rather
+    // than rejecting the whole device list.
+    (enabled === undefined || isBoolean(enabled)) &&
     isDeviceStreaming(streaming)
   );
 }

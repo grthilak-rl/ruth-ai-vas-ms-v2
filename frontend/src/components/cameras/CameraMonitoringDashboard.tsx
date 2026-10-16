@@ -71,6 +71,13 @@ interface CameraMonitoringDashboardProps {
   isLoading: boolean;
   isError: boolean;
   onRetry: () => void;
+  /**
+   * Whether `cameras` was fetched including cameras disabled in VAS, and the
+   * setter for that choice. The page owns the state because it owns the
+   * query; the dashboard only renders the control.
+   */
+  showDisabled: boolean;
+  onShowDisabledChange: (show: boolean) => void;
 }
 
 /** Operator-facing text for a failed picker change. */
@@ -85,6 +92,8 @@ export function CameraMonitoringDashboard({
   isLoading,
   isError,
   onRetry,
+  showDisabled,
+  onShowDisabledChange,
 }: CameraMonitoringDashboardProps) {
   // Grid size state
   const [gridSize, setGridSizeState] = useState<GridSize>(getGridSize());
@@ -376,6 +385,22 @@ export function CameraMonitoringDashboard({
     }
   }, []);
 
+  // Retired-camera visibility. Shared by all three toolbars for the same
+  // reason as the Viewing Pane control below: the operator must find it in
+  // the same place whether the grid is loading, empty or populated —
+  // particularly in the empty state, where "no cameras" may be exactly
+  // because every camera at this site is disabled.
+  const disabledCamerasToggle = (
+    <label className="camera-monitoring-dashboard__show-disabled">
+      <input
+        type="checkbox"
+        checked={showDisabled}
+        onChange={(event) => onShowDisabledChange(event.target.checked)}
+      />
+      <span>Show disabled cameras</span>
+    </label>
+  );
+
   // Viewing Pane entry. Shared by the loading / empty / main toolbars so the
   // control is in the same place regardless of dashboard state.
   //
@@ -435,6 +460,7 @@ export function CameraMonitoringDashboard({
           />
           <ShiftConfigDropdown />
           <ShiftIndicator />
+          {disabledCamerasToggle}
           {viewingPaneControls}
         </div>
         <div className={`camera-monitoring-dashboard__grid camera-monitoring-dashboard__grid--${gridSize}x${gridSize}`}>
@@ -483,6 +509,7 @@ export function CameraMonitoringDashboard({
           />
           <ShiftConfigDropdown />
           <ShiftIndicator />
+          {disabledCamerasToggle}
           {viewingPaneControls}
         </div>
         <div className="camera-monitoring-dashboard__empty-state">
@@ -510,6 +537,7 @@ export function CameraMonitoringDashboard({
         />
         <ShiftConfigDropdown />
         <ShiftIndicator />
+        {disabledCamerasToggle}
         {viewingPaneControls}
       </div>
 

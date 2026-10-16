@@ -38,11 +38,17 @@ import type {
  * Fetches devices/cameras with 60s polling (F6 §11.1).
  *
  * Uses the centralized API client - no direct fetch calls.
+ *
+ * `includeDisabled` defaults to false, so the many callers that just want
+ * "the cameras" keep working unchanged and automatically stop showing
+ * cameras an operator retired in VAS. Only the Cameras page passes true,
+ * and only when its toggle is on.
  */
-export function useDevicesQuery() {
+export function useDevicesQuery(options: { includeDisabled?: boolean } = {}) {
+  const includeDisabled = options.includeDisabled ?? false;
   return useQuery({
-    queryKey: queryKeys.devices.list(),
-    queryFn: fetchDevices,
+    queryKey: queryKeys.devices.list(includeDisabled),
+    queryFn: () => fetchDevices({ includeDisabled }),
     refetchInterval: POLLING_INTERVALS.DEVICES,
     // Reuse cached response within half-interval so quick page hops
     // don't re-fire the (expensive) /api/v1/devices fanout.
@@ -245,7 +251,14 @@ export function useManwaysQuery() {
  *
  * onSettled re-fetches regardless of outcome, replacing the optimistic guess
  * with what VAS actually stored (it normalizes manway to uppercase).
+ *
+ * Both devices-list variants (with and without disabled cameras) are updated
+ * and reverted together. Touching only the default one would leave the
+ * Cameras page showing the old name whenever its "show disabled" toggle was
+ * on — the rename is to the same camera either way.
  */
+const DEVICE_LIST_VARIANTS = [false, true] as const;
+
 export function useUpdateDeviceNamingMutation() {
   const queryClient = useQueryClient();
 
@@ -255,41 +268,51 @@ export function useUpdateDeviceNamingMutation() {
 
     onMutate: async ({ deviceId, update }) => {
       // Stop in-flight refetches from clobbering the optimistic value.
-      await queryClient.cancelQueries({ queryKey: queryKeys.devices.list() });
+      await queryClient.cancelQueries({ queryKey: queryKeys.devices.all });
 
-      const previous = queryClient.getQueryData<DevicesListResponse>(
-        queryKeys.devices.list()
+      const previous = DEVICE_LIST_VARIANTS.map(
+        (includeDisabled) =>
+          [
+            includeDisabled,
+            queryClient.getQueryData<DevicesListResponse>(
+              queryKeys.devices.list(includeDisabled)
+            ),
+          ] as const
       );
 
-      queryClient.setQueryData<DevicesListResponse>(
-        queryKeys.devices.list(),
-        (old) => {
-          if (!old) return old;
-          return {
-            ...old,
-            items: old.items.map((d) => {
-              if (d.id !== deviceId) return d;
-              // Only fields present in the update change; the rest hold.
-              const manway = 'manway' in update ? update.manway ?? null : d.manway ?? null;
-              const inOut = 'in_out' in update ? update.in_out ?? null : d.in_out ?? null;
-              return {
-                ...d,
-                manway,
-                in_out: inOut as Device['in_out'],
-                display_name: deriveDisplayName(d.name, manway, inOut),
-              };
-            }),
-          };
-        }
-      );
+      for (const includeDisabled of DEVICE_LIST_VARIANTS) {
+        queryClient.setQueryData<DevicesListResponse>(
+          queryKeys.devices.list(includeDisabled),
+          (old) => {
+            if (!old) return old;
+            return {
+              ...old,
+              items: old.items.map((d) => {
+                if (d.id !== deviceId) return d;
+                // Only fields present in the update change; the rest hold.
+                const manway = 'manway' in update ? update.manway ?? null : d.manway ?? null;
+                const inOut = 'in_out' in update ? update.in_out ?? null : d.in_out ?? null;
+                return {
+                  ...d,
+                  manway,
+                  in_out: inOut as Device['in_out'],
+                  display_name: deriveDisplayName(d.name, manway, inOut),
+                };
+              }),
+            };
+          }
+        );
+      }
 
       return { previous };
     },
 
     onError: (_err, _vars, context) => {
-      // Revert to the exact pre-edit snapshot.
-      if (context?.previous) {
-        queryClient.setQueryData(queryKeys.devices.list(), context.previous);
+      // Revert to the exact pre-edit snapshots.
+      for (const [includeDisabled, snapshot] of context?.previous ?? []) {
+        if (snapshot) {
+          queryClient.setQueryData(queryKeys.devices.list(includeDisabled), snapshot);
+        }
       }
     },
 

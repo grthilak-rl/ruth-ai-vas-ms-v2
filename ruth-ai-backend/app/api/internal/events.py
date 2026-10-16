@@ -17,7 +17,7 @@ from fastapi import APIRouter, HTTPException, status
 from pydantic import BaseModel
 from sqlalchemy import select
 
-from app.core.cache import DEVICES_LIST_CACHE_KEY, cache_delete
+from app.core.cache import DEVICES_LIST_CACHE_KEYS, cache_delete
 from app.core.logging import get_logger
 from app.deps import DeviceServiceDep, EvidenceServiceDep
 from app.deps.db import DBSession
@@ -75,7 +75,7 @@ async def sync_devices(
     logger.info("Device sync completed", count=len(devices))
 
     # Device set may have changed; invalidate the cached /devices response.
-    await cache_delete(DEVICES_LIST_CACHE_KEY)
+    await cache_delete(*DEVICES_LIST_CACHE_KEYS)
 
     return SyncResponse(
         message=f"Synced {len(devices)} devices from VAS",

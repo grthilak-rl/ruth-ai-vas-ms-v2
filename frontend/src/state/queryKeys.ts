@@ -53,7 +53,13 @@ export const queryKeys = {
   // Devices domain
   devices: {
     all: ['devices'] as const,
-    list: () => ['devices', 'list'] as const,
+    /**
+     * The devices list. Keyed by includeDisabled because the two variants
+     * are different lists — sharing a key would let the Cameras page's
+     * toggle swap the list under every other view on the page.
+     */
+    list: (includeDisabled = false) =>
+      ['devices', 'list', { includeDisabled }] as const,
     detail: (id: string) => ['devices', 'detail', id] as const,
     manways: () => ['devices', 'manways'] as const,
     /**

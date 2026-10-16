@@ -17,7 +17,7 @@ from uuid import UUID
 from fastapi import APIRouter, HTTPException, Response, status
 from pydantic import BaseModel, Field
 
-from app.core.cache import DEVICES_LIST_CACHE_KEY, cache_delete
+from app.core.cache import DEVICES_LIST_CACHE_KEYS, cache_delete
 from app.deps import DBSession, StreamServiceDep
 from app.services.exceptions import (
     DeviceNotFoundError,
@@ -142,7 +142,7 @@ async def add_model(
     except StreamStartError as exc:
         raise HTTPException(502, detail={"error": "stream_start_failed", "message": str(exc)})
     await db.commit()
-    await cache_delete(DEVICES_LIST_CACHE_KEY)
+    await cache_delete(*DEVICES_LIST_CACHE_KEYS)
     response.status_code = status.HTTP_201_CREATED if outcome.changed else status.HTTP_200_OK
     return _out(device_id, outcome.session)
 
@@ -167,7 +167,7 @@ async def update_model(
     except SessionModelError as exc:
         raise _http(exc)
     await db.commit()
-    await cache_delete(DEVICES_LIST_CACHE_KEY)
+    await cache_delete(*DEVICES_LIST_CACHE_KEYS)
     return _out(device_id, session)
 
 
@@ -187,7 +187,7 @@ async def remove_model(
     except SessionModelError as exc:
         raise _http(exc)
     await db.commit()
-    await cache_delete(DEVICES_LIST_CACHE_KEY)
+    await cache_delete(*DEVICES_LIST_CACHE_KEYS)
     return _out(device_id, session)
 
 

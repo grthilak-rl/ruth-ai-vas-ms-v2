@@ -101,10 +101,34 @@ class Device(Base, TimestampMixin):
         nullable=True,
     )
 
-    # Whether the device is active and available for streaming
+    # Whether the device is active and available for streaming.
+    #
+    # Mirrored from VAS on every sync, where it means *transient liveness*
+    # and is reset to False on each VAS boot. It is therefore not a durable
+    # policy flag and must not be used as one — see `enabled` below.
     is_active: Mapped[bool] = mapped_column(
         Boolean,
         default=True,
+        nullable=False,
+        index=True,
+    )
+
+    # Durable operator policy from VAS: may this camera run at all?
+    #
+    # VAS owns it (vas-ms-v2 Device.enabled) and already returns it on
+    # GET /api/devices; Ruth previously dropped it on the floor. A disabled
+    # camera is one an operator has retired — physically removed, or a
+    # finished campaign like the COKEDRUM units. It stays in the table and
+    # the relationship is fully reversible; this is not a soft delete.
+    #
+    # Ruth's camera lists hide disabled cameras by default (the
+    # `include_disabled` query parameter on GET /api/v1/devices). Archived
+    # violations still resolve their device_id, so hiding the camera never
+    # orphans history.
+    enabled: Mapped[bool] = mapped_column(
+        Boolean,
+        default=True,
+        server_default="true",
         nullable=False,
         index=True,
     )
