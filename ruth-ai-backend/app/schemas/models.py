@@ -46,6 +46,28 @@ class ModelStatusInfo(BaseModel):
     )
 
 
+class StoreRuntimeStatus(BaseModel):
+    """Reachability of the model store runtime, as of this request.
+
+    Exists because the store failing used to be indistinguishable from the
+    store not being configured: both produced a bare built-in list. Callers
+    that care can now tell "no store models" from "we could not ask".
+    """
+
+    reachable: bool = Field(..., description="Whether /capabilities answered")
+    error: str | None = Field(None, description="Failure reason when unreachable")
+    checked_at: datetime = Field(..., description="When this was last checked")
+    last_success_at: datetime | None = Field(
+        None,
+        description=(
+            "Last successful check by this backend process. Resets on "
+            "restart; present it as 'since backend start'."
+        ),
+    )
+    models_total: int = Field(0, description="Models the runtime reports")
+    models_ready: int = Field(0, description="Models in state=ready")
+
+
 class ModelsStatusResponse(BaseModel):
     """Response schema for GET /api/v1/models/status.
 
@@ -53,3 +75,9 @@ class ModelsStatusResponse(BaseModel):
     """
 
     models: list[ModelStatusInfo] = Field(..., description="List of model statuses")
+    #: Additive, and left unset (so omitted — the endpoint serializes with
+    #: exclude_unset) when MODEL_STORE_RUNTIME_URL is not configured. The
+    #: built-in `models` list is unaffected by the store in every case.
+    store_runtime: StoreRuntimeStatus | None = Field(
+        None, description="Model store runtime reachability (store deployments only)"
+    )

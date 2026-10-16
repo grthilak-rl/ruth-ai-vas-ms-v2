@@ -31,12 +31,19 @@ from app.schemas.model_store import (
     StoreModelCreate,
     StoreModelDetail,
     StoreModelList,
+    StoreModelRuntime,
     StoreModelSummary,
     StoreModelUpdate,
     StoreUpload,
     StoreUploadList,
     UploadComplete,
     UploadInit,
+)
+from app.services.model_store.enabled import enabled_store_models
+from app.services.model_store.runtime_probe import (
+    READY_STATE,
+    StoreRuntimeProbe,
+    probe_store_runtime,
 )
 from app.services.model_store import (
     ModelStore,
@@ -100,7 +107,62 @@ async def _upload_out(store: ModelStore, upload: ModelStoreUpload) -> StoreUploa
     )
 
 
-def _summary_out(model: ModelStoreModel, file_count: int, total_bytes: int) -> StoreModelSummary:
+def _runtime_out(
+    model: ModelStoreModel,
+    probe: StoreRuntimeProbe | None,
+    installed: dict[str, object],
+) -> StoreModelRuntime | None:
+    """Whether the store runtime is serving this model.
+
+    Answers the question the upload status cannot: a model can be fully
+    uploaded and still not be running. ``None`` when no store runtime is
+    configured, so the UI shows "—" instead of inventing a state.
+    """
+    if probe is None or not probe.configured:
+        return None
+
+    if not probe.reachable:
+        # Applies to every row: we genuinely do not know what is loaded.
+        return StoreModelRuntime(
+            state="unreachable",
+            detail=probe.error or "Store runtime did not answer",
+        )
+
+    if model.model_id not in installed:
+        # Uploaded, but never installed into enabled/ — the runtime only
+        # loads what is there, so it was never going to run.
+        return StoreModelRuntime(
+            state="not_installed", detail="Not installed in enabled/"
+        )
+
+    entry = probe.model(model.model_id)
+    if entry is None:
+        return StoreModelRuntime(
+            state="not_loaded", detail="Installed but not loaded by the runtime"
+        )
+
+    state = str(entry.get("state", "unknown"))
+    health = str(entry.get("health", "unknown"))
+    version = entry.get("version")
+    if state == READY_STATE:
+        return StoreModelRuntime(
+            state="running",
+            version=str(version) if version else None,
+            detail=f"{state}, {health}",
+        )
+    return StoreModelRuntime(
+        state="not_loaded",
+        version=str(version) if version else None,
+        detail=f"{state}, {health}",
+    )
+
+
+def _summary_out(
+    model: ModelStoreModel,
+    file_count: int,
+    total_bytes: int,
+    runtime: StoreModelRuntime | None = None,
+) -> StoreModelSummary:
     return StoreModelSummary(
         id=model.id,
         model_id=model.model_id,
@@ -112,13 +174,20 @@ def _summary_out(model: ModelStoreModel, file_count: int, total_bytes: int) -> S
         status="uploaded" if file_count else "no_files",
         created_at=model.created_at,
         created_by=model.created_by,
+        runtime=runtime,
     )
 
 
 async def _detail_out(db, store: ModelStore, model: ModelStoreModel) -> StoreModelDetail:
     files = await service.list_files(db, model.id)
     uploads = await service.list_active_uploads(db, model.id)
-    summary = _summary_out(model, len(files), sum(f.size_bytes for f in files))
+    probe = await probe_store_runtime()
+    summary = _summary_out(
+        model,
+        len(files),
+        sum(f.size_bytes for f in files),
+        runtime=_runtime_out(model, probe, enabled_store_models()),
+    )
     return StoreModelDetail(
         **summary.model_dump(),
         files=[_file_out(f) for f in files],
@@ -134,8 +203,19 @@ async def _detail_out(db, store: ModelStore, model: ModelStoreModel) -> StoreMod
 @router.get("/models", response_model=StoreModelList, summary="List uploaded models")
 async def list_models(db: DBSession, _store: Store) -> StoreModelList:
     summaries = await service.list_models(db)
+    # Probed and read once for the whole page, not per row.
+    probe = await probe_store_runtime()
+    installed = enabled_store_models()
     return StoreModelList(
-        models=[_summary_out(s.model, s.file_count, s.total_bytes) for s in summaries]
+        models=[
+            _summary_out(
+                s.model,
+                s.file_count,
+                s.total_bytes,
+                runtime=_runtime_out(s.model, probe, installed),
+            )
+            for s in summaries
+        ]
     )
 
 

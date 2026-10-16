@@ -261,6 +261,30 @@
   color: #137333;
 }
 
+/* Runtime column: whether the store runtime is serving the model. Red is
+   reserved for "unreachable" — we genuinely don't know what is loaded,
+   which is the state that previously went unnoticed for twelve days. */
+
+.admin-badge--runtime-running {
+  background-color: #e6f4ea;
+  color: #137333;
+}
+
+.admin-badge--runtime-not_loaded {
+  background-color: #fef7e0;
+  color: #b06000;
+}
+
+.admin-badge--runtime-not_installed {
+  background-color: #f0f0f0;
+  color: #555;
+}
+
+.admin-badge--runtime-unreachable {
+  background-color: #fce8e6;
+  color: #c5221f;
+}
+
 /* Uploader */
 
 .admin-uploader {

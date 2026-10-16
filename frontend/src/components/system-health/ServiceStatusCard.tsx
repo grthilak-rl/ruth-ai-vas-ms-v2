@@ -1,11 +1,12 @@
 import { useState, useCallback } from 'react';
 import type {
-  ComponentHealth,
+  HealthComponents,
   DatabaseHealthDetails,
   RedisHealthDetails,
   AIRuntimeHealthDetails,
   VASHealthDetails,
   NLPChatHealthDetails,
+  ModelStoreRuntimeHealthDetails,
 } from '../../state';
 import './ServiceStatusCard.css';
 
@@ -31,16 +32,12 @@ interface ServiceStatusCardProps {
   lastUpdated?: string;
   /** Whether the card is expandable */
   expandable?: boolean;
-  /** Detailed component health data for expanded view */
-  components?: {
-    database?: ComponentHealth;
-    redis?: ComponentHealth;
-    ai_runtime?: ComponentHealth;
-    vas?: ComponentHealth;
-    nlp_chat?: ComponentHealth;
-  };
+  /** Detailed component health data for expanded view.
+   *  Uses HealthComponents directly so new components (e.g. the model
+   *  store runtime) don't need this shape restated. */
+  components?: HealthComponents;
   /** Service type to determine which details to show */
-  serviceType?: 'backend' | 'ai_runtime' | 'video' | 'nlp_chat';
+  serviceType?: 'backend' | 'ai_runtime' | 'video' | 'nlp_chat' | 'model_store_runtime';
 }
 
 /**
@@ -340,6 +337,60 @@ function getDetailItems(
             label: 'Error',
             value: nlpChat.error,
           });
+        }
+      }
+      break;
+    }
+
+    case 'model_store_runtime': {
+      const store = components.model_store_runtime;
+      if (store) {
+        const storeDetails = store.details as
+          | ModelStoreRuntimeHealthDetails
+          | undefined;
+
+        // Reachability first: it is the thing that silently broke before,
+        // and it decides whether the rest of these numbers mean anything.
+        items.push({
+          label: 'Reachable',
+          value: storeDetails?.reachable === false ? 'No' : 'Yes',
+        });
+        if (store.latency_ms != null) {
+          items.push({ label: 'Latency', value: store.latency_ms, unit: 'ms' });
+        }
+        if (storeDetails?.models_total != null) {
+          items.push({
+            label: 'Models Ready',
+            value: `${storeDetails.models_ready ?? 0} / ${storeDetails.models_total}`,
+          });
+        }
+        if (storeDetails?.models_loaded?.length) {
+          items.push({
+            label: 'Loaded',
+            value: storeDetails.models_loaded.join(', '),
+          });
+        }
+        if (storeDetails?.models_not_ready?.length) {
+          items.push({
+            label: 'Not Loaded',
+            value: storeDetails.models_not_ready.join(', '),
+          });
+        }
+        if (storeDetails?.last_success_at) {
+          items.push({
+            // Process-local: labelled so nobody reads it as durable history.
+            label: 'Last Reachable (since backend start)',
+            value: new Date(storeDetails.last_success_at).toLocaleString(),
+          });
+        }
+        if (storeDetails?.runtime_id) {
+          items.push({ label: 'Runtime ID', value: storeDetails.runtime_id });
+        }
+        if (storeDetails?.url) {
+          items.push({ label: 'URL', value: storeDetails.url });
+        }
+        if (store.error) {
+          items.push({ label: 'Error', value: store.error });
         }
       }
       break;

@@ -42,6 +42,7 @@ export type {
   AIRuntimeHealthDetails,
   VASHealthDetails,
   NLPChatHealthDetails,
+  ModelStoreRuntimeHealthDetails,
 
   // Violations
   ViolationType,

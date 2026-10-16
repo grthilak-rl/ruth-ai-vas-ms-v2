@@ -2,6 +2,10 @@ import { useMemo } from 'react';
 import type { HealthResponse, ModelStatusInfo } from '../../state';
 import { formatUptime } from '../../state';
 import { ServiceStatusCard, type ServiceHealthStatus } from './ServiceStatusCard';
+import {
+  deriveStoreRuntimeStatus,
+  getModelStoreDescription,
+} from './storeRuntimeStatus';
 import { ModelStatusCard } from './ModelStatusCard';
 import { AuditEventList, type AuditEvent } from './AuditEventList';
 import './SystemHealthView.css';
@@ -72,6 +76,10 @@ export function SystemHealthView({
       aiRuntime: deriveServiceStatus(components.ai_runtime?.status),
       video: deriveServiceStatus(components.vas?.status),
       nlpChat: deriveServiceStatus(components.nlp_chat?.status),
+      // Unreachable is reported by the backend as `degraded` so it cannot
+      // flip overall health to unhealthy — but on the card it is a hard
+      // failure, not a wobble, so it renders red. See storeRuntimeStatus.
+      modelStore: deriveStoreRuntimeStatus(components.model_store_runtime),
     };
   }, [health.components]);
 
@@ -172,6 +180,24 @@ export function SystemHealthView({
             serviceType="nlp_chat"
             components={health.components}
           />
+          {/* Only for deployments that run a store runtime. Absent (older
+              backend) or "disabled" (MODEL_STORE_RUNTIME_URL unset) means
+              there is nothing to report, so the card is not rendered. */}
+          {health.components?.model_store_runtime &&
+            health.components.model_store_runtime.status !== 'disabled' && (
+              <ServiceStatusCard
+                serviceName="Model store runtime"
+                status={serviceStatuses.modelStore}
+                description={getModelStoreDescription(
+                  serviceStatuses.modelStore,
+                  health.components.model_store_runtime
+                )}
+                lastUpdated={health.timestamp}
+                expandable={true}
+                serviceType="model_store_runtime"
+                components={health.components}
+              />
+            )}
         </div>
       </section>
 

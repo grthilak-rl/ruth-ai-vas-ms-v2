@@ -242,6 +242,25 @@ export interface StoreModelSummary {
   status: 'no_files' | 'uploaded';
   created_at: string;
   created_by: string | null;
+  /**
+   * Whether the store runtime is actually serving this model. Distinct from
+   * `status`, which only says whether the weight files were uploaded — a
+   * model can be fully uploaded and still not be running. Null when no
+   * store runtime is configured.
+   */
+  runtime?: StoreModelRuntime | null;
+}
+
+export type StoreModelRuntimeState =
+  | 'running'
+  | 'not_loaded'
+  | 'not_installed'
+  | 'unreachable';
+
+export interface StoreModelRuntime {
+  state: StoreModelRuntimeState;
+  version?: string | null;
+  detail?: string | null;
 }
 
 export interface StoreModelDetail extends StoreModelSummary {

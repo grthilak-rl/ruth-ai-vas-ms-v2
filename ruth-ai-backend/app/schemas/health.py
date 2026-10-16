@@ -84,6 +84,41 @@ class VASDetails(ComponentDetails):
     service: str | None = Field(None, description="VAS service name")
 
 
+class ModelStoreRuntimeDetails(ComponentDetails):
+    """Model store runtime health check details.
+
+    ``reachable`` is what separates the two ways this component can be
+    ``degraded``: unreachable (render red — the store is down) versus
+    reachable with some models not loaded (render amber). The component
+    status is ``degraded`` for both so an unreachable store does not flip
+    the whole system to ``unhealthy``; the UI uses this flag to tell them
+    apart.
+    """
+
+    configured: bool | None = Field(
+        None, description="Whether MODEL_STORE_RUNTIME_URL is set"
+    )
+    reachable: bool | None = Field(
+        None, description="Whether /capabilities answered on this check"
+    )
+    runtime_id: str | None = Field(None, description="Store runtime identifier")
+    url: str | None = Field(None, description="Store runtime base URL")
+    models_ready: int | None = Field(None, description="Models in state=ready")
+    models_total: int | None = Field(None, description="Models the runtime reports")
+    models_loaded: list[str] | None = Field(None, description="Ready model IDs")
+    models_not_ready: list[str] | None = Field(
+        None, description="Model IDs the runtime holds but cannot serve"
+    )
+    last_success_at: str | None = Field(
+        None,
+        description=(
+            "Last successful /capabilities call, ISO-8601. Process-local: "
+            "it resets when the backend restarts, so present it as "
+            "'since backend start'."
+        ),
+    )
+
+
 class NLPChatDetails(ComponentDetails):
     """NLP Chat Service health check details."""
 

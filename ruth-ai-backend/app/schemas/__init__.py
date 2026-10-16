@@ -8,6 +8,7 @@ from app.schemas.health import (
     HealthResponse,
     HealthStatus,
     LivenessResponse,
+    ModelStoreRuntimeDetails,
     ReadinessResponse,
     RedisDetails,
     VASDetails,
@@ -31,7 +32,11 @@ from app.schemas.analytics import (
     ViolationTrendBucket,
     ViolationTrendsResponse,
 )
-from app.schemas.models import ModelStatusInfo, ModelsStatusResponse
+from app.schemas.models import (
+    ModelStatusInfo,
+    ModelsStatusResponse,
+    StoreRuntimeStatus,
+)
 from app.schemas.device import (
     Device,
     DeviceDetailResponse,
@@ -133,6 +138,7 @@ __all__ = [
     # Models schemas
     "ModelStatusInfo",
     "ModelsStatusResponse",
+    "StoreRuntimeStatus",
     # Error schemas
     "ErrorResponse",
     "ValidationErrorDetail",
@@ -145,6 +151,7 @@ __all__ = [
     "HealthResponse",
     "HealthStatus",
     "LivenessResponse",
+    "ModelStoreRuntimeDetails",
     "ReadinessResponse",
     "RedisDetails",
     "VASDetails",

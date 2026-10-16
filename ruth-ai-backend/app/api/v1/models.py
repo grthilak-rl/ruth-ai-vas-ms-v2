@@ -15,7 +15,12 @@ from sqlalchemy import func, or_, select
 from app.core.logging import get_logger
 from app.deps import DBSession
 from app.models import StreamSession, StreamState
-from app.schemas import ErrorResponse, ModelStatusInfo, ModelsStatusResponse
+from app.schemas import (
+    ErrorResponse,
+    ModelStatusInfo,
+    ModelsStatusResponse,
+    StoreRuntimeStatus,
+)
 from app.integrations.unified_runtime.client import (
     UnifiedRuntimeClient,
     UnifiedRuntimeConnectionError,
@@ -23,6 +28,10 @@ from app.integrations.unified_runtime.client import (
 from app.integrations.unified_runtime.config import get_unified_runtime_config
 from app.services.model_store.enabled import enabled_store_models
 from app.services.model_store.ids import RESERVED_MODEL_IDS
+from app.services.model_store.runtime_probe import (
+    StoreRuntimeProbe,
+    probe_store_runtime,
+)
 
 router = APIRouter(tags=["Models"])
 logger = get_logger(__name__)
@@ -163,49 +172,63 @@ async def get_models_status(
     # Uploaded models served by the model store runtime, appended after the
     # built-in ones. Off (and the response exactly as above) unless
     # MODEL_STORE_RUNTIME_URL is set.
+    store_runtime: StoreRuntimeStatus | None = None
     if config.model_store_runtime_url:
+        probe = await probe_store_runtime()
         models.extend(
             await _store_model_statuses(
                 db,
-                config.model_store_runtime_url,
+                probe,
                 skip=set(production_models),
                 test_model_prefixes=test_model_prefixes,
             )
+        )
+        # Reachability is reported even when it costs us no entries, so
+        # "no store models" is distinguishable from "we could not ask".
+        store_runtime = StoreRuntimeStatus(
+            reachable=probe.reachable,
+            error=probe.error,
+            checked_at=probe.checked_at,
+            last_success_at=probe.last_success_at,
+            models_total=probe.total,
+            models_ready=probe.ready,
         )
 
     logger.info(
         "Retrieved model statuses",
         count=len(models),
         unified_runtime_count=len(runtime_models),
+        store_reachable=store_runtime.reachable if store_runtime else None,
     )
 
-    return ModelsStatusResponse(models=models)
-
-
-#: Short: a hung store runtime must not hold up the model list.
-STORE_RUNTIME_STATUS_TIMEOUT_S = 5.0
+    # store_runtime stays unset (and so is omitted, via
+    # response_model_exclude_unset) when no store runtime is configured.
+    if store_runtime is None:
+        return ModelsStatusResponse(models=models)
+    return ModelsStatusResponse(models=models, store_runtime=store_runtime)
 
 
 async def _store_model_statuses(
     db,
-    store_runtime_url: str,
+    probe: StoreRuntimeProbe,
     skip: set[str],
     test_model_prefixes: list[str],
 ) -> list[ModelStatusInfo]:
     """Status entries for store models: installed (enabled/) and reported by
-    the store runtime. Any failure gives no entries, never an error."""
-    try:
-        async with UnifiedRuntimeClient(
-            runtime_url=store_runtime_url, timeout=STORE_RUNTIME_STATUS_TIMEOUT_S
-        ) as client:
-            capabilities = await client.get_capabilities()
-    except Exception as e:  # noqa: BLE001 - the built-in list must still be returned
-        logger.warning("Model store runtime unavailable for status", error=str(e))
+    the store runtime.
+
+    An unreachable runtime yields no entries — the built-in list must be
+    returned regardless — but is no longer silent: the caller reports it on
+    ``ModelsStatusResponse.store_runtime``, and the probe logs the
+    transition once. The warning that used to fire here on every request is
+    gone with it.
+    """
+    if not probe.reachable:
         return []
 
     installed = enabled_store_models()
     entries: list[ModelStatusInfo] = []
-    for model_info in capabilities.get("models", []):
+    for model_info in probe.models:
         model_id = model_info.get("model_id")
         if (
             not model_id

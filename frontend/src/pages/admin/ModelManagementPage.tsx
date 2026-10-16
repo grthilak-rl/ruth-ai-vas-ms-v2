@@ -9,8 +9,40 @@ import {
   fetchAdminMe,
   listStoreModels,
 } from './adminApi';
+import type { StoreModelRuntime, StoreModelRuntimeState } from './adminApi';
 import { formatBytes, formatDateTime } from './format';
 import './AdminPages.css';
+
+/**
+ * The Runtime column: is the store runtime actually serving this model?
+ *
+ * Deliberately separate from the upload Status column. A model can be fully
+ * uploaded and still not be running — not installed into enabled/, or
+ * installed but not loaded — and before this column there was no way to see
+ * that from here.
+ */
+const RUNTIME_LABELS: Record<StoreModelRuntimeState, string> = {
+  running: 'Running',
+  not_loaded: 'Not loaded',
+  not_installed: 'Not installed',
+  unreachable: 'Runtime unreachable',
+};
+
+export function RuntimeBadge({ runtime }: { runtime?: StoreModelRuntime | null }) {
+  // No store runtime configured: say nothing rather than imply it is broken.
+  if (!runtime) {
+    return <span className="admin-muted">—</span>;
+  }
+  return (
+    <span
+      className={`admin-badge admin-badge--runtime-${runtime.state}`}
+      title={runtime.detail ?? undefined}
+    >
+      {RUNTIME_LABELS[runtime.state]}
+      {runtime.state === 'running' && runtime.version ? ` (${runtime.version})` : ''}
+    </span>
+  );
+}
 
 /**
  * Model Management — model list
@@ -112,6 +144,7 @@ export function ModelManagementPage() {
                 <th>Files</th>
                 <th>Size</th>
                 <th>Status</th>
+                <th>Runtime</th>
                 <th>Created</th>
               </tr>
             </thead>
@@ -128,6 +161,9 @@ export function ModelManagementPage() {
                     <span className={`admin-badge admin-badge--${model.status}`}>
                       {model.status === 'uploaded' ? 'Uploaded' : 'No files'}
                     </span>
+                  </td>
+                  <td>
+                    <RuntimeBadge runtime={model.runtime} />
                   </td>
                   <td>{formatDateTime(model.created_at)}</td>
                 </tr>

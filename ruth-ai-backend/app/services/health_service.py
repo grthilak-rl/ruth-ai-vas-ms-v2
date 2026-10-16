@@ -30,6 +30,7 @@ from app.schemas.health import (
     DatabaseDetails,
     HealthResponse,
     HealthStatus,
+    ModelStoreRuntimeDetails,
     NLPChatDetails,
     RedisDetails,
     VASDetails,
@@ -301,6 +302,88 @@ class HealthService:
                 error=f"AI Runtime error: {type(e).__name__}",
             )
 
+    async def check_model_store_runtime(self) -> ComponentHealth:
+        """Check the model store runtime (uploaded models).
+
+        Separate from ``check_ai_runtime`` on purpose: the store runtime is
+        never "the AI runtime", and this check does not touch that one's
+        result. It exists because the store runtime once sat unreachable for
+        twelve days while every surface degraded silently — see
+        ``app.services.model_store.runtime_probe``.
+
+        Status mapping:
+
+        * not configured -> ``disabled`` (excluded from overall health)
+        * reachable, all models ready -> ``healthy``
+        * reachable, some models not ready -> ``degraded``
+        * unreachable -> ``degraded``, with ``details.reachable = False``
+
+        Unreachable is deliberately ``degraded`` rather than ``unhealthy``:
+        uploaded models being unavailable is a real outage for the people
+        using them, but the core system is fine, and flipping overall health
+        to ``unhealthy`` would trip alerting tuned for database and runtime
+        failures. The UI reads ``details.reachable`` to render this case red
+        ("Unreachable") while a partially-ready store stays amber.
+
+        Returns:
+            ComponentHealth for the ``model_store_runtime`` component
+        """
+        from app.services.model_store.runtime_probe import probe_store_runtime
+
+        start_time = time.perf_counter()
+        probe = await probe_store_runtime()
+        latency_ms = int((time.perf_counter() - start_time) * 1000)
+
+        if not probe.configured:
+            # Feature off in this deployment. Not a fault, and excluded from
+            # the overall status, exactly like a disabled NLP chat service.
+            return ComponentHealth(
+                status="disabled",
+                details=ModelStoreRuntimeDetails(configured=False).model_dump(
+                    exclude_none=True
+                ),
+            )
+
+        last_success = (
+            probe.last_success_at.isoformat() if probe.last_success_at else None
+        )
+        ready_ids = [
+            mid for mid in probe.model_ids if mid not in probe.not_ready_ids
+        ]
+        details = ModelStoreRuntimeDetails(
+            configured=True,
+            reachable=probe.reachable,
+            runtime_id=probe.runtime_id or None,
+            url=probe.runtime_url or None,
+            models_ready=probe.ready,
+            models_total=probe.total,
+            models_loaded=ready_ids or None,
+            models_not_ready=list(probe.not_ready_ids) or None,
+            last_success_at=last_success,
+        ).model_dump(exclude_none=True)
+
+        if not probe.reachable:
+            return ComponentHealth(
+                status="degraded",
+                latency_ms=latency_ms,
+                error=probe.error or "Model store runtime unreachable",
+                details=details,
+            )
+
+        if probe.partially_ready:
+            return ComponentHealth(
+                status="degraded",
+                latency_ms=latency_ms,
+                error=f"{probe.ready}/{probe.total} models ready",
+                details=details,
+            )
+
+        return ComponentHealth(
+            status="healthy",
+            latency_ms=latency_ms,
+            details=details,
+        )
+
     async def check_vas(
         self,
         timeout_seconds: float = 5.0,
@@ -533,13 +616,23 @@ class HealthService:
             self.check_ai_runtime(timeout_seconds=ai_runtime_timeout),
             self.check_vas(timeout_seconds=vas_timeout),
             self.check_nlp_chat(timeout_seconds=nlp_chat_timeout),
+            # Own timeout lives in the probe (PROBE_TIMEOUT_SECONDS); it
+            # never raises, so it cannot delay or break the others.
+            self.check_model_store_runtime(),
             return_exceptions=True,
         )
 
         components: dict[str, ComponentHealth] = {}
 
         # Process results (handle any unexpected exceptions)
-        component_names = ["database", "redis", "ai_runtime", "vas", "nlp_chat"]
+        component_names = [
+            "database",
+            "redis",
+            "ai_runtime",
+            "vas",
+            "nlp_chat",
+            "model_store_runtime",
+        ]
         for name, result in zip(component_names, results):
             if isinstance(result, Exception):
                 logger.error(

@@ -131,12 +131,35 @@ export interface ComponentHealth {
  *
  * Note: All fields are OPTIONAL - backend may not report all components.
  */
+/**
+ * `components.model_store_runtime.details`.
+ *
+ * `reachable` is what separates the two degraded cases: the backend reports
+ * `degraded` for both "unreachable" and "reachable but some models not
+ * ready" so an unreachable store cannot flip overall health to unhealthy.
+ * The card uses this flag to show unreachable in red.
+ */
+export interface ModelStoreRuntimeHealthDetails {
+  configured?: boolean;
+  reachable?: boolean;
+  runtime_id?: string;
+  url?: string;
+  models_ready?: number;
+  models_total?: number;
+  models_loaded?: string[];
+  models_not_ready?: string[];
+  /** ISO timestamp. Process-local — resets when the backend restarts. */
+  last_success_at?: string;
+}
+
 export interface HealthComponents {
   database?: ComponentHealth;
   redis?: ComponentHealth;
   ai_runtime?: ComponentHealth;
   vas?: ComponentHealth;
   nlp_chat?: ComponentHealth;
+  /** Absent on backends without the model store runtime check. */
+  model_store_runtime?: ComponentHealth;
 }
 
 /**

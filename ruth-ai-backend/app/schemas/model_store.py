@@ -24,6 +24,30 @@ class StoreModelUpdate(BaseModel):
     )
 
 
+class StoreModelRuntime(BaseModel):
+    """Whether the store runtime is actually serving this model.
+
+    Distinct from ``StoreModelSummary.status``, which is about the *upload*
+    (are the weight files here?). A model can be fully uploaded and still
+    not be running — installed but not loaded, or not installed into
+    ``enabled/`` at all — and until this field existed there was no way to
+    see that from the admin page.
+    """
+
+    state: Literal["running", "not_loaded", "not_installed", "unreachable"] = Field(
+        ...,
+        description=(
+            "running: loaded and ready. not_loaded: installed in enabled/ "
+            "but the runtime isn't serving it. not_installed: uploaded but "
+            "not in enabled/. unreachable: the store runtime did not answer."
+        ),
+    )
+    version: str | None = Field(None, description="Version the runtime reports")
+    detail: str | None = Field(
+        None, description="Runtime state/health, or the reason it isn't running"
+    )
+
+
 class StoreModelSummary(BaseModel):
     id: UUID
     model_id: str
@@ -36,6 +60,9 @@ class StoreModelSummary(BaseModel):
     status: Literal["no_files", "uploaded"]
     created_at: datetime
     created_by: str | None
+    #: None when no store runtime is configured — the column then shows "—"
+    #: rather than claiming the model isn't running.
+    runtime: StoreModelRuntime | None = None
 
 
 class StoreFile(BaseModel):
