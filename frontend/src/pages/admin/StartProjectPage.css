@@ -1,0 +1,190 @@
+/* Start New Project.
+ *
+ * Extends AdminPages.css rather than restyling: the page must read as part
+ * of the admin area, not as a separate tool. Literal colours here match that
+ * file, which uses no custom properties.
+ */
+
+.start-project__section-title {
+  margin: 0 0 0.75rem 0;
+  font-size: 1rem;
+  font-weight: 600;
+  color: #1a1a1a;
+}
+
+/* Explainer — the reassurance block. Blue, not red: this action is safe. */
+.start-project__explainer {
+  border-left: 3px solid #1a73e8;
+}
+
+.start-project__explainer ul {
+  margin: 0;
+  padding-left: 1.25rem;
+  font-size: 0.875rem;
+  line-height: 1.6;
+  color: #333;
+}
+
+.start-project__explainer li + li {
+  margin-top: 0.25rem;
+}
+
+.start-project__explainer code,
+.start-project__blockers code {
+  padding: 0.0625rem 0.25rem;
+  font-size: 0.8125rem;
+  background-color: #f1f3f4;
+  border-radius: 3px;
+}
+
+/* Counts */
+.start-project__counts {
+  margin: 0.75rem 0;
+}
+
+.start-project__num {
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}
+
+.start-project__counts tfoot th,
+.start-project__counts tfoot td {
+  padding: 0.625rem 0.75rem;
+  font-weight: 600;
+  color: #1a1a1a;
+  border-top: 2px solid #e0e0e0;
+  text-align: left;
+}
+
+.start-project__counts tfoot td {
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}
+
+/* Blockers */
+.start-project__blockers {
+  margin-top: 1rem;
+  padding: 0.75rem 0.875rem;
+  font-size: 0.875rem;
+  line-height: 1.5;
+  color: #8a3f00;
+  background-color: #fff4e5;
+  border: 1px solid #ffd9a8;
+  border-radius: 6px;
+}
+
+.start-project__blockers p {
+  margin: 0;
+}
+
+.start-project__blockers p + p,
+.start-project__blockers div + p,
+.start-project__blockers p + div {
+  margin-top: 0.625rem;
+}
+
+.start-project__cameras {
+  margin: 0.375rem 0 0 0;
+  padding-left: 1.25rem;
+}
+
+/* Form */
+.start-project__form {
+  display: flex;
+  flex-direction: column;
+  gap: 1rem;
+  align-items: stretch;
+}
+
+.start-project__match {
+  margin-left: 0.5rem;
+  font-weight: 600;
+  color: #1e7e34;
+}
+
+.start-project__mismatch {
+  margin-left: 0.5rem;
+  font-weight: 500;
+  color: #8a3f00;
+}
+
+/* The opt-in that turns a refusal into a permitted action: deliberately
+ * heavier than a plain checkbox, because ticking it stops live safety
+ * monitoring. */
+.start-project__stop {
+  display: flex;
+  gap: 0.625rem;
+  align-items: flex-start;
+  padding: 0.75rem 0.875rem;
+  font-size: 0.875rem;
+  line-height: 1.5;
+  color: #333;
+  background-color: #fdecea;
+  border: 1px solid #f5c6c2;
+  border-radius: 6px;
+  cursor: pointer;
+}
+
+.start-project__stop input {
+  flex: 0 0 auto;
+  margin-top: 0.1875rem;
+}
+
+.start-project__form .admin-button {
+  align-self: flex-start;
+}
+
+/* Result */
+.start-project__result {
+  border-left: 3px solid #1e7e34;
+}
+
+.start-project__result-title {
+  margin: 0 0 0.5rem 0;
+  font-size: 1.0625rem;
+  font-weight: 600;
+  color: #1a1a1a;
+}
+
+.start-project__result p {
+  margin: 0 0 0.75rem 0;
+  font-size: 0.875rem;
+  line-height: 1.5;
+  color: #333;
+}
+
+.start-project__facts {
+  display: grid;
+  grid-template-columns: minmax(10rem, max-content) 1fr;
+  gap: 0.375rem 1rem;
+  margin: 0 0 0.75rem 0;
+  font-size: 0.875rem;
+}
+
+.start-project__facts dt {
+  font-weight: 500;
+  color: #666;
+}
+
+.start-project__facts dd {
+  margin: 0;
+  color: #1a1a1a;
+  overflow-wrap: anywhere;
+}
+
+.start-project__active-badge {
+  margin-left: 0.5rem;
+  color: #1e7e34;
+  background-color: #e6f4ea;
+}
+
+@media (max-width: 640px) {
+  .start-project__facts {
+    grid-template-columns: 1fr;
+    gap: 0.125rem;
+  }
+
+  .start-project__facts dd {
+    margin-bottom: 0.5rem;
+  }
+}

@@ -23,6 +23,7 @@ import {
   ModelDetailPage,
   ModelManagementPage,
   RequireAdminToken,
+  StartProjectPage,
 } from './pages/admin';
 
 /**
@@ -169,6 +170,14 @@ export const router = createBrowserRouter([
         element: (
           <RequireAdminToken>
             <ModelDetailPage />
+          </RequireAdminToken>
+        ),
+      },
+      {
+        path: 'admin/projects',
+        element: (
+          <RequireAdminToken>
+            <StartProjectPage />
           </RequireAdminToken>
         ),
       },

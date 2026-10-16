@@ -409,3 +409,19 @@
   background-color: #1a73e8;
   transition: width 0.2s ease;
 }
+
+/* Header action cluster (Model Management: project link + sign out). */
+.admin-page__actions {
+  display: flex;
+  flex-shrink: 0;
+  gap: 0.5rem;
+  align-items: center;
+}
+
+/* The link styled as a button needs the text decoration and line-height a
+   real <button> gets for free. */
+.admin-page__actions a.admin-button {
+  display: inline-flex;
+  align-items: center;
+  text-decoration: none;
+}

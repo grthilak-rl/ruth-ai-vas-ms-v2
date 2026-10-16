@@ -361,3 +361,135 @@ export function putChunk(
     xhr.send(data);
   });
 }
+
+// ============================================================================
+// Projects (/api/v1/admin/projects)
+// ============================================================================
+
+const PROJECTS = `${ADMIN_API_PREFIX}/projects`;
+
+/** Longer than the shared TIMEOUT_MS: pg_dump plus the archive transaction. */
+const START_PROJECT_TIMEOUT_MS = 20 * 60_000;
+
+export interface ProjectSummary {
+  id: string;
+  name: string;
+  slug: string;
+  state: 'active' | 'archived';
+  started_at: string;
+  started_by: string;
+  ended_at: string | null;
+  ended_by: string | null;
+  archive_batch_id: string | null;
+  archived_counts: Record<string, number> | null;
+  backup_path: string | null;
+}
+
+export interface LiveCameraInfo {
+  device_id: string;
+  camera_name: string;
+  session_id: string;
+  state: string;
+}
+
+/** Machine-readable preflight refusals; see PreflightResponse on the server. */
+export type ProjectBlocker =
+  | 'inference_active'
+  | 'too_much_data'
+  | 'backup_unavailable';
+
+export interface ProjectPreflight {
+  can_proceed: boolean;
+  blockers: ProjectBlocker[];
+  current_project: ProjectSummary | null;
+  row_counts: Record<string, number>;
+  total_rows: number;
+  live_cameras: LiveCameraInfo[];
+  backup_dir: string;
+  evidence_with_vas_media: number;
+}
+
+export interface StartProjectResult {
+  new_project: ProjectSummary;
+  archived_project: ProjectSummary | null;
+  archive_batch_id: string | null;
+  archived_counts: Record<string, number>;
+  backup_path: string | null;
+  stopped_cameras: string[];
+  vas_paths_resolved: number;
+  vas_paths_missing: number;
+  message: string;
+}
+
+export function listProjects(): Promise<{
+  items: ProjectSummary[];
+  active: ProjectSummary | null;
+}> {
+  return adminFetch(PROJECTS);
+}
+
+/**
+ * What starting a new project would archive, and anything blocking it.
+ *
+ * `stopInference` previews the result assuming live inference is stopped
+ * first, so ticking the checkbox re-measures rather than guessing.
+ */
+export function fetchProjectPreflight(stopInference = false): Promise<ProjectPreflight> {
+  const query = stopInference ? '?stop_inference=true' : '';
+  return adminFetch(`${PROJECTS}/preflight${query}`);
+}
+
+/**
+ * Archive the current project and start a new one.
+ *
+ * Not routed through adminFetch: the default 30s timeout is far too short
+ * for a pg_dump of a 150 MB database followed by the archive transaction.
+ */
+export async function startNewProject(body: {
+  name: string;
+  confirm_name: string;
+  stop_inference: boolean;
+  confirm_large?: boolean;
+}): Promise<StartProjectResult> {
+  const token = getAdminToken();
+  if (!token) {
+    redirectToAdminLogin();
+    throw new AdminApiError(401, 'Not signed in');
+  }
+
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), START_PROJECT_TIMEOUT_MS);
+  let response: Response;
+  try {
+    response = await fetch(buildApiUrl(`${PROJECTS}/start`), {
+      method: 'POST',
+      headers: {
+        Authorization: `Bearer ${token}`,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify(body),
+      signal: controller.signal,
+    });
+  } catch {
+    // A timeout here does NOT mean the archive failed — it runs in one
+    // transaction server-side and may well have committed. Say so, rather
+    // than inviting a retry that would then be refused for a duplicate name.
+    throw new AdminApiError(
+      0,
+      'The request timed out. The archive may still have completed — reload ' +
+        'the project list before trying again.'
+    );
+  } finally {
+    clearTimeout(timer);
+  }
+
+  if (response.status === 401) {
+    clearAdminToken();
+    redirectToAdminLogin();
+    throw await errorFromResponse(response);
+  }
+  if (!response.ok) {
+    throw await errorFromResponse(response);
+  }
+  return (await response.json()) as StartProjectResult;
+}

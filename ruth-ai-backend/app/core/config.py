@@ -202,6 +202,31 @@ class Settings(BaseSettings):
         description="NLP Chat Service request timeout (LLM calls can be slow)",
     )
 
+    # Project archiving ("Start new project")
+    project_backup_dir: str = Field(
+        default="/var/backups/ruth-ai",
+        description=(
+            "Directory for the pg_dump taken before a project is archived. "
+            "Must exist and be writable, and should be a mounted volume — a "
+            "dump inside the container layer is lost on the next deploy. "
+            "Starting a project refuses rather than proceeding unbacked."
+        ),
+    )
+    project_pg_dump_path: str = Field(
+        default="pg_dump",
+        description=(
+            "pg_dump executable. Looked up on PATH by default; set an "
+            "absolute path if the image carries a specific client version. "
+            "Must be >= the server's major version (Postgres 15 here)."
+        ),
+    )
+    project_backup_timeout_seconds: int = Field(
+        default=1800,
+        ge=60,
+        le=14400,
+        description="Hard timeout for the pre-archive pg_dump",
+    )
+
     @property
     def is_development(self) -> bool:
         """Check if running in development mode."""

@@ -32,6 +32,16 @@ from app.schemas.analytics import (
     ViolationTrendBucket,
     ViolationTrendsResponse,
 )
+from app.schemas.project import (
+    ArchivedViolation,
+    ArchivedViolationListResponse,
+    LiveCameraInfo,
+    PreflightResponse,
+    ProjectListResponse,
+    ProjectSummary,
+    StartProjectRequest,
+    StartProjectResponse,
+)
 from app.schemas.models import (
     ModelStatusInfo,
     ModelsStatusResponse,
@@ -159,4 +169,13 @@ __all__ = [
     "ChatErrorDetail",
     "ChatRequest",
     "ChatResponse",
+    # Project schemas
+    "ArchivedViolation",
+    "ArchivedViolationListResponse",
+    "LiveCameraInfo",
+    "PreflightResponse",
+    "ProjectListResponse",
+    "ProjectSummary",
+    "StartProjectRequest",
+    "StartProjectResponse",
 ]

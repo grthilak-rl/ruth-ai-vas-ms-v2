@@ -5,6 +5,13 @@ Models are designed to match the Ruth AI API Contract Specification exactly.
 """
 
 from app.models.app_setting import SHIFT_SCHEDULE_KEY, AppSetting
+from app.models.archive import (
+    BookmarkAnalysisArchive,
+    EventArchive,
+    EvidenceArchive,
+    StreamSessionArchive,
+    ViolationArchive,
+)
 from app.models.base import Base, TimestampMixin
 from app.models.bookmark_analysis import BookmarkAnalysis
 from app.models.device import Device
@@ -20,6 +27,13 @@ from app.models.enums import (
 from app.models.event import Event
 from app.models.evidence import Evidence
 from app.models.model_store import ModelStoreFile, ModelStoreModel, ModelStoreUpload
+from app.models.project import (
+    PROJECT_START_LOCK_KEY,
+    PROJECT_STATE_ACTIVE,
+    PROJECT_STATE_ARCHIVED,
+    PROJECT_STATES,
+    Project,
+)
 from app.models.stream_session import StreamSession
 from app.models.violation import Violation
 
@@ -47,4 +61,16 @@ __all__ = [
     "ModelStoreModel",
     "ModelStoreFile",
     "ModelStoreUpload",
+    # Projects
+    "Project",
+    "PROJECT_STATE_ACTIVE",
+    "PROJECT_STATE_ARCHIVED",
+    "PROJECT_STATES",
+    "PROJECT_START_LOCK_KEY",
+    # Archive tables
+    "ViolationArchive",
+    "EventArchive",
+    "EvidenceArchive",
+    "StreamSessionArchive",
+    "BookmarkAnalysisArchive",
 ]

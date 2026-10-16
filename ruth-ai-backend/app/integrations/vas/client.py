@@ -10,6 +10,7 @@ Defensive async client for VAS-MS-V2 integration with:
 import asyncio
 import json
 import time
+from collections.abc import Sequence
 from contextlib import asynccontextmanager
 from typing import Any, AsyncIterator
 
@@ -923,6 +924,59 @@ class VASClient:
             bookmark_id: Bookmark UUID
         """
         await self._request("DELETE", f"/v2/bookmarks/{bookmark_id}")
+
+    # -------------------------------------------------------------------------
+    # Bulk media paths (project archiving)
+    # -------------------------------------------------------------------------
+
+    async def get_snapshot_paths(
+        self,
+        snapshot_ids: Sequence[str],
+    ) -> dict[str, dict[str, Any]]:
+        """Resolve VAS's on-disk paths for a batch of snapshot ids.
+
+        Used only when archiving a project: Evidence rows keep a VAS id, and
+        VAS deletes the file and the row together at retention, after which
+        nothing records where the file was. See the VAS endpoint's docstring.
+
+        Args:
+            snapshot_ids: Up to MAX_IDS (1000) snapshot UUIDs.
+
+        Returns:
+            ``{snapshot_id: {"file_path": str, "file_size": int | None}}``.
+            Ids VAS no longer has are absent — a missing key means "gone",
+            not an error.
+        """
+        if not snapshot_ids:
+            return {}
+        response = await self._request(
+            "POST",
+            "/v2/media-paths/snapshots",
+            json={"ids": list(snapshot_ids)},
+        )
+        return response.json().get("paths", {})
+
+    async def get_bookmark_paths(
+        self,
+        bookmark_ids: Sequence[str],
+    ) -> dict[str, dict[str, Any]]:
+        """Resolve VAS's on-disk paths for a batch of bookmark ids.
+
+        Args:
+            bookmark_ids: Up to MAX_IDS (1000) bookmark UUIDs.
+
+        Returns:
+            ``{bookmark_id: {"video_file_path": str, "thumbnail_path": str |
+            None, "file_size": int | None}}``. Absent ids are gone from VAS.
+        """
+        if not bookmark_ids:
+            return {}
+        response = await self._request(
+            "POST",
+            "/v2/media-paths/bookmarks",
+            json={"ids": list(bookmark_ids)},
+        )
+        return response.json().get("paths", {})
 
     @asynccontextmanager
     async def download_bookmark_video(

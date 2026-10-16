@@ -1,4 +1,4 @@
-"""Admin API (/api/v1/admin) for the Model Management page.
+"""Admin API (/api/v1/admin) for the Model Management and Projects pages.
 
 Everything here is admin-only via require_admin, except POST /admin/auth/login.
 Protected endpoints go on ``protected_router``; nothing else in the app
@@ -7,7 +7,7 @@ depends on this package.
 
 from fastapi import APIRouter, Depends
 
-from app.api.v1.admin import auth, me, model_store
+from app.api.v1.admin import auth, me, model_store, projects
 from app.core.admin_auth import require_admin
 
 router = APIRouter(prefix="/admin", tags=["Admin"])
@@ -19,6 +19,7 @@ router.include_router(auth.router)
 protected_router = APIRouter(dependencies=[Depends(require_admin)])
 protected_router.include_router(me.router)
 protected_router.include_router(model_store.router)
+protected_router.include_router(projects.router)
 router.include_router(protected_router)
 
 __all__ = ["router"]

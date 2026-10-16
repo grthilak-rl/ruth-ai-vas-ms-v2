@@ -98,9 +98,17 @@ export function ModelManagementPage() {
             )}
           </p>
         </div>
-        <button className="admin-button admin-button--secondary" type="button" onClick={signOut}>
-          Sign out
-        </button>
+        <div className="admin-page__actions">
+          {/* The only entry point to project archiving. Kept here rather
+              than in the operator navigation: starting a project zeroes
+              every dashboard, and it belongs behind the admin login. */}
+          <Link to="/admin/projects" className="admin-button admin-button--secondary">
+            Start new project
+          </Link>
+          <button className="admin-button admin-button--secondary" type="button" onClick={signOut}>
+            Sign out
+          </button>
+        </div>
       </header>
 
       <form className="admin-card admin-new-model" onSubmit={onCreate}>
