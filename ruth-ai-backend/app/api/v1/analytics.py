@@ -123,8 +123,23 @@ async def get_analytics_summary(
     result = await db.execute(active_cameras_stmt)
     cameras_active = result.scalar() or 0
 
-    # Count total cameras
-    total_cameras_stmt = select(func.count()).select_from(Device).where(Device.is_active == True)
+    # Count total cameras.
+    #
+    # `enabled` is matched here as well as `is_active` so this denominator
+    # agrees with the one the Overview card derives from GET /api/v1/devices,
+    # which hides cameras an operator retired in VAS. Two screens quoting
+    # different camera totals is worse than either total on its own.
+    #
+    # Note this is a *current* count against a *historical* violation range:
+    # retiring a camera today changes the denominator for last month's
+    # report too. That is the same behaviour `is_active` already had, and
+    # the alternative — reconstructing which cameras were enabled during the
+    # window — needs history this schema does not keep.
+    total_cameras_stmt = (
+        select(func.count())
+        .select_from(Device)
+        .where(Device.is_active.is_(True), Device.enabled.is_(True))
+    )
     result = await db.execute(total_cameras_stmt)
     cameras_total = result.scalar() or 0
 
@@ -528,8 +543,22 @@ async def get_devices_status(
     # For each device, get: violation counts by status, by type, avg confidence, last violation time
     devices_data = []
 
-    # Get all devices
-    devices_stmt = select(Device).where(Device.is_active == True)
+    # Get all devices. Matches GET /api/v1/devices: cameras an operator
+    # retired in VAS are excluded, so `summary.total_cameras` here and the
+    # camera list elsewhere quote the same number.
+    #
+    # Consequence worth knowing: a retired camera drops out of `devices`
+    # AND out of `summary.total_violations`, which is summed from the rows
+    # below. /analytics/summary is deliberately NOT filtered this way — its
+    # `violations_total` counts the violations table directly and its
+    # `by_camera` breakdown joins devices without this predicate, so both
+    # still include retired cameras. That is intentional: a breakdown of
+    # what happened should not drop history, and its rows must keep summing
+    # to its own total. The two endpoints therefore report different
+    # violation totals once a camera is retired.
+    devices_stmt = select(Device).where(
+        Device.is_active.is_(True), Device.enabled.is_(True)
+    )
     devices_result = await db.execute(devices_stmt)
     all_devices = devices_result.scalars().all()
 

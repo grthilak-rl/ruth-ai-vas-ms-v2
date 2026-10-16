@@ -135,18 +135,15 @@ docker cp ruth-ai-vas-postgres:/tmp/pre-projects-*.dump ./backups/
 # Verify it is a readable archive, not just a non-empty file:
 pg_restore -l ./backups/pre-projects-*.dump | head
 
-# ── 1. Prerequisite: pg_dump + a writable backup volume in the backend ─────
-# The action REFUSES to run without these, by design. Neither is present in
-# the current image.
-#   - Dockerfile: add `postgresql-client` (>= 15, matching the server)
-#   - docker-compose.yml, ruth-ai-backend:
-#       volumes:
-#         - ruth-project-backups:/var/backups/ruth-ai
-#       environment:
-#         PROJECT_BACKUP_DIR: /var/backups/ruth-ai   # optional; this is the default
-#   - volumes: ruth-project-backups:
-# Confirm after deploy:
-docker exec ruth-ai-vas-backend pg_dump --version
+# ── 1. Prerequisite: the host backup directory (uid 1000) ─────────────────
+# The image now ships postgresql-client-15 and compose bind-mounts
+# ${RUTH_BACKUP_HOST_DIR:-/mnt/storage/ruth-backups} at /var/backups/ruth-ai,
+# but the host directory still has to exist and be writable by appuser.
+# The action REFUSES to archive without a verified dump, by design.
+sudo mkdir -p /mnt/storage/ruth-backups
+sudo chown 1000:1000 /mnt/storage/ruth-backups
+# Confirm after the backend is up:
+docker exec ruth-ai-vas-backend pg_dump --version        # expect 15.x
 docker exec ruth-ai-vas-backend sh -c 'test -w /var/backups/ruth-ai && echo writable'
 
 # ── 2. Deploy VAS first ────────────────────────────────────────────────────
@@ -159,10 +156,14 @@ docker compose up -d --build vas-backend
 # ── 3. Raise VAS retention to 365 days, via storage config (no code change) ─
 # storage_config is currently EMPTY, so VAS is running on the code defaults
 # of 30 days. This writes a row that overrides them.
+#
+# No token: /v2/storage/* declares no auth dependency AND is listed in
+# JWT_AUTH_PREFIXES, so the API-key middleware skips it too. Verified:
+# GET /v2/storage/config returns 200 unauthenticated. See the warning below.
 curl -sS -X PUT "$VAS_BASE_URL/v2/storage/config" \
-  -H "Authorization: Bearer $VAS_TOKEN" -H 'Content-Type: application/json' \
+  -H 'Content-Type: application/json' \
   -d '{"snapshot_retention_days": 365, "bookmark_retention_days": 365}'
-curl -sS "$VAS_BASE_URL/v2/storage/config" -H "Authorization: Bearer $VAS_TOKEN"
+curl -sS "$VAS_BASE_URL/v2/storage/config"
 # Check free disk first: this stops reaping snapshots at 30 days.
 
 # ── 4. Migrate Ruth ────────────────────────────────────────────────────────
@@ -204,6 +205,18 @@ docker exec ruth-ai-vas-backend alembic downgrade stream_session_models
 # back out after an archive: restore the batch first (step below), then
 # downgrade.
 ```
+
+> **Pre-existing security gap, unrelated to this work.** Every endpoint
+> under `/v2/storage/*` is effectively unauthenticated: none of them declare
+> `require_scope`/`get_current_user`, and the prefix is in
+> `JWT_AUTH_PREFIXES`, so `api_key_middleware` waves it through on the
+> assumption those endpoints "handle their own JWT auth". They do not.
+> Anyone who can reach the VAS port can read and rewrite storage paths,
+> retention windows and the backup schedule, and trigger media cleanup.
+> Confirmed empirically: `GET /v2/storage/config` -> 200 with no credentials,
+> where a correctly-gated endpoint (`GET /v2/snapshots`) -> 403. Worth
+> fixing separately; it makes the retention change below easy, but for the
+> wrong reason.
 
 ---
 

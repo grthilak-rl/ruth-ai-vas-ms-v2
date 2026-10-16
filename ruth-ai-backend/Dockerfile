@@ -33,9 +33,18 @@ FROM python:3.11-slim-bookworm
 WORKDIR /app
 ENV PYTHONPATH=/app
 
-# Install runtime dependencies
+# Install runtime dependencies.
+#
+# postgresql-client-15 supplies pg_dump/pg_restore for the "Start new
+# project" admin action, which takes a verified dump before archiving and
+# refuses to run if it cannot. The major version is pinned to match the
+# server (postgres:15-alpine): pg_dump refuses to dump a server newer than
+# itself, and an unversioned `postgresql-client` would silently follow
+# Debian's default to a different major on a future base-image bump.
+# 15.x ships in bookworm itself, so no PGDG repo is needed.
 RUN apt-get update && apt-get install -y --no-install-recommends \
     curl \
+    postgresql-client-15 \
     && rm -rf /var/lib/apt/lists/*
 
 # Create non-root user
