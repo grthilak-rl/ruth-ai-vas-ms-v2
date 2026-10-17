@@ -5,8 +5,10 @@ Accepts base64-encoded frames and routes to appropriate models for inference.
 Includes input validation for security hardening.
 """
 
+import asyncio
 import base64
 import io
+import os
 import re
 import time
 import uuid
@@ -30,7 +32,48 @@ from ai.observability.metrics import (
 )
 
 router = APIRouter()
+
 logger = get_logger(__name__)
+
+# Run the blocking inference off the event loop. See docs/BACKLOG.md BL-5.
+#
+# `submit_inference` is an `async def`, but `sandbox_manager.execute()` is
+# synchronous and blocks until the GPU returns. Under a single uvicorn
+# worker that pins the whole event loop for the duration, so the runtime
+# serves exactly ONE request at a time across every camera and model --
+# measured on HPCL 2026-10-17 as max-concurrency 1 across 9,670 paired
+# request/completion spans, with the GPU at 26% median.
+#
+# Off by default and read once at import. This module is shared by the
+# built-in runtime (5 models, every deployment) and the model-store
+# runtime, so the flag is enabled per service: turning it on for the store
+# runtime alone leaves the built-in path byte-identical, which is what
+# BL-5 asked for before touching a path used by all 5 models.
+#
+# The sandbox already owns a TimeoutExecutor(max_workers=2) internally, so
+# the GPU work was always on a worker thread -- it is only the *waiting*
+# that was on the loop.
+OFFLOAD_INFERENCE = os.getenv("RUTH_RUNTIME_OFFLOAD_INFERENCE", "").lower() in (
+    "1", "true", "yes", "on"
+)
+
+def offload_status() -> dict:
+    """How inference is dispatched, for the startup log.
+
+    Not logged here. This module is imported by `ai.server.main` at line 51,
+    while `configure_logging()` runs later inside the lifespan — a
+    module-level `logger.info` is therefore emitted against an
+    unconfigured logging system and silently dropped. (It was, for one
+    deploy: the flag was correctly active and the confirmation line never
+    appeared, which is worse than no line at all because it reads as the
+    flag not taking effect.)
+
+    main.py calls this once logging is up.
+    """
+    return {
+        "offload_to_thread": OFFLOAD_INFERENCE,
+        "env": "RUTH_RUNTIME_OFFLOAD_INFERENCE",
+    }
 
 
 # =============================================================================
@@ -376,13 +419,27 @@ async def submit_inference(request: InferenceRequest) -> InferenceResponse:
 
         # Execute inference through sandbox manager
         # This provides proper isolation and error handling
-        execution_result = sandbox_manager.execute(
-            model_id=request.model_id,
-            version=model_version.version,
-            frame=frame,
-            request_id=str(request_id),
-            config=request.config,
-        )
+        if OFFLOAD_INFERENCE:
+            # Same call, awaited on a worker thread so the event loop stays
+            # free to accept and complete other requests. Exceptions
+            # propagate identically; `execute` already returns an
+            # ExecutionResult rather than raising for inference failures.
+            execution_result = await asyncio.to_thread(
+                sandbox_manager.execute,
+                model_id=request.model_id,
+                version=model_version.version,
+                frame=frame,
+                request_id=str(request_id),
+                config=request.config,
+            )
+        else:
+            execution_result = sandbox_manager.execute(
+                model_id=request.model_id,
+                version=model_version.version,
+                frame=frame,
+                request_id=str(request_id),
+                config=request.config,
+            )
 
         if not execution_result.success:
             raise Exception(execution_result.error or "Inference failed")

@@ -5,6 +5,474 @@ investigation. Newest first.
 
 ---
 
+## BL-11 · A camera can stop being monitored silently, and nothing says so
+
+**Status:** open, operational · **Found:** 2026-10-17 (HPCL) · **Area:**
+backend lifespan / inference sessions, and whatever should alert on this
+
+**Finding.** Camera **74004** had no AI inference for **21.3 hours** while
+its video stream ran normally. Nobody noticed; it surfaced only because a
+camera count was questioned.
+
+| | |
+|---|---|
+| VAS | stream `LIVE`, device enabled, `desired_state=ACTIVE` |
+| Ruth | no active session; last one `stopped` 2026-10-16 13:29 |
+| last session | single-model `safety_vest`, started 13:21 |
+| violations from this camera, ever | **0** |
+
+The other 11 cameras were reconfigured to 3-model sessions between 13:27
+and 13:29 that day. 74004's single-model session stopped at 13:29 with an
+empty `error_message` — a clean stop — and was never restarted with the
+new configuration. It looks like it was missed during that change, not
+that anything crashed.
+
+**Two separate problems.**
+
+1. **Nothing restarts it.** Ruth's lifespan has no auto-resume for
+   inference sessions: a stopped session stays stopped across backend
+   restarts. The backend restarted twice on 2026-10-17 and 74004 did not
+   come back. (VAS has `desired_state` + auto-resume for *video*; Ruth has
+   no equivalent for *inference*.)
+2. **Nothing reports it.** The camera reads as healthy almost everywhere —
+   the video is live, the device is enabled and active. Only
+   `streaming.ai_enabled` is false, which no alert watches. A plant can
+   therefore believe a camera is monitored when it is not, which is worse
+   than it being visibly offline.
+
+**Impact.** Safety monitoring silently absent on one of twelve cameras for
+most of a day. This is the failure mode the product most needs not to
+have.
+
+**Resolved for this instance:** 74004 was started manually with the same
+3 models at 2026-10-17 10:52 UTC (16:22 IST), taking the fleet to 12
+sessions / 36 consumers. The two defects below remain.
+
+---
+
+### Proposal A — persist intent, and resume it
+
+Mirror what VAS already does for video. VAS keeps
+`devices.desired_state` (`ACTIVE` / `STOPPED`), documented as *"survives
+restarts and drives auto-resume: on startup, devices with ACTIVE are
+restarted automatically; STOPPED devices stay down until an operator opts
+back in."* Ruth has no equivalent for inference, which is the whole gap.
+
+*Shape.* A durable per-device inference intent, set by the existing
+start/stop-inference endpoints, plus a startup reconciler that brings
+reality to match it.
+
+- **Where the intent lives.** Not on `stream_sessions` — a session is a
+  record of a run, and the last one here is `stopped`, which is correct
+  and must stay correct. It belongs on `devices` (e.g.
+  `inference_desired_state` + `inference_models` jsonb), or in a small
+  `device_inference_intent` table. `devices` is the simpler read; the
+  separate table avoids widening a row the VAS sync overwrites — note
+  `_sync_single_device` rewrites `devices` columns on every sync, so any
+  new column there must be explicitly excluded from the sync or it will
+  be clobbered. **That is the trap to avoid**; it is the same mistake
+  `is_active` already embodies.
+- **When it reconciles.** On backend startup, after the device sync, and
+  periodically (the supervisor already wakes regularly). Reconciling only
+  at startup would not have fixed 74004, whose session died during a
+  reconfiguration, not a restart.
+- **What it must not do.** Restart inference on a camera an operator
+  deliberately stopped. Hence *intent*, not "was running recently":
+  stop-inference clears the intent, a crash does not.
+- **Failure modes to design for.** A camera whose model no longer exists
+  (uploaded model deleted) must fail visibly, not loop. A camera VAS has
+  disabled (`enabled=false`) must not be resumed. Repeated start failures
+  need backoff and should surface, not retry silently forever.
+
+**Decided (2026-10-17):** desired-state model, not "last session ended
+cleanly". Intent is recorded explicitly when an operator acts; a session
+ending for any reason other than an operator stop is a gap to be closed.
+Order: **B first, then A.**
+
+#### Schema
+
+```sql
+CREATE TABLE device_inference_intent (
+    device_id            uuid PRIMARY KEY
+                           REFERENCES devices(id) ON DELETE CASCADE,
+    desired_state        varchar(8)  NOT NULL DEFAULT 'off',  -- 'active' | 'off'
+    models               jsonb,            -- same shape as stream_sessions.models
+    inference_fps        integer,
+    confidence_threshold double precision,
+    consecutive_failures integer     NOT NULL DEFAULT 0,
+    last_attempt_at      timestamptz,
+    last_error           text,
+    updated_at           timestamptz NOT NULL DEFAULT now(),
+    updated_by           text,
+    CONSTRAINT ck_intent_state CHECK (desired_state IN ('active', 'off'))
+);
+```
+
+Why this shape:
+
+- **A separate table, not columns on `devices`.** `_sync_single_device`
+  rewrites `devices` on every VAS sync; a column there would be silently
+  clobbered. This is the same trap `is_active` already embodies, and the
+  reason it cannot be used as a policy flag.
+- **Primary key on `device_id`** — exactly one intent per camera. No
+  history: `stream_sessions` already is the history, and a second
+  historical record would be a second thing to keep consistent.
+- **`models` mirrors `stream_sessions.models`** so the reconciler can
+  pass it straight to the existing start path with no translation. NULL
+  means "the legacy single model", matching the session convention.
+- **No `failed` column.** Failure is *derived*:
+  `desired_state = 'active' AND consecutive_failures >= 2`. A stored
+  status would be a second source of truth that can disagree with the
+  counter; the counter is what the reconciler already has to maintain.
+- **`ON DELETE CASCADE`** — devices are never deleted today (only marked
+  inactive), but if one ever is, its intent should go with it.
+
+#### Who writes it
+
+Every operator action that changes what should be running:
+
+| action | writes |
+|---|---|
+| picker adds a model (`POST /devices/{id}/models`) | `desired_state='active'`, models updated |
+| picker changes one (`PATCH .../models/{model_id}`) | models updated |
+| picker removes one (`DELETE .../models/{model_id}`) | models updated; `'off'` if it was the last |
+| `POST /devices/{id}/start-inference` | `desired_state='active'` + models |
+| `POST /devices/{id}/stop-inference` | **`desired_state='off'`** |
+
+**An operator stop sets the intent off, so it is never auto-resumed.**
+That is the whole safety property: the reconciler restores what somebody
+asked for and never overrides what somebody switched off.
+
+Writing intent in the same transaction as the session change keeps the
+two from diverging on a crash mid-request.
+
+#### Reconciler
+
+A periodic task, **not** startup-only — 74004's session died during a
+reconfiguration, not a restart, so a startup-only reconciler would not
+have caught it.
+
+- **Interval: 60 s**, `RUTH_INFERENCE_RECONCILE_SECONDS`. Worst-case
+  coverage gap of about a minute; twelve cheap reads per minute; far
+  slower than any legitimate transient. Deliberately *not* folded into
+  the inference loop's existing 1 s tick: that cadence is for starting
+  and stopping local tasks, while a resume calls VAS, and retrying that
+  every second against a camera that is genuinely broken is a way to
+  turn one failure into an outage.
+- **Each pass:** for every intent with `desired_state='active'` and no
+  session in (`starting`, `live`, `stopping`), attempt a start with the
+  recorded models. Log every resume at INFO with device, models and the
+  reason the session was missing.
+- **Grace window:** skip any camera whose `updated_at` is within the last
+  30 s, so the reconciler cannot race an operator action still in flight.
+- **`starting` counts as present.** Treating it as missing would start a
+  second session and trip `uq_stream_sessions_device_active`.
+- **Backoff and stop:** on failure, `consecutive_failures += 1`, record
+  `last_error`. **At 2 consecutive failures, stop attempting** and let it
+  surface through the B coverage signal as *failed*, distinct from
+  *not configured*. A success resets the counter to 0.
+- **Never resume** a camera with `devices.enabled = false` (retired in
+  VAS) or `is_active = false` (absent from VAS). Both are states where
+  starting would be wrong and would fail anyway.
+
+Two failures at 60 s apart means a genuine problem is retried for about a
+minute and then parked — comfortably inside B's alert debounce, so the
+operator sees one actionable "failed" rather than a flapping alert.
+
+#### Interaction with B
+
+They share a signal. B reports a camera as uncovered when video is live
+and inference is absent; A removes the common causes. After A, anything B
+still reports is either inside the 60 s reconcile window, deliberately
+switched off, or genuinely failed — and the derived `failed` flag tells
+them apart. Shipping B first means the metric exists to prove A works.
+
+### Proposal B — make the gap visible (do this one first)
+
+Auto-resume reduces how often this happens; an alert is what catches it
+when it happens anyway, including for reasons nobody predicted. B is
+independent of A and worth shipping first because it is smaller and it
+is the part that failed here — 21 hours passed with nobody knowing.
+
+*The signal.* A camera is anomalous when **video is live and inference is
+absent**. Both halves are already available in one place:
+`GET /api/v1/devices` returns `streaming.video_live` and
+`streaming.ai_enabled` per camera. No new endpoint is needed.
+
+*Where it should show.*
+
+- **System Health tab** — a row or card: "Monitoring coverage: 11 of 12
+  cameras". Today the page reports service health but says nothing about
+  whether cameras are actually being watched, which is the question an
+  operator most needs answered.
+- **Camera grid** — a distinct badge. The existing `getCameraStatus`
+  returns `live | offline | disabled` from *video* state only, so a
+  camera with no inference currently renders as plain "Live". Adding a
+  `monitoring: on | off` dimension beside it is the minimal change.
+- **Overview** — the "Cameras Live" card already reads `streaming.active`
+  and so would have shown 11/12. It is correct but silent; the number
+  needs a comparison to make the discrepancy legible.
+
+*Grace period.* Inference legitimately drops out for seconds during
+restarts and model changes, so alerting must debounce — a few minutes,
+not seconds. Pick it deliberately: too short and every deploy pages
+somebody; too long and this one still goes unnoticed for a shift.
+
+*Cheap interim, available now,* while the above is designed — a query
+that lists the gap, run from cron or checked by hand:
+
+```sql
+SELECT d.name
+FROM devices d
+LEFT JOIN stream_sessions s
+       ON s.device_id = d.id AND s.state IN ('starting','live','stopping')
+WHERE d.enabled AND d.is_active AND s.id IS NULL;
+```
+
+---
+
+## BL-10 · Inference pacing counts frame-fetch time as GPU time
+
+**Status:** proposed, not started · **Found:** 2026-10-17 (measuring BL-5
+step A) · **Area:** backend, `app/services/inference_loop.py`
+
+**Finding.** With BL-5's offload deployed, the store runtime is no longer
+the constraint — it runs at 2 concurrent and is idle two thirds of the
+time (mean concurrency 1.02). The fleet still achieves only **0.48
+inferences/s per camera per model against a requested 10**. The pacing is
+now fully accounted for, and it is arithmetic, not a bug hiding somewhere:
+
+```
+InferenceBudget.fps_for_consumer:
+    fair_share_fps = MAX_GPU_UTILIZATION / (active_count x latency)
+                   = 2.3 / (33 x 0.145)
+                   = 0.48          <-- exactly what is observed
+```
+
+Three inputs produce that number, and two of them are surprising:
+
+1. **`active_count` is 33, not 11.** Multi-model sessions register one
+   consumer per *(session, model)* pair, so 11 cameras x 3 models = 33
+   claimants on one budget. Correct by design, but it means adding a
+   model to every camera cuts every existing model's rate by a third.
+
+2. **`latency` is 145 ms, of which only 65 ms is GPU.** Line 1020 records
+   `fetch_seconds + inference_time` into the budget:
+
+   ```python
+   self._budget.record_latency(entry["model_id"], fetch_seconds + clock() - started)
+   ```
+
+   So **55% of a budget named MAX_GPU_UTILIZATION is spent on frame-fetch
+   I/O**, which does not occupy the GPU at all. The GPU sits at 32% while
+   the budget behaves as though it were nearly full.
+
+3. **The backend serialises models within a tick on purpose** (`_run_due_models`,
+   M1.2 fastest-first: `for i in order: await self._run_model(...)`). That
+   is a deliberate latency choice — a fast model's GPU work never shares
+   the device with a slow one — and it means concurrency can only ever
+   come from *different cameras*. Raising a semaphore cannot create
+   within-tick parallelism.
+
+**Impact.** The plant runs at ~5% of its requested detection rate with a
+GPU at 32% and a runtime idle two thirds of the time. Every lever tried so
+far (BL-5 offload, the store semaphore) sits downstream of this one.
+
+**Proposal — three candidate changes, in order of leverage per unit of risk.**
+
+- *(a) Stop counting fetch time as GPU time.* Record only the inference
+  duration into the budget and account for fetch separately. On today's
+  numbers this alone moves fair-share from 0.48 to
+  `2.3 / (33 x 0.065)` = **1.07/s per consumer, a 2.2x gain**, with no
+  change to how hard the GPU is driven — it is a correction, not a
+  loosening. Needs care: fetch time is real wall-clock that limits how
+  fast a camera *can* tick, so it belongs in the schedule, just not in
+  the GPU budget.
+- *(b) Raise `RUTH_INFERENCE_MAX_GPU_UTIL` above 2.3.* The blunt lever.
+  With (a) applied, 2.3 -> 4.0 would give `4.0 / (33 x 0.065)` = 1.86/s
+  per consumer. Only worth doing after (a), and only with GPU headroom
+  confirmed at the new rate.
+- *(c) Scope the budget per runtime.* The store models and the built-in
+  models are served by different processes on the same GPU but are
+  currently paced from one shared budget — the same conflation BL-5's
+  semaphore split fixed for concurrency. Splitting the budget would let
+  store models be paced on their own measured latency without changing
+  built-in behaviour. Largest change of the three; do last if at all.
+
+**Can it be scoped to store models only?** Partly. `MAX_GPU_UTILIZATION`,
+`TARGET_FPS` and `MIN_FPS` are module-level and shared, so (b) alone
+cannot be scoped — raising it speeds built-in models up too. (a) is
+naturally scoped in the sense that it is a correctness fix applying
+equally to both, and is the safer thing to apply globally. True per-runtime
+scoping is (c).
+
+**Measurement plan.** Same instrument as BL-5, which now has a baseline to
+compare against:
+
+```bash
+python3 docs/tools/measure_inference_concurrency.py --minutes 10 \
+    --label pre_c --out /tmp/pc
+# apply (a) only
+python3 docs/tools/measure_inference_concurrency.py --minutes 10 \
+    --label post_a --out /tmp/pc
+python3 docs/tools/measure_inference_concurrency.py --compare \
+    /tmp/pc/pre_c.json /tmp/pc/post_a.json
+```
+
+Expected after (a): per-consumer 0.48 -> ~1.07/s, fleet ~16 -> ~35 req/s,
+GPU 32% -> ~55-65%, p95 up from 114 ms (contention). Stop conditions as
+BL-5: p95 > 250 ms, any error lines, any runtime restart, violation rate
+falling. **One change at a time** — (a) and (b) together cannot be told
+apart afterwards.
+
+Worth confirming first, cheaply: instrument `fetch_seconds` into a log
+line or a metric. It is measured in the loop today and then discarded into
+the budget, so the 80 ms figure above is inferred from the observed rate
+rather than measured directly. If fetch is in fact slower or more variable
+than that, (a) matters even more and the fetch path itself becomes a
+target.
+
+**Note on the built-in runtime being retired.** Once every model arrives
+by upload, option (c) stops being "protect the built-in path" and becomes
+simply *the* budget. That removes the main objection to (b): raising
+`MAX_GPU_UTILIZATION` would no longer speed up a path whose concurrency
+has never been validated, because there would be no such path. Re-rank
+(b) upward when that happens.
+
+---
+
+### (d) Cross-camera batching — the largest gain, and the largest redesign
+
+**Where the time actually goes.** Decomposing the measured 65 ms against
+the GPU reading (32% at 16.0 inf/s):
+
+| | |
+|---|---:|
+| GPU kernel time | **20 ms (31%)** |
+| CPU-side: JPEG decode, letterbox, NMS, HTTP, Python dispatch | **45 ms (69%)** |
+
+**Two thirds of an "inference" is not inference.** That is what batching
+attacks: the per-call share of those 45 ms is paid once per call instead
+of once per frame, and a 3090 at imgsz 1280 batch-1 is badly
+under-occupied.
+
+**Estimated gain** (per model stream; assumes ~60% of CPU cost is
+per-call and GPU/frame improves 20 → 12 ms with occupancy):
+
+| batch | ms/frame | inf/s | GPU | speedup |
+|---:|---:|---:|---:|---:|
+| 1 (today) | 65.0 | 15.4 | 31% | 1.0x |
+| 4 | 38.8 | 25.8 | 36% | **1.7x** |
+| 8 | 33.4 | 30.0 | 36% | **1.9x** |
+| 16 | 30.7 | 32.6 | 36% | 2.1x |
+
+Returns flatten past batch 8 because the residual per-frame CPU cost
+(decode, NMS) does not amortise. **Batching alone is worth ~2x, not 10x**
+— the CPU-side work is the ceiling, and the real prize may be moving
+decode/NMS off the critical path rather than batching per se. VRAM is a
+non-issue: 4.5 GB of 24 GB used today, and yolov8m at 1280 batch-8 adds a
+few GB.
+
+**The cost nobody sees until it bites — batch fill time:**
+
+| | batch 4 | batch 8 |
+|---|---:|---:|
+| today (12 cams x 0.44/s per model) | **0.76 s** | **1.52 s** |
+| after Step C(a), scenario (ii) | 0.23 s | 0.45 s |
+
+A batch of 8 today would wait **1.5 s to assemble a call that runs in
+0.065 s** — adding 23x the inference time in latency to save 50% of it.
+**Batching must come after (a), not instead of it**, and even then needs
+a max-wait timeout that flushes partial batches (100-200 ms) so a quiet
+site does not accumulate stale frames. There is a mild chicken-and-egg:
+batching raises the ceiling, a higher ceiling fills batches faster.
+
+**What it does to the pacer.** This is the part that makes (d) a redesign
+rather than a feature:
+
+- `record_latency` currently stores per-inference duration. With
+  batching, one call covers N frames, so it must record *per-frame
+  effective* latency or the budget will think the system got 8x slower
+  and throttle to nothing.
+- `MAX_GPU_UTILIZATION` is a sum of `latency x rate` across consumers.
+  Under batching that product no longer means GPU occupancy at all —
+  frames share a call. The budget would need to model calls, not frames.
+- The backend's deliberate within-tick serialisation (`_run_due_models`,
+  fastest-first) is per-camera. Batching is inherently *cross*-camera, so
+  frames must be collected from independent camera loops into a shared
+  per-model queue — a scheduler change in the backend, not just a runtime
+  one.
+- The store plugin contract assumes one frame per call
+  (`model.predict(frame)`), so manifests would need something like
+  `supports_batch` / `max_batch`, and `ai/store_plugin/inference.py`
+  would need a list-accepting path.
+
+**Recommended order:** (a) first — it is a correctness fix worth 2.2x on
+its own, with no architectural change. Measure. Then reconsider (b) and
+(d) against what is actually binding at that point; if the GPU is at
+~71% as predicted, (d)'s 2x is no longer available without also
+addressing the 69% CPU-side cost.
+
+---
+
+## BL-9 · `tank_overflow_monitoring` reports as "(invalid)" while running fine
+
+**Status:** parked · **Found:** 2026-10-17 (HPCL live check) · **Area:** AI
+runtime, `ai/runtime/discovery.py`, `ai/runtime/loader.py`
+
+**Finding.** `/capabilities` returns this model with
+`display_name: "tank_overflow_monitoring (invalid)"` yet
+`state: "ready", health: "healthy"` — and it genuinely is healthy. It is
+loaded on the GPU and serving. Exact sequence from the runtime log:
+
+```
+discovery: "Version discovered but invalid"
+           errors: ["Required directory 'weights/' not found"]
+registry:  Version registered           state=invalid
+loader:    "Tank overflow detector loaded successfully"
+loader:    Model loaded successfully    load_time_ms=14  device=cuda:0
+registry:  Version state changed        old_state=invalid  new_state=ready
+```
+
+Two independent defects produce this:
+
+1. **The validator requires a `weights/` directory.** This model is a pure
+   geometry tank detector with no weights —
+   `ai/models/tank_overflow_monitoring/1.0.0/` contains only
+   `inference.py`, `model.yaml` and `tank_detector.py`. It fails a rule
+   that does not apply to it.
+2. **`display_name` is stamped once at discovery and never refreshed.**
+   `discovery.py:235` sets `display_name=f"{model_id} (invalid)"` on the
+   invalid descriptor. The loader then succeeds and the registry corrects
+   the **state** to `ready`, but nothing anywhere rewrites the name —
+   neither `loader.py` nor `registry.py` touches that field. The model's
+   own `model.yaml` already says `display_name: "Tank Overflow Monitoring"`.
+
+Defect 2 is the more general one: *any* model that fails validation and is
+then loaded successfully keeps a wrong name for the life of the process.
+
+**Impact.** Cosmetic today, but actively misleading: the Settings → AI
+Models list and the System tab both show a working model labelled
+"(invalid)", which invites someone to "fix" a model that is fine. It also
+defeats the backend's own guard — `app/api/v1/models.py` filters entries
+with `state == "invalid"`, which never matches here because by the time
+the backend asks, the state is legitimately `ready`.
+
+**Proposal (two parts, independently shippable).**
+
+- *Validator:* make `weights/` optional. A model that declares no weights
+  in its `model.yaml` should not be required to carry an empty directory.
+  Prefer keying off the manifest rather than special-casing this model id.
+- *Loader/registry:* on a successful load, refresh the descriptor's
+  `display_name` from the manifest — or stop deriving it at discovery and
+  read it from `model.yaml` at the point of use. Then a model that
+  recovers stops advertising the failure it recovered from.
+
+Worth doing together with a check that no other model is silently in this
+state: `curl -sS <runtime>/capabilities | grep invalid`.
+
+---
+
 ## BL-8 · Fullscreen camera page shows only the video
 
 **Status:** parked (work on fullscreen later) · **Found:** 2026-10-04 (M3
@@ -128,6 +596,31 @@ latency by the full duration of whatever is ahead of it; a slow uploaded
 model would delay all built-in ones. Running uploaded models alongside
 built-in ones (Step 5) makes this more visible.
 
+**Confirmed at scale on the HPCL store deployment (2026-10-17).** 11
+cameras x 3 store models (`gloves`, `hard_hat`, `safety_vest`), measured
+over a 10-minute window by pairing every runtime request to its completion
+by `request_id`:
+
+| | |
+|---|---|
+| paired spans | 9,670 |
+| **max concurrent in-flight** | **1** |
+| overlapping spans | **0** |
+| idle gap between spans, p50 | 6.5 ms |
+| runtime busy | 69.4% (416.6 s of 600 s) |
+| aggregate throughput | 16.1 inferences/s |
+| mean latency | 43.1 ms (p95 ~86 ms) |
+| GPU utilisation | 22-41%, median 26%; VRAM 17% |
+| achieved per camera per model | 0.49/s against a requested 10 |
+
+Not one request in 9,670 overlapped another. **The GPU is not the
+constraint** — this invalidates the note previously carried at
+`inference_loop.py:110`, which concluded the GPU was binding from a
+measurement taken against the built-in runtime (that comment has been
+corrected in place). A second, independent cap sits in the backend:
+`INFERENCE_CONCURRENCY = 2` (`inference_loop.py:121`), so **raising either
+one alone changes almost nothing** — they must move together.
+
 **Proposal (to evaluate after Step 5).**
 - Run the blocking `execute` off the event loop (`await
   asyncio.to_thread(...)` or a bounded executor), so `MAX_CONCURRENT_INFERENCES`
@@ -139,8 +632,88 @@ built-in ones (Step 5) makes this more visible.
 - This changes an existing runtime path used by all 5 models: needs explicit
   sign-off and a before/after latency run per model.
 
-Tools: `check_fastest_first_rt.py` (scratch) reproduces the table above from
-`docker logs` of the backend and runtime.
+**Tool:** `docs/tools/measure_inference_concurrency.py` — committed because
+this question has now been asked twice and answered twice with a throwaway
+script, and the answer changed between them. Read-only; run it against a
+live deployment:
+
+```bash
+python3 docs/tools/measure_inference_concurrency.py --minutes 10 \
+    --label baseline --out /tmp/p1
+# ... make the change ...
+python3 docs/tools/measure_inference_concurrency.py --minutes 10 \
+    --label after --out /tmp/p1
+python3 docs/tools/measure_inference_concurrency.py \
+    --compare /tmp/p1/baseline.json /tmp/p1/after.json
+```
+
+`--compare` prints the before/after table and evaluates the stop
+conditions below. The older `check_fastest_first_rt.py` (scratch) produced
+the 2026-10-04 table above.
+
+**Fix, as built (2026-10-17), awaiting the deploy window.**
+`RUTH_RUNTIME_OFFLOAD_INFERENCE` gates the thread hand-off in
+`ai/server/routes/inference.py`; off by default, so the built-in runtime is
+byte-identical (`ai/tests/test_inference_offload.py` asserts the two
+branches forward identical arguments and that the flag defaults off).
+`RUTH_STORE_INFERENCE_CONCURRENCY` gives uploaded models their own backend
+semaphore so the two runtimes stop throttling each other; also defaults to
+2, so nothing changes until both are raised deliberately.
+
+Thread safety was checked first, offline, against the frozen frames in
+`/mnt/storage/ruth-models/eval/2026-10-17/frames/`: 4 threads x 5 repeats
+x 32 frames per model, comparing every box against a serial ground truth.
+All three store models returned byte-identical results with zero errors
+across 480 concurrent calls, so **no per-model lock is needed**.
+
+**Deployed on the store runtime, 2026-10-17 10:06 UTC.** The flag alone,
+with the backend budget left at 2:
+
+| | baseline | after |
+|---|---:|---:|
+| max concurrent | **1** | **2** |
+| overlapping pairs | 0 of 8,141 | 8,236 of 9,597 |
+| requests/s | 13.57 | 15.99 |
+| latency mean / p95 ms | 50.0 / 97.0 | 65.2 / 114.5 |
+| runtime busy | 67.8% | 104.2% |
+| GPU util mean | 29.8% | 32.5% |
+| fleet publications/s | 14.03 | 14.53 |
+| error lines | 0 | 0 |
+
+Serialisation is gone — zero overlapping spans became 8,236. The latency
+rise is the expected contention trade, well inside the 250 ms stop
+condition, and buys the property that actually mattered: a fast model no
+longer waits behind a slow one.
+
+**The end-to-end gain is only +4% on fleet publications, and the reason
+matters.** Step B (raising `RUTH_STORE_INFERENCE_CONCURRENCY`) was
+prepared and then *not* applied, because the measurement showed the
+semaphore is not the constraint:
+
+```
+mean concurrency        1.02   (semaphore allows 2)
+time at concurrency >=2 33.2%
+```
+
+The budget of 2 sits idle two thirds of the time. At 65 ms mean, two slots
+could serve ~30 req/s; the runtime is serving 16. The limiter has moved
+upstream to `InferenceBudget` (`RUTH_INFERENCE_TARGET_FPS` 2.0,
+`RUTH_INFERENCE_MIN_FPS` 0.2, `RUTH_INFERENCE_MAX_GPU_UTIL` 2.3), which
+paces every camera deliberately and is what holds the fleet near 0.5
+ticks/s per camera. **This corrects the expectation recorded above** that
+the two changes had to move together: they do, but the second one is the
+pacer, not the semaphore.
+
+Raising the pacer is tracked separately as BL-10 — it touches the budget
+shared with built-in models, so it needs its own scoping and before/after.
+
+One defect found and fixed during the deploy: the startup line confirming
+the flag never printed. `ai/server/main.py` imports the routes module
+before the lifespan calls `configure_logging()`, so a module-level
+`logger.info` is emitted against an unconfigured logging system and
+dropped. It read exactly like the flag failing, when the flag was active.
+The value is now exposed as `inference.offload_status()` and logged from
+the lifespan; `ai/tests/test_inference_offload.py` covers it.
 
 ---
 

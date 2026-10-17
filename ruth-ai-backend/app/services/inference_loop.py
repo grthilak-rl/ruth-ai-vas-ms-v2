@@ -39,6 +39,7 @@ from sqlalchemy import select, and_, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.logging import get_logger
+from app.services.model_store.enabled import enabled_store_models
 from app.models import Device, StreamSession, StreamState, Violation, ViolationStatus
 from app.models.enums import is_known_violation_type, resolve_violation_type
 from app.integrations.unified_runtime.router import RuntimeRouter
@@ -130,6 +131,22 @@ MIN_FPS = float(os.getenv("RUTH_INFERENCE_MIN_FPS", "0.2"))
 # masked by the hand-driven session generator. Both are fixed (see _db() and
 # VIOLATION_TYPE_MAP); the value stays at 2 purely on the throughput evidence.
 INFERENCE_CONCURRENCY = int(os.getenv("RUTH_INFERENCE_CONCURRENCY", "2"))
+
+# Store (uploaded) models get their own budget, because they are served by a
+# different process with different limits. Keeping one shared semaphore
+# meant the two runtimes throttled each other: raising the budget to let the
+# store runtime work harder would also have let more built-in inference in
+# flight, on a path whose concurrency has never been validated.
+#
+# Defaults to the same 2, so this split changes nothing until it is raised
+# deliberately. Raise it only once the store runtime can actually use the
+# extra slots — see RUTH_RUNTIME_OFFLOAD_INFERENCE in
+# ai/server/routes/inference.py and BL-5. Raising this alone does nothing:
+# the store runtime blocks its event loop and serves one request at a time
+# regardless of how many the backend offers it.
+STORE_INFERENCE_CONCURRENCY = int(
+    os.getenv("RUTH_STORE_INFERENCE_CONCURRENCY", "2")
+)
 
 # Occupancy ceiling the scheduler aims for.
 #
@@ -285,6 +302,8 @@ class InferenceLoopService:
         # faster than the GPU drains it; the budget derives each session's pace.
         self._budget = InferenceBudget()
         self._gpu_slots = asyncio.Semaphore(INFERENCE_CONCURRENCY)
+        # Separate budget for uploaded models (see STORE_INFERENCE_CONCURRENCY).
+        self._store_gpu_slots = asyncio.Semaphore(STORE_INFERENCE_CONCURRENCY)
 
         # session_id -> device_id, so a cancelled session can drop its
         # device's detections (the cancel path has no device_id otherwise).
@@ -550,7 +569,7 @@ class InferenceLoopService:
                 # many inferences are in flight across all sessions; the timing
                 # around it feeds the budget so pacing tracks what the GPU is
                 # actually delivering rather than a number we guessed.
-                async with self._gpu_slots:
+                async with self._slots_for(model_id):
                     inference_started = asyncio.get_event_loop().time()
                     result = await self._runtime_router.submit_inference(
                         model_id=model_id,
@@ -981,9 +1000,9 @@ class InferenceLoopService:
         frame: Any,
         fetch_seconds: float,
     ) -> Dict[str, Any]:
-        """One model on the shared frame, under the GPU-concurrency semaphore."""
+        """One model on the shared frame, under its runtime's concurrency budget."""
         clock = asyncio.get_event_loop().time
-        async with self._gpu_slots:
+        async with self._slots_for(entry["model_id"]):
             started = clock()
             result = await self._runtime_router.submit_inference_with_frame(
                 model_id=entry["model_id"],
@@ -1131,6 +1150,31 @@ class InferenceLoopService:
             except Exception as e:  # the result is already published; log, don't back off
                 logger.error(f"Result processing failed: {e}", session_id=str(session_id), model_id=model_id)
         return outcomes
+
+
+    def _slots_for(self, model_id: str) -> asyncio.Semaphore:
+        """The concurrency budget that governs this model.
+
+        Uploaded (store) models run in the model-store runtime, built-in
+        ones in the unified runtime. They are separate processes with
+        separate capacity, so one must not be able to starve the other.
+
+        Membership comes from the store's own installed manifests
+        (`enabled_store_models`, cached for 30s), which is the same source
+        /models/status uses to mark entries `source: "store"` — rather than
+        a naming convention, which would silently misroute the first
+        uploaded model whose id happened to look built-in.
+
+        A store that is unreadable yields {}, so every model falls back to
+        the built-in budget: the conservative direction.
+        """
+        try:
+            if model_id in enabled_store_models():
+                return self._store_gpu_slots
+        except Exception:  # noqa: BLE001 - never fail an inference over routing
+            logger.debug("Store model lookup failed; using built-in budget",
+                         model_id=model_id)
+        return self._gpu_slots
 
     async def _add_session_counter(self, session_id: UUID, column_name: str, amount: int) -> None:
         """Atomic +amount on a stream_sessions counter.

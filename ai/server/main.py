@@ -77,6 +77,11 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     )
     logger = get_logger(__name__)
 
+    # Dispatch mode (BL-5). Logged here, not at import: routes are imported
+    # above, before configure_logging() above runs, so anything they log at
+    # module level is discarded.
+    logger.info("Inference dispatch configured", extra=inference.offload_status())
+
     logger.info("🚀 Ruth AI Unified Runtime starting...", extra={
         "runtime_id": config.runtime_id,
         "version": "1.0.0"

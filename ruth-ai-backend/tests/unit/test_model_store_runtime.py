@@ -126,12 +126,21 @@ async def test_store_down_from_the_start_delegates_to_builtin():
 
 
 class FakeDB:
+    """Minimal async session double for /models/status.
+
+    The route issues two shapes of query: scalar counts (active cameras,
+    last inference) and, since the inference-rate summary was added, a
+    row fetch via .all(). Both are stubbed empty — these tests are about
+    how store models are merged into the response, not about rates, and
+    an empty rate summary is the correct result for "no live sessions".
+    """
+
     def __init__(self):
         self.statements = []
 
     async def execute(self, stmt):
         self.statements.append(stmt)
-        return SimpleNamespace(scalar=lambda: None)
+        return SimpleNamespace(scalar=lambda: None, all=lambda: [])
 
 
 INSTALLED = {
