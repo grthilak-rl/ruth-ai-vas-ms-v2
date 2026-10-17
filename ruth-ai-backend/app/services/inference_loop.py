@@ -30,6 +30,7 @@ Usage:
 import asyncio
 import base64
 import os
+import random
 from contextlib import asynccontextmanager
 from datetime import datetime, timezone
 from typing import Any, AsyncGenerator, Callable, Dict, Optional
@@ -148,6 +149,31 @@ STORE_INFERENCE_CONCURRENCY = int(
     os.getenv("RUTH_STORE_INFERENCE_CONCURRENCY", "2")
 )
 
+# BL-10 (a). Charge the GPU budget for inference time only, not for the
+# frame fetch that precedes it.
+#
+# InferenceBudget exists to keep aggregate GPU demand under
+# MAX_GPU_UTILIZATION. It is currently fed `fetch_seconds + inference`,
+# so network I/O to VAS — which never touches the GPU — consumes the GPU
+# budget. Measured on HPCL 2026-10-17: 145 ms recorded, of which only
+# 65 ms was inference, so roughly half the "GPU" budget was spent on
+# fetch and every camera was paced at half the rate the GPU could serve.
+#
+# Off by default: this changes pacing for every camera, so it ships dark
+# and is enabled once the fetch figures below confirm the premise.
+BUDGET_EXCLUDE_FETCH = os.getenv("RUTH_BUDGET_EXCLUDE_FETCH", "").lower() in (
+    "1", "true", "yes", "on"
+)
+
+# Fraction of frame fetches to log, and the threshold above which one is
+# logged regardless. `fetch_seconds` is measured on every tick and then
+# thrown away into the budget, so its distribution has never been
+# observed — the 80 ms figure in BL-10 is inferred from the achieved rate,
+# not measured. Sampled because ticks run at ~16/s fleet-wide and logging
+# all of them would bury everything else.
+FETCH_LOG_SAMPLE = float(os.getenv("RUTH_FETCH_LOG_SAMPLE", "0.02"))
+SLOW_FETCH_SECONDS = float(os.getenv("RUTH_SLOW_FETCH_SECONDS", "0.5"))
+
 # Occupancy ceiling the scheduler aims for.
 #
 # This is deliberately > 1.0, which needs explaining. record_latency() times
@@ -178,6 +204,11 @@ MAX_GPU_UTILIZATION = float(os.getenv("RUTH_INFERENCE_MAX_GPU_UTIL", "2.3"))
 # Until a model has been measured, assume the slower of the two known models
 # so early iterations under-schedule rather than overcommit.
 DEFAULT_LATENCY_S = 0.3
+
+#: Assumed frame-fetch cost before any has been observed. Deliberately on
+#: the high side: under-estimating it would let the scheduler ask for
+#: intervals the loop cannot meet during the first few ticks.
+DEFAULT_FETCH_S = 0.15
 LATENCY_EWMA_ALPHA = 0.3
 
 
@@ -195,6 +226,8 @@ class InferenceBudget:
     def __init__(self) -> None:
         self._active: set = set()
         self._latency_s: Dict[str, float] = {}
+        #: Fleet-wide frame-fetch EWMA; None until the first tick.
+        self._fetch_s: Optional[float] = None
 
     def register(self, session_id: UUID) -> None:
         self._active.add(session_id)
@@ -219,6 +252,41 @@ class InferenceBudget:
 
     def latency_for(self, model_id: str) -> float:
         return self._latency_s.get(model_id, DEFAULT_LATENCY_S)
+
+    def record_fetch(self, seconds: float) -> None:
+        """Fold one observed frame-fetch duration into the fleet-wide EWMA.
+
+        Tracked separately from inference because it is a different
+        resource: fetch is network I/O to VAS, inference is the GPU. Once
+        BUDGET_EXCLUDE_FETCH drops fetch out of the GPU budget, the
+        scheduler still needs it — a tick costs fetch + inference in wall
+        time whatever the GPU is doing, and an interval shorter than that
+        is one the loop cannot meet.
+
+        Fleet-wide rather than per-camera: every camera reads its frame
+        from the same VAS, and one EWMA is enough to floor an interval.
+        """
+        previous = self._fetch_s
+        if previous is None:
+            self._fetch_s = seconds
+        else:
+            self._fetch_s = (
+                LATENCY_EWMA_ALPHA * seconds + (1 - LATENCY_EWMA_ALPHA) * previous
+            )
+
+    def fetch_estimate(self) -> float:
+        """Current frame-fetch EWMA, or a conservative default."""
+        return self._fetch_s if self._fetch_s is not None else DEFAULT_FETCH_S
+
+    def min_tick_seconds(self, model_id: str) -> float:
+        """The shortest interval a tick for this model can actually sustain.
+
+        A tick costs one fetch plus one inference in wall time. Scheduling
+        faster than that does not make it faster; it makes the loop
+        permanently late, so every iteration fires immediately and the
+        session spins without gaining throughput.
+        """
+        return self.fetch_estimate() + self.latency_for(model_id)
 
     def fps_for(self, model_id: str) -> float:
         """Per-camera fps this model can sustain given current contention."""
@@ -853,13 +921,50 @@ class InferenceLoopService:
             return True
         return meta["revision"] != session.models_revision
 
+    def _log_fetch(self, device_id: UUID, seconds: float, models_due: int) -> None:
+        """Log frame-fetch duration: a sample, plus every slow one.
+
+        `fetch_seconds` has been measured on every tick since multi-model
+        sessions shipped and then discarded straight into the budget, so
+        its distribution has never been looked at. The 80 ms used to size
+        BL-10 (a) is inferred from the achieved rate, not observed, and
+        the change is not worth making on an inferred premise.
+
+        Sampled at FETCH_LOG_SAMPLE because ticks run at ~16/s fleet-wide;
+        slow fetches are always logged, because the tail is what would
+        make fetch, rather than inference, the thing to fix.
+        """
+        slow = seconds >= SLOW_FETCH_SECONDS
+        if not slow and random.random() >= FETCH_LOG_SAMPLE:
+            return
+        logger.info(
+            "Frame fetch",
+            device_id=str(device_id),
+            fetch_ms=round(seconds * 1000, 1),
+            models_due=models_due,
+            slow=slow,
+        )
+
     def _multi_interval(self, entry: Dict[str, Any]) -> float:
+        """Seconds between ticks for one model on a multi-model camera.
+
+        Floored at what a tick actually costs in wall time (one fetch plus
+        one inference). Without the floor, excluding fetch from the GPU
+        budget could hand back an interval shorter than the work it
+        schedules: the loop would then be permanently late, fire every
+        iteration immediately and spin without gaining throughput.
+
+        The floor is applied unconditionally rather than only under the
+        flag, because it is a property that should always have held. In
+        practice it does not bind today — `desired_fps` caps at
+        TARGET_FPS (2.0, a 0.5 s interval) and a tick costs ~0.145 s — so
+        it changes nothing until something makes the budget generous.
+        """
         from app.services.model_rates import desired_fps
 
-        fps = self._budget.fps_for_consumer(
-            entry["model_id"], desired_fps(entry, TARGET_FPS)
-        )
-        return 1.0 / fps
+        model_id = entry["model_id"]
+        fps = self._budget.fps_for_consumer(model_id, desired_fps(entry, TARGET_FPS))
+        return max(1.0 / fps, self._budget.min_tick_seconds(model_id))
 
     def _clear_model_detections(self, device_id: UUID, keep: Optional[set] = None) -> None:
         for key in [k for k in self._latest_model_detections if k[0] == device_id]:
@@ -1017,7 +1122,19 @@ class InferenceLoopService:
             )
             # Same accounting as single-model sessions: the budget's latency
             # includes the frame fetch (see MAX_GPU_UTILIZATION).
-            self._budget.record_latency(entry["model_id"], fetch_seconds + clock() - started)
+            # BL-10 (a): the GPU budget should be charged for GPU time.
+            # `fetch_seconds` is network I/O to VAS and occupies no GPU, so
+            # including it made the budget throttle on a cost it was not
+            # modelling. Behind a flag because it repaces every camera.
+            #
+            # Either way the fetch is recorded separately, so the scheduler
+            # can still floor the interval at what a tick really costs.
+            inference_seconds = clock() - started
+            self._budget.record_latency(
+                entry["model_id"],
+                inference_seconds if BUDGET_EXCLUDE_FETCH
+                else fetch_seconds + inference_seconds,
+            )
         return result
 
     def _publish_model_result(
@@ -1283,6 +1400,11 @@ class InferenceLoopService:
                         stream_id=UUID(vas_stream_id), device_id=device_id
                     )
                     fetch_seconds = clock() - fetch_started
+                    # The scheduler needs this even when the GPU budget
+                    # does not (see BUDGET_EXCLUDE_FETCH): a tick costs a
+                    # fetch in wall time regardless of what the GPU does.
+                    self._budget.record_fetch(fetch_seconds)
+                    self._log_fetch(device_id, fetch_seconds, len(due))
                 except asyncio.CancelledError:
                     raise
                 except Exception as e:
