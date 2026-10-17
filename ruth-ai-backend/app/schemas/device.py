@@ -43,6 +43,23 @@ class DeviceStreaming(BaseModel):
         serialization_alias="model_config",
     )
 
+    # Monitoring coverage (BL-11). Set only when no inference session is
+    # running: when the most recent session ended. NULL while inference is
+    # active, and ALSO null when inference has never run on this camera —
+    # which is uncovered too, and for longer. Read it together with
+    # `active`, never alone.
+    #
+    # Server-side on purpose: a client timing this itself would restart the
+    # clock on every page load, and a camera unmonitored for a day would
+    # look freshly absent to anyone who refreshed.
+    inference_absent_since: datetime | None = Field(
+        None,
+        description=(
+            "When inference last stopped, for a camera with no active "
+            "session. Null if active, or if it never ran."
+        ),
+    )
+
 
 class Device(BaseModel):
     """Device/Camera entity.

@@ -1,7 +1,8 @@
 import { useMemo } from 'react';
-import type { HealthResponse, ModelStatusInfo } from '../../state';
+import type { Device, HealthResponse, ModelStatusInfo } from '../../state';
 import { formatUptime } from '../../state';
 import { ServiceStatusCard, type ServiceHealthStatus } from './ServiceStatusCard';
+import { MonitoringCoverage } from './MonitoringCoverage';
 import {
   deriveStoreRuntimeStatus,
   getModelStoreDescription,
@@ -16,6 +17,10 @@ interface SystemHealthViewProps {
   models: ModelStatusInfo[];
   /** Whether models data is loading */
   modelsLoading?: boolean;
+  /** Cameras, for the monitoring-coverage signal (BL-11). */
+  devices?: Device[];
+  /** Whether the devices list is loading */
+  devicesLoading?: boolean;
   /** Callback to refresh health data */
   onRefresh?: () => void;
   /** Whether health data is currently refreshing */
@@ -42,6 +47,8 @@ export function SystemHealthView({
   health,
   models,
   modelsLoading = false,
+  devices = [],
+  devicesLoading = false,
   onRefresh,
   isRefreshing = false,
 }: SystemHealthViewProps) {
@@ -149,6 +156,11 @@ export function SystemHealthView({
       )}
 
       {/* Service Status Cards */}
+      {/* Above the service cards on purpose: a degraded Redis is worth
+          knowing, a camera nobody is watching is worth knowing first.
+          See BL-11. */}
+      <MonitoringCoverage devices={devices} isLoading={devicesLoading} />
+
       <section className="system-health-view__section">
         <h2 className="system-health-view__section-title">Service Health</h2>
         <p className="system-health-view__section-hint">Click a card to expand detailed metrics</p>

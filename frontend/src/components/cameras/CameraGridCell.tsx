@@ -4,6 +4,7 @@ import { AIModelSelector, type AIModel } from './AIModelSelector';
 import { deviceDisplayName } from '../../state';
 import { CameraNamingEditor } from './CameraNamingEditor';
 import type { Device } from '../../state';
+import { cameraCoverage, formatAbsentFor } from '../../state/api/coverage';
 import { activeModelIds } from '../../state/api/devices.api';
 import type { ModelConfig } from '../../types/geofencing';
 import './CameraGridCell.css';
@@ -97,6 +98,18 @@ export function CameraGridCell({
     }
   }, [detectionStatus]);
 
+  // Monitoring coverage (BL-11). Derived here from the camera itself
+  // rather than threaded down as a prop: every caller already passes the
+  // full Device, and the signal must not depend on a parent remembering
+  // to compute it.
+  //
+  // Distinct from `detectionStatus`, which describes the model's health
+  // when inference IS running. This is the case where inference is not
+  // running at all while video streams — the state that let camera 74004
+  // go unwatched for 21 hours while this cell showed a cheerful "LIVE".
+  const coverage = useMemo(() => cameraCoverage(camera), [camera]);
+  const isUncovered = coverage.state === 'uncovered';
+
   const isDetectionActive = detectionStatus === 'active' || detectionStatus === 'degraded';
   const showOverlays = detectionStatus === 'active';
 
@@ -179,9 +192,18 @@ export function CameraGridCell({
           inOut={camera.in_out}
           displayName={label}
         />
-        <span className={`camera-grid-cell__detection ${detectionStatusInfo.className}`}>
-          {detectionStatusInfo.icon} {detectionStatusInfo.label}
-        </span>
+        {isUncovered ? (
+          <span
+            className="camera-grid-cell__detection camera-grid-cell__detection--unmonitored"
+            title={`Video is streaming but nothing is analysing it — no detection for ${formatAbsentFor(coverage.absentForMs)}.`}
+          >
+            ⚠ NOT MONITORED
+          </span>
+        ) : (
+          <span className={`camera-grid-cell__detection ${detectionStatusInfo.className}`}>
+            {detectionStatusInfo.icon} {detectionStatusInfo.label}
+          </span>
+        )}
         <span className={`camera-grid-cell__status ${statusIndicator.className}`}>
           {statusIndicator.icon} {statusIndicator.label}
         </span>

@@ -26,7 +26,7 @@ from datetime import datetime, timezone
 from typing import Any
 from uuid import UUID
 
-from sqlalchemy import and_, select
+from sqlalchemy import and_, func, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -599,14 +599,43 @@ class StreamService:
         for s in result.scalars().all():
             session_by_device.setdefault(s.device_id, s)
 
-        # 3. Compose per-device status from the two maps.
+        # 3. When did inference last stop, for the devices that have none
+        #    running? This is what makes the "camera not being monitored"
+        #    signal debounceable: inference legitimately drops out for a few
+        #    seconds during a restart or a model change, so a client needs
+        #    to know *how long* it has been absent, not merely that it is.
+        #
+        #    It has to come from the server. Timing it client-side would
+        #    restart the clock on every page load, so a camera unmonitored
+        #    for a day would look freshly absent to anyone who refreshed —
+        #    which is exactly how a 21-hour gap went unnoticed (BL-11).
+        #
+        #    One extra aggregate over devices without an active session.
+        uncovered_ids = [d.id for d in devices if d.id not in session_by_device]
+        absent_since: dict[UUID, datetime] = {}
+        if uncovered_ids:
+            stopped_stmt = (
+                select(
+                    StreamSession.device_id,
+                    func.max(StreamSession.stopped_at),
+                )
+                .where(StreamSession.device_id.in_(uncovered_ids))
+                .group_by(StreamSession.device_id)
+            )
+            for device_id, stopped_at in (await self._db.execute(stopped_stmt)).all():
+                if stopped_at is not None:
+                    absent_since[device_id] = stopped_at
+
+        # 4. Compose per-device status from the maps.
         out: dict[UUID, dict] = {}
         for d in devices:
             vas_stream = vas_stream_by_camera.get(d.vas_device_id)
             video_live = bool(vas_stream and vas_stream.state.value == "live")
             vas_stream_id = str(vas_stream.id) if vas_stream else None
             session = session_by_device.get(d.id)
-            out[d.id] = self._build_status_dict(session, video_live, vas_stream_id)
+            out[d.id] = self._build_status_dict(
+                session, video_live, vas_stream_id, absent_since.get(d.id)
+            )
 
         return out
 
@@ -615,8 +644,15 @@ class StreamService:
         session: StreamSession | None,
         video_live: bool,
         vas_stream_id: str | None,
+        inference_absent_since: datetime | None = None,
     ) -> dict:
-        """Shared shape for both get_combined_status and bulk variant."""
+        """Shared shape for both get_combined_status and bulk variant.
+
+        `inference_absent_since` is only meaningful when there is no active
+        session. NULL there means inference has never run on this camera,
+        which is "uncovered" too — and for longer — so callers must not
+        read NULL as "fine".
+        """
         if session is None:
             return {
                 "video_live": video_live,
@@ -626,6 +662,7 @@ class StreamService:
                 "state": None,
                 "model_id": None,
                 "model_config": None,
+                "inference_absent_since": inference_absent_since,
             }
         return {
             "video_live": video_live,
@@ -638,6 +675,7 @@ class StreamService:
             "models": [e.get("model_id") for e in session.models]
             if session.models
             else [session.model_id],
+            "inference_absent_since": None,
         }
 
     # -------------------------------------------------------------------------

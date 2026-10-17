@@ -190,3 +190,16 @@
 .camera-grid-cell__ai-controls .ai-model-selector__trigger {
   padding: 0 0.625rem;
 }
+/* Monitoring coverage (BL-11): video streaming, nothing analysing it.
+ *
+ * Deliberately the loudest thing in the status bar. "Detection
+ * Unavailable" is a model problem and reads as amber; this is the camera
+ * not being watched at all, and it sat invisible for 21 hours behind a
+ * green "LIVE". It should be impossible to scan past. */
+.camera-grid-cell__detection--unmonitored {
+  font-weight: 700;
+  color: #fff;
+  background-color: #d93025;
+  border-radius: 3px;
+  padding: 0.0625rem 0.375rem;
+}

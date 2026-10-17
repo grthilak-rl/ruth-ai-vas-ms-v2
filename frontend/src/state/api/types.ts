@@ -426,6 +426,16 @@ export interface DeviceStreaming {
   model_config: Record<string, unknown> | null;
 
   /**
+   * When inference last stopped, for a camera with no active session
+   * (BL-11). Null while inference is active, and ALSO null when it has
+   * never run — which is uncovered too, and for longer. Read it together
+   * with `active`, never alone; see state/api/coverage.ts.
+   *
+   * Optional: absent on backends older than the coverage signal.
+   */
+  inference_absent_since?: ISOTimestamp | null;
+
+  /**
    * Every model running on this camera (model_id is the first). Optional:
    * absent on backends older than multi-model sessions; use
    * activeModelIds(streaming), which falls back to [model_id].

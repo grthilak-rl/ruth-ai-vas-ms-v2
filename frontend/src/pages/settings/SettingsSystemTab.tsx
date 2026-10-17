@@ -1,5 +1,5 @@
 import { useCallback, useState } from 'react';
-import { useHealthQuery, useModelsStatusQuery } from '../../state';
+import { useDevicesQuery, useHealthQuery, useModelsStatusQuery } from '../../state';
 import { SystemHealthSkeleton, SystemHealthView } from '../../components/system-health';
 
 /**
@@ -32,16 +32,22 @@ export function SettingsSystemTab() {
     refetch: refetchModels,
   } = useModelsStatusQuery();
 
+  // Cameras, for the monitoring-coverage signal (BL-11). Uses the shared
+  // devices query, so it costs no extra request on a page that other
+  // views have usually already warmed.
+  const { data: devicesData, isLoading: isDevicesLoading, refetch: refetchDevices } =
+    useDevicesQuery();
+
   const [isManualRefresh, setIsManualRefresh] = useState(false);
 
   const handleRefresh = useCallback(async () => {
     setIsManualRefresh(true);
     try {
-      await Promise.all([refetchHealth(), refetchModels()]);
+      await Promise.all([refetchHealth(), refetchModels(), refetchDevices()]);
     } finally {
       setIsManualRefresh(false);
     }
-  }, [refetchHealth, refetchModels]);
+  }, [refetchHealth, refetchModels, refetchDevices]);
 
   if (isHealthLoading && !health) {
     return <SystemHealthSkeleton />;
@@ -65,6 +71,8 @@ export function SettingsSystemTab() {
       health={health}
       models={modelsData?.models ?? []}
       modelsLoading={isModelsLoading}
+      devices={devicesData?.items ?? []}
+      devicesLoading={isDevicesLoading}
       onRefresh={handleRefresh}
       isRefreshing={isManualRefresh || isHealthFetching}
     />

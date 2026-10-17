@@ -163,6 +163,9 @@ async def list_devices(
                     model_id=stream_status.get("model_id"),
                     models=stream_status.get("models") or [],
                     ai_model_config=stream_status.get("model_config"),
+                    inference_absent_since=stream_status.get(
+                        "inference_absent_since"
+                    ),
                 ),
             )
         )

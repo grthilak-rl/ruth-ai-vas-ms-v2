@@ -1,0 +1,100 @@
+/* Monitoring coverage (BL-11).
+ *
+ * Styled to be readable at a glance from across a control room: the
+ * question "is anything unwatched?" should be answerable without reading
+ * the detail. Green is not decoration here — it is the absence of an
+ * alarm, so the warn state has to be unmistakably different.
+ */
+
+.coverage {
+  padding: 0.875rem 1.125rem;
+  margin-bottom: 1.25rem;
+  background-color: #fff;
+  border: 1px solid #e0e0e0;
+  border-left-width: 4px;
+  border-radius: 8px;
+}
+
+.coverage--ok {
+  border-left-color: #1e7e34;
+}
+
+.coverage--warn {
+  background-color: #fff8f7;
+  border-color: #f5c6c2;
+  border-left-color: #d93025;
+}
+
+.coverage--none,
+.coverage--loading {
+  border-left-color: #9aa0a6;
+}
+
+.coverage__headline {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem 1rem;
+  align-items: baseline;
+  justify-content: space-between;
+}
+
+.coverage__label {
+  font-size: 0.875rem;
+  font-weight: 600;
+  color: #1a1a1a;
+}
+
+.coverage__ratio {
+  font-size: 1rem;
+  color: #333;
+}
+
+.coverage--warn .coverage__ratio strong {
+  color: #b3261e;
+}
+
+.coverage--ok .coverage__ratio strong {
+  color: #1e7e34;
+}
+
+.coverage__detail {
+  margin-top: 0.75rem;
+  padding-top: 0.75rem;
+  border-top: 1px solid #f5c6c2;
+}
+
+.coverage__alert {
+  margin: 0 0 0.5rem 0;
+  font-size: 0.875rem;
+  font-weight: 500;
+  color: #b3261e;
+}
+
+.coverage__list {
+  margin: 0;
+  padding-left: 1.25rem;
+  font-size: 0.875rem;
+  line-height: 1.6;
+  color: #333;
+}
+
+.coverage__camera {
+  font-weight: 600;
+}
+
+.coverage__since {
+  color: #666;
+}
+
+.coverage__muted {
+  margin: 0.5rem 0 0 0;
+  font-size: 0.8125rem;
+  color: #666;
+}
+
+@media (max-width: 560px) {
+  .coverage__headline {
+    flex-direction: column;
+    gap: 0.25rem;
+  }
+}
