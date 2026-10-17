@@ -43,6 +43,7 @@ from app.schemas.project import (
     StartProjectResponse,
 )
 from app.schemas.models import (
+    InferenceRateSummary,
     ModelStatusInfo,
     ModelsStatusResponse,
     StoreRuntimeStatus,
@@ -169,6 +170,7 @@ __all__ = [
     "ChatErrorDetail",
     "ChatRequest",
     "ChatResponse",
+    "InferenceRateSummary",
     # Project schemas
     "ArchivedViolation",
     "ArchivedViolationListResponse",

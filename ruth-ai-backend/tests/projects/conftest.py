@@ -37,6 +37,7 @@ from app.models import (
     ViolationStatus,
     ViolationType,
 )
+from app.services.device_service import DeviceService
 
 DATABASE_URL = os.environ.get("PROJECT_TEST_DATABASE_URL")
 
@@ -61,6 +62,16 @@ async def db(engine) -> AsyncGenerator[AsyncSession, None]:
     factory = async_sessionmaker(engine, expire_on_commit=False)
     async with factory() as session:
         yield session
+
+
+@pytest.fixture
+def device_service(db) -> DeviceService:
+    """DeviceService for list/count assertions.
+
+    Those two methods never touch VAS, so the client can be None. Note the
+    positional order: DeviceService takes (vas_client, db).
+    """
+    return DeviceService(None, db)
 
 
 @pytest.fixture

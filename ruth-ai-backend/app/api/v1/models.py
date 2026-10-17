@@ -17,6 +17,7 @@ from app.deps import DBSession
 from app.models import StreamSession, StreamState
 from app.schemas import (
     ErrorResponse,
+    InferenceRateSummary,
     ModelStatusInfo,
     ModelsStatusResponse,
     StoreRuntimeStatus,
@@ -35,6 +36,12 @@ from app.services.model_store.runtime_probe import (
 
 router = APIRouter(tags=["Models"])
 logger = get_logger(__name__)
+
+#: A session must have run this long before its lifetime-average rate is
+#: reported. Below it the average is dominated by startup and reads as a
+#: wild over- or under-performance; such sessions are omitted from the
+#: summary entirely rather than skewing the fleet figure.
+MIN_RATE_UPTIME_SECONDS = 5.0
 
 
 @router.get(
@@ -157,6 +164,23 @@ async def get_models_status(
         else:
             health_status = "unhealthy"
 
+        # The runtime already serves a properly-cased display_name for every
+        # built-in model, read from its model.yaml ("PPE Detection",
+        # "Geo-Fencing"). This used to be dropped, leaving clients to
+        # title-case the id instead and render "Ppe Detection". Passed
+        # through rather than fixed with an acronym heuristic in the
+        # frontend: the correct string already exists upstream, and a
+        # heuristic would be a second place to keep right.
+        #
+        # Passed as a conditional kwarg so that when the runtime omits it the
+        # field stays *unset* rather than set-to-None. The route serializes
+        # with response_model_exclude_unset=True, so an explicit None would
+        # start emitting `"display_name": null` on every built-in entry —
+        # a response-shape change for no benefit. Clients already humanize
+        # the id when the field is absent.
+        display_name = model_info.get("display_name")
+        extra = {"display_name": display_name} if display_name else {}
+
         models.append(
             ModelStatusInfo(
                 model_id=model_id,
@@ -166,6 +190,7 @@ async def get_models_status(
                 cameras_active=cameras_active,
                 last_inference_at=last_started,
                 started_at=last_started,
+                **extra,
             )
         )
 
@@ -201,11 +226,70 @@ async def get_models_status(
         store_reachable=store_runtime.reachable if store_runtime else None,
     )
 
+    inference_rate = await _inference_rate(db)
+
     # store_runtime stays unset (and so is omitted, via
     # response_model_exclude_unset) when no store runtime is configured.
     if store_runtime is None:
-        return ModelsStatusResponse(models=models)
-    return ModelsStatusResponse(models=models, store_runtime=store_runtime)
+        return ModelsStatusResponse(models=models, inference_rate=inference_rate)
+    return ModelsStatusResponse(
+        models=models, store_runtime=store_runtime, inference_rate=inference_rate
+    )
+
+
+async def _inference_rate(db) -> InferenceRateSummary:
+    """Achieved vs requested inference rate over the live sessions.
+
+    One query. `frames_processed` counts model publications (see
+    InferenceLoop._add_session_counter, which adds the number of models
+    published per tick), so it is directly comparable with
+    inference_fps x models without rescaling.
+
+    Sessions younger than MIN_RATE_UPTIME_SECONDS are skipped. Guarding
+    only against uptime <= 0 is not enough: time always advances, so a
+    session started moments ago has a tiny positive uptime and its handful
+    of frames divides out to an absurd rate (measured 72/s against a 30/s
+    request — 240% — on a session 0.07s old). An average needs a few
+    seconds of history before it means anything.
+    """
+    rows = (
+        await db.execute(
+            select(
+                StreamSession.inference_fps,
+                StreamSession.models,
+                StreamSession.frames_processed,
+                StreamSession.started_at,
+            ).where(StreamSession.state == StreamState.LIVE)
+        )
+    ).all()
+
+    now = datetime.now(timezone.utc)
+    cameras = 0
+    slots = 0
+    requested = 0.0
+    effective = 0.0
+
+    for fps, model_list, frames, started_at in rows:
+        if not started_at:
+            continue
+        uptime = (now - started_at).total_seconds()
+        if uptime < MIN_RATE_UPTIME_SECONDS:
+            continue
+        # NULL models = a legacy single-model session.
+        n_models = len(model_list) if model_list else 1
+        cameras += 1
+        slots += n_models
+        requested += float(fps) * n_models
+        effective += frames / uptime
+
+    percent = round(100.0 * effective / requested, 1) if requested > 0 else None
+    return InferenceRateSummary(
+        cameras=cameras,
+        model_slots=slots,
+        requested_per_second=round(requested, 2),
+        effective_per_second=round(effective, 2),
+        percent_of_requested=percent,
+    )
 
 
 async def _store_model_statuses(

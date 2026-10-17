@@ -46,6 +46,24 @@ const TABLE_LABELS: Record<string, string> = {
   bookmark_analyses: 'Bookmark analyses',
 };
 
+/**
+ * Why a zero can need explaining.
+ *
+ * The live multi-model/store inference path writes violations but never
+ * Event rows — inference_loop.py has no Event creation and never bumps
+ * events_count. Every event in the database came from the older ingest
+ * path, which last wrote on 2026-08-01. So "Detection events: 0" is
+ * accurate and permanent, not a sign that counting is broken, and an
+ * unannotated 0 next to a healthy violation count reads like a fault.
+ *
+ * Shown only when the count really is zero: if events ever start being
+ * recorded again the note disappears on its own rather than becoming a
+ * lie that needs removing.
+ */
+const NOT_RECORDED_NOTE: Record<string, string> = {
+  events: 'not recorded by the current pipeline',
+};
+
 function Counts({ counts, total }: { counts: Record<string, number>; total: number }) {
   return (
     <table className="admin-table start-project__counts">
@@ -58,12 +76,18 @@ function Counts({ counts, total }: { counts: Record<string, number>; total: numb
         </tr>
       </thead>
       <tbody>
-        {Object.entries(counts).map(([table, count]) => (
-          <tr key={table}>
-            <td>{TABLE_LABELS[table] ?? table}</td>
-            <td className="start-project__num">{count.toLocaleString()}</td>
-          </tr>
-        ))}
+        {Object.entries(counts).map(([table, count]) => {
+          const note = count === 0 ? NOT_RECORDED_NOTE[table] : undefined;
+          return (
+            <tr key={table}>
+              <td>{TABLE_LABELS[table] ?? table}</td>
+              <td className="start-project__num">
+                {count.toLocaleString()}
+                {note && <span className="start-project__note"> — {note}</span>}
+              </td>
+            </tr>
+          );
+        })}
       </tbody>
       <tfoot>
         <tr>

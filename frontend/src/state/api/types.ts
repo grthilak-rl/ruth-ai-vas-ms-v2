@@ -583,6 +583,26 @@ export interface StoreRuntimeStatus {
 }
 
 /**
+ * Achieved vs requested inference rate across live sessions.
+ *
+ * A session stores inference_fps (10 on HPCL) but the scheduler never aims
+ * for it — InferenceBudget paces sessions between TARGET_FPS (2.0) and
+ * MIN_FPS (0.2), degrading as cameras are added. Only the requested figure
+ * used to be visible anywhere, which made a heavily-paced deployment look
+ * like it was running at 10 fps.
+ *
+ * `effective_per_second` is a session-lifetime average, not instantaneous.
+ */
+export interface InferenceRateSummary {
+  cameras: number;
+  model_slots: number;
+  requested_per_second: number;
+  effective_per_second: number;
+  /** null when nothing is live. */
+  percent_of_requested: number | null;
+}
+
+/**
  * Models status response
  *
  * Source: GET /api/v1/models/status
@@ -597,6 +617,9 @@ export interface ModelsStatusResponse {
 
   /** Omitted when no store runtime is configured. */
   store_runtime?: StoreRuntimeStatus;
+
+  /** Achieved vs requested inference rate. Zeros when nothing is live. */
+  inference_rate?: InferenceRateSummary;
 }
 
 // ============================================================================

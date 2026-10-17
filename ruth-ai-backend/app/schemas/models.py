@@ -68,6 +68,42 @@ class StoreRuntimeStatus(BaseModel):
     models_ready: int = Field(0, description="Models in state=ready")
 
 
+class InferenceRateSummary(BaseModel):
+    """What inference is actually achieving, against what was asked for.
+
+    Exists because the two numbers are far apart and only one of them was
+    ever visible. A session stores inference_fps=10, but the scheduler does
+    not aim for it: InferenceBudget paces every session between
+    RUTH_INFERENCE_TARGET_FPS (default 2.0) and RUTH_INFERENCE_MIN_FPS
+    (0.2), degrading as cameras are added. Measured on the HPCL deployment
+    (11 cameras x 3 models), the achieved rate was 0.49 inferences/s per
+    camera per model against the 10 that the session advertised.
+
+    `effective_per_second` is a session-lifetime average
+    (frames_processed / uptime), not an instantaneous rate — cheap to
+    compute in one query, and stable enough to compare against the
+    request. Present it as an average, because that is what it is.
+    """
+
+    cameras: int = Field(0, description="Live sessions counted")
+    model_slots: int = Field(
+        0, description="Sum of models across live sessions (a camera x model pair)"
+    )
+    requested_per_second: float = Field(
+        0.0, description="Sum of inference_fps x models over live sessions"
+    )
+    effective_per_second: float = Field(
+        0.0,
+        description=(
+            "Model publications per second, averaged over each session's "
+            "lifetime. Compare with requested_per_second."
+        ),
+    )
+    percent_of_requested: float | None = Field(
+        None, description="effective/requested as a percentage; null when nothing is live"
+    )
+
+
 class ModelsStatusResponse(BaseModel):
     """Response schema for GET /api/v1/models/status.
 
@@ -75,6 +111,11 @@ class ModelsStatusResponse(BaseModel):
     """
 
     models: list[ModelStatusInfo] = Field(..., description="List of model statuses")
+    #: Additive and always set (zeros when nothing is live), so clients can
+    #: render the achieved-vs-requested comparison without a second call.
+    inference_rate: InferenceRateSummary | None = Field(
+        None, description="Achieved vs requested inference rate across live sessions"
+    )
     #: Additive, and left unset (so omitted — the endpoint serializes with
     #: exclude_unset) when MODEL_STORE_RUNTIME_URL is not configured. The
     #: built-in `models` list is unaffected by the store in every case.

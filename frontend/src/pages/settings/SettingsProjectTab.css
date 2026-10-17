@@ -207,3 +207,12 @@
   line-height: 1.6;
   color: #333;
 }
+
+/* Annotation on a count that is legitimately and permanently zero, so an
+   accurate 0 is not read as a counting fault. See NOT_RECORDED_NOTE. */
+.start-project__note {
+  font-weight: 400;
+  font-variant-numeric: normal;
+  color: #666;
+  white-space: nowrap;
+}

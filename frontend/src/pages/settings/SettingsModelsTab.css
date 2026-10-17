@@ -253,3 +253,20 @@
     overflow-x: auto;
   }
 }
+
+/* Achieved-vs-requested inference rate. Quiet, but present: the gap
+   between the two is large and was previously invisible. */
+.models-tab__rate {
+  margin: 0 0 1rem 0;
+  padding: 0.5rem 0.75rem;
+  font-size: 0.8125rem;
+  line-height: 1.5;
+  color: #333;
+  background-color: #f8f9fa;
+  border: 1px solid #e0e0e0;
+  border-radius: 6px;
+}
+
+.models-tab__rate-note {
+  color: #666;
+}

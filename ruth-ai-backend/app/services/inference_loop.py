@@ -107,9 +107,20 @@ def _normalize_bbox(bbox: Any) -> Optional[Dict[str, int]]:
 # a camera slows every camera a little instead of overcommitting the GPU.
 TARGET_FPS = float(os.getenv("RUTH_INFERENCE_TARGET_FPS", "2.0"))
 MIN_FPS = float(os.getenv("RUTH_INFERENCE_MIN_FPS", "0.2"))
-# Kept at 2 deliberately: raising it to 3 was measured and rejected, moving
-# aggregate throughput only 5.43 -> 5.60 inferences/sec (+3%) because the GPU
-# is already the binding constraint here.
+# Kept at 2, but NOT because the GPU is saturated — that earlier conclusion
+# was drawn against the built-in runtime and no longer holds.
+#
+# Measured on the HPCL store deployment (11 cameras x 3 models, 2026-10-17,
+# 9670 paired spans over 10 minutes): 16.1 inferences/s aggregate at 43ms
+# mean latency, with GPU utilisation 22-41% (median 26%) and 17% VRAM. Max
+# concurrent in-flight requests at the store runtime: 1, with zero
+# overlapping spans. The binding constraint is that the store runtime
+# blocks its event loop — ai/server/routes/inference.py calls
+# sandbox_manager.execute() synchronously inside an async handler, under a
+# single uvicorn worker — so raising this semaphore alone changes nothing.
+#
+# Raise it only together with that hand-off, and re-measure both the
+# aggregate rate and p95 latency afterwards.
 #
 # An earlier version of this comment also blamed the bump for a "session
 # handling race" in the violation-write path. That was wrong. The
@@ -1122,9 +1133,22 @@ class InferenceLoopService:
         return outcomes
 
     async def _add_session_counter(self, session_id: UUID, column_name: str, amount: int) -> None:
-        """Atomic +amount on a stream_sessions counter (multi-model ticks write
-        frames_processed once per tick rather than once per model). Failures
-        are swallowed, like _increment_session_counter."""
+        """Atomic +amount on a stream_sessions counter.
+
+        One WRITE per tick, but the amount added is the number of models
+        that published on that tick — so on a 3-model session
+        frames_processed advances by up to 3 per tick, and the column
+        counts model publications, not ticks. Dividing it by uptime gives
+        inferences/second, directly comparable with
+        inference_fps x len(models); divide again by the model count for
+        ticks/second.
+
+        (An earlier version of this docstring claimed the column counted
+        ticks. It does not, and reading it that way overstates the tick
+        rate by the number of models.)
+
+        Failures are swallowed, like _increment_session_counter.
+        """
         if amount <= 0:
             return
         column = getattr(StreamSession, column_name)

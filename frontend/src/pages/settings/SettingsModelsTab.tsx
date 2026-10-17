@@ -98,7 +98,9 @@ function UploadedRow({ model }: { model: MergedModel }) {
         </td>
         <td className="models-tab__num">{status?.cameras_active ?? '—'}</td>
         <td className="models-tab__muted">
-          {store ? `${store.file_count} files · ${formatBytes(store.total_bytes)}` : '—'}
+          {store
+            ? `${store.file_count} ${store.file_count === 1 ? 'file' : 'files'} · ${formatBytes(store.total_bytes)}`
+            : '—'}
         </td>
       </tr>
       {hint && (
@@ -175,6 +177,8 @@ export function SettingsModelsTab() {
     if (displayName.trim()) create.mutate(displayName.trim());
   };
 
+  const rate = status.data?.inference_rate;
+
   const healthy = merged.builtIn.filter((m) => m.status?.health === 'healthy').length;
   const totalWithStatus = merged.builtIn.length + merged.uploaded.filter((m) => m.status).length;
   const healthyTotal =
@@ -198,6 +202,33 @@ export function SettingsModelsTab() {
           </span>
         )}
       </div>
+
+      {/*
+        Achieved vs requested. Both numbers, because only the requested one
+        used to be visible: a session advertises inference_fps=10 while the
+        scheduler paces it between TARGET_FPS 2.0 and MIN_FPS 0.2, so a
+        deployment can sit at a twentieth of its stated rate with nothing
+        on screen saying so.
+      */}
+      {rate && rate.cameras > 0 && (
+        <p className="models-tab__rate">
+          Inference:{' '}
+          <strong>{rate.effective_per_second.toFixed(1)}/s</strong> effective
+          {rate.percent_of_requested !== null && (
+            <> ({rate.percent_of_requested.toFixed(0)}% of requested)</>
+          )}
+          {' · '}
+          {rate.requested_per_second.toFixed(0)}/s requested across{' '}
+          {rate.cameras} {rate.cameras === 1 ? 'camera' : 'cameras'} and{' '}
+          {rate.model_slots} model {rate.model_slots === 1 ? 'slot' : 'slots'}
+          <span className="models-tab__rate-note">
+            {' '}
+            — effective is a session-lifetime average; the scheduler paces
+            each camera down as cameras are added, so it will not reach the
+            requested figure.
+          </span>
+        </p>
+      )}
 
       {status.isError && (
         <p className="models-tab__error" role="alert">

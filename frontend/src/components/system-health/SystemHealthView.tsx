@@ -75,13 +75,30 @@ export function SystemHealthView({
     };
   }, [health.components]);
 
-  // Count model health
-  const modelCounts = useMemo(() => {
-    const healthy = models.filter(m => m.health === 'healthy').length;
-    const degraded = models.filter(m => m.health === 'degraded').length;
-    const unhealthy = models.filter(m => m.health === 'unhealthy').length;
-    return { healthy, degraded, unhealthy, total: models.length };
-  }, [models]);
+  // Count model health.
+  //
+  // Two counts, because the two places they appear mean different things.
+  // /models/status returns built-in AND uploaded (store) models in one
+  // array, store ones marked source:'store'.
+  const countHealth = (list: ModelStatusInfo[]) => ({
+    healthy: list.filter(m => m.health === 'healthy').length,
+    degraded: list.filter(m => m.health === 'degraded').length,
+    unhealthy: list.filter(m => m.health === 'unhealthy').length,
+    total: list.length,
+  });
+
+  // The "AI Models" section below lists every model, so its header counts
+  // every model.
+  const modelCounts = useMemo(() => countHealth(models), [models]);
+
+  // The AI Runtime service card must count ONLY built-in models. Uploaded
+  // models are served by a different process with its own card on this
+  // page, so including them made the card claim credit for models the AI
+  // Runtime has never loaded ("8 of 8" when it serves 5).
+  const builtInCounts = useMemo(
+    () => countHealth(models.filter(m => m.source !== 'store')),
+    [models]
+  );
 
   const systemStatusLabel = getSystemStatusLabel(systemStatus);
   const systemStatusIcon = getSystemStatusIcon(systemStatus);
@@ -148,7 +165,7 @@ export function SystemHealthView({
           <ServiceStatusCard
             serviceName="AI Runtime"
             status={serviceStatuses.aiRuntime}
-            description={getAIRuntimeDescription(serviceStatuses.aiRuntime, modelCounts)}
+            description={getAIRuntimeDescription(serviceStatuses.aiRuntime, builtInCounts)}
             lastUpdated={health.timestamp}
             expandable={true}
             serviceType="ai_runtime"

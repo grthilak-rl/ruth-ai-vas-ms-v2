@@ -11,7 +11,6 @@ import uuid
 import pytest
 
 from app.models import Device
-from app.services.device_service import DeviceService
 
 pytestmark = pytest.mark.skipif(
     not os.environ.get("PROJECT_TEST_DATABASE_URL"),
@@ -29,13 +28,6 @@ async def _seed(db, *, enabled: bool, active: bool = True, name: str = "CAM") ->
     db.add(device)
     await db.flush()
     return device
-
-
-@pytest.fixture
-def device_service(db) -> DeviceService:
-    # list/count never touch VAS, so the client can be None. Note the
-    # positional order: DeviceService takes (vas_client, db).
-    return DeviceService(None, db)
 
 
 async def test_disabled_cameras_hidden_by_default(db, device_service) -> None:
