@@ -43,8 +43,12 @@ export function getModelDisplay(model: ModelStatusInfo): ModelDisplayInfo {
  *
  * Re-exported from API module for convenience.
  */
-export function humanizeModelId(modelId: string, isAdmin: boolean = false): string {
-  return apiHumanizeModelId(modelId, isAdmin);
+export function humanizeModelId(
+  modelId: string,
+  isAdmin: boolean = false,
+  displayName?: string | null
+): string {
+  return apiHumanizeModelId(modelId, isAdmin, displayName);
 }
 
 /**

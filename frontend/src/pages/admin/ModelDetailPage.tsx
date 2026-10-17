@@ -13,8 +13,11 @@ import { formatBytes, formatDateTime } from './format';
 import './AdminPages.css';
 
 /**
- * Model Management — one model
- * Path: /admin/models/:modelPk — behind RequireAdminToken.
+ * One uploaded model: files, uploads, delete.
+ *
+ * Path: /settings/models/:modelPk — a drill-down from the AI Models tab,
+ * still behind RequireAdminToken because, unlike the tabs, there is
+ * nothing here to show without a token.
  */
 export function ModelDetailPage() {
   const { modelPk = '' } = useParams();
@@ -40,7 +43,7 @@ export function ModelDetailPage() {
     mutationFn: () => deleteStoreModel(modelPk),
     onSuccess: () => {
       refresh();
-      navigate('/admin/models', { replace: true });
+      navigate('/settings/models', { replace: true });
     },
   });
 
@@ -50,7 +53,7 @@ export function ModelDetailPage() {
   if (model.isError) {
     return (
       <div className="admin-page">
-        <Link to="/admin/models" className="admin-back">← All models</Link>
+        <Link to="/settings/models" className="admin-back">← AI Models</Link>
         <p className="admin-login__error" role="alert">
           {model.error instanceof AdminApiError && model.error.status === 404
             ? 'This model does not exist or was deleted.'
@@ -77,7 +80,7 @@ export function ModelDetailPage() {
 
   return (
     <div className="admin-page">
-      <Link to="/admin/models" className="admin-back">← All models</Link>
+      <Link to="/settings/models" className="admin-back">← AI Models</Link>
       <header className="admin-page__header">
         <div>
           <h1 className="admin-page__title">{data.display_name}</h1>

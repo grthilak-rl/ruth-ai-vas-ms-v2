@@ -2,6 +2,23 @@
 
 A minimal frontend portal for viewing live video feeds from VAS-MS-V2 devices via WebRTC.
 
+## Requirements
+
+**Node 20.19+ (or 22.12+).** Pinned in `engines` and `.nvmrc`; the Docker
+build already uses `node:20-alpine`.
+
+This is not advisory. Vite 7 declares `^20.19.0 || >=22.12.0` and on Node 18
+`vitest run` fails 24 tests in `src/components/video/__tests__/` with
+`Hook timed out in 10000ms` — fake-timer hooks never settle. The failures
+look like real test failures and are not: the same suite is 86/86 on Node
+20. If you see that signature, check `node --version` before debugging the
+tests.
+
+```bash
+nvm use            # reads .nvmrc
+node --version     # expect v20.19+
+```
+
 ## Quick Start
 
 ```bash

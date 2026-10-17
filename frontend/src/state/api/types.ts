@@ -566,12 +566,37 @@ export interface ModelStatusInfo {
 }
 
 /**
+ * Store runtime reachability, reported alongside the model list.
+ *
+ * Present only when a store runtime is configured (MODEL_STORE_RUNTIME_URL).
+ * Absent is "no store runtime in this deployment", which is different from
+ * `reachable: false`, which is "configured but we could not reach it" —
+ * the Settings model list distinguishes the two.
+ */
+export interface StoreRuntimeStatus {
+  reachable: boolean;
+  error?: string | null;
+  checked_at?: ISOTimestamp | null;
+  last_success_at?: ISOTimestamp | null;
+  models_total?: number | null;
+  models_ready?: number | null;
+}
+
+/**
  * Models status response
  *
  * Source: GET /api/v1/models/status
+ *
+ * `models` is already the union of built-in runtime models and uploaded
+ * (store) models — the latter carry `source: 'store'`. The backend has
+ * merged these since the store-runtime probe landed; the frontend simply
+ * did not read the distinguishing fields until the Settings consolidation.
  */
 export interface ModelsStatusResponse {
   models: ModelStatusInfo[];
+
+  /** Omitted when no store runtime is configured. */
+  store_runtime?: StoreRuntimeStatus;
 }
 
 // ============================================================================

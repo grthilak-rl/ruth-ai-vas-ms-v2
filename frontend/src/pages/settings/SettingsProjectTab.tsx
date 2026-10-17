@@ -1,6 +1,6 @@
 import { useMemo, useState, type FormEvent } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { Link } from 'react-router-dom';
+import { useOutletContext } from 'react-router-dom';
 import {
   AdminApiError,
   fetchProjectPreflight,
@@ -9,13 +9,21 @@ import {
   type ProjectPreflight,
   type ProjectSummary,
   type StartProjectResult,
-} from './adminApi';
-import { formatDateTime } from './format';
-import './AdminPages.css';
-import './StartProjectPage.css';
+} from '../admin/adminApi';
+import { useAdminSession } from '../admin/useAdminSession';
+import { formatDateTime } from '../admin/format';
+import { InlineAdminSignIn } from './InlineAdminSignIn';
+import type { SettingsOutletContext } from './SettingsLayout';
+import '../admin/AdminPages.css';
+import './SettingsProjectTab.css';
 
 /**
- * Start New Project — Path: /admin/projects, behind RequireAdminToken.
+ * Settings -> Project. Path: /settings/project.
+ *
+ * Was the standalone /admin/projects page behind a route guard. It now
+ * lives in Settings, which is reachable signed out, so the whole tab is
+ * gated inline: there is no open endpoint for "what project is running",
+ * so with no token there is genuinely nothing to show but the prompt.
  *
  * The screen's job is to make an irreversible-looking action legible before
  * it is taken, and reassuring after:
@@ -175,7 +183,37 @@ function ProjectRow({ project }: { project: ProjectSummary }) {
   );
 }
 
-export function StartProjectPage() {
+export function SettingsProjectTab() {
+  const { sessionExpired } = useOutletContext<SettingsOutletContext>();
+  const { isSignedIn } = useAdminSession();
+
+  // Every endpoint this tab needs is admin-only, so signed out there is
+  // nothing to render read-only. Returning early also means the preflight
+  // poll below never starts without a token.
+  if (!isSignedIn) {
+    return (
+      <div className="start-project__gated">
+        <section className="admin-card start-project__explainer">
+          <h2 className="start-project__section-title">Project lifecycle</h2>
+          <p>
+            Starting a new project archives this site's violations, events,
+            evidence links, stream sessions and bookmark analyses, then
+            begins a new project at zero. Nothing is deleted and no file on
+            disk is moved.
+          </p>
+        </section>
+        <InlineAdminSignIn
+          capability="view and manage projects"
+          expired={sessionExpired}
+        />
+      </div>
+    );
+  }
+
+  return <ProjectTabContent />;
+}
+
+function ProjectTabContent() {
   const queryClient = useQueryClient();
   const [name, setName] = useState('');
   const [confirmName, setConfirmName] = useState('');
@@ -234,20 +272,7 @@ export function StartProjectPage() {
   }, [confirmName, namesMatch]);
 
   return (
-    <div className="admin-page">
-      <header className="admin-page__header">
-        <div>
-          <Link to="/admin/models" className="admin-back">
-            ← Model Management
-          </Link>
-          <h1 className="admin-page__title">Start New Project</h1>
-          <p className="admin-page__subtitle">
-            Archive this site's violations, events, evidence links, sessions
-            and bookmark analyses, and begin a new project at zero.
-          </p>
-        </div>
-      </header>
-
+    <div className="start-project">
       <section className="admin-card start-project__explainer">
         <h2 className="start-project__section-title">What this does</h2>
         <ul>

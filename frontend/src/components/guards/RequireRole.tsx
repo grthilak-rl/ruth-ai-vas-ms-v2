@@ -25,14 +25,22 @@ interface RequireRoleProps {
  * Usage:
  * ```tsx
  * <Route
- *   path="/settings"
+ *   path="/analytics"
  *   element={
- *     <RequireRole requiredRole="admin">
- *       <SettingsPage />
+ *     <RequireRole requiredRole="supervisor">
+ *       <AnalyticsPage />
  *     </RequireRole>
  *   }
  * />
  * ```
+ *
+ * There is no RequireAdmin wrapper. Settings was its only consumer and now
+ * gates on the admin token instead (useAdminSession), because the role
+ * these guards read is hardcoded to 'admin' in AuthContext with a TODO and
+ * nothing ever calls login() — so an admin role gate protects nothing today
+ * and would hide the page outright the day real auth lands. Use
+ * `RequireRole requiredRole="admin"` directly if a genuinely role-gated
+ * admin route ever appears.
  */
 export function RequireRole({
   requiredRole,
@@ -57,9 +65,3 @@ export function RequireSupervisor({ children }: { children: ReactNode }) {
   return <RequireRole requiredRole="supervisor">{children}</RequireRole>;
 }
 
-/**
- * Convenience wrapper for Admin-only routes
- */
-export function RequireAdmin({ children }: { children: ReactNode }) {
-  return <RequireRole requiredRole="admin">{children}</RequireRole>;
-}

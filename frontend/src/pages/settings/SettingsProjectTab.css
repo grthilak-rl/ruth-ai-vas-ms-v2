@@ -188,3 +188,22 @@
     margin-bottom: 0.5rem;
   }
 }
+
+/* Signed-out state for the whole tab.
+ *
+ * Every endpoint this tab needs is admin-only — there is no open "which
+ * project is running" endpoint — so signed out it shows what the action
+ * does and asks for credentials, rather than an empty shell. */
+.start-project__gated {
+  display: flex;
+  flex-direction: column;
+  gap: 1rem;
+  max-width: 48rem;
+}
+
+.start-project__gated p {
+  margin: 0;
+  font-size: 0.875rem;
+  line-height: 1.6;
+  color: #333;
+}

@@ -1,0 +1,255 @@
+/* Settings -> AI Models: the merged built-in + uploaded list. */
+
+.models-tab__summary {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 1rem;
+  align-items: center;
+  margin-bottom: 1rem;
+  font-size: 0.875rem;
+  color: #333;
+}
+
+.models-tab__runtime {
+  padding: 0.125rem 0.5rem;
+  font-size: 0.8125rem;
+  font-weight: 500;
+  border-radius: 999px;
+}
+
+.models-tab__runtime--up {
+  color: #1e7e34;
+  background-color: #e6f4ea;
+}
+
+.models-tab__runtime--down {
+  color: #8a3f00;
+  background-color: #fff4e5;
+}
+
+.models-tab__section {
+  padding: 1rem 1.25rem;
+  margin-bottom: 1.25rem;
+  background-color: #fff;
+  border: 1px solid #e0e0e0;
+  border-radius: 8px;
+}
+
+.models-tab__section-header {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.75rem;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.models-tab__section-title {
+  margin: 0 0 0.75rem 0;
+  font-size: 1rem;
+  font-weight: 600;
+  color: #1a1a1a;
+}
+
+/* Table */
+.models-tab__table {
+  width: 100%;
+  font-size: 0.875rem;
+  border-collapse: collapse;
+}
+
+.models-tab__table th {
+  padding: 0.5rem 0.75rem;
+  font-weight: 500;
+  color: #666;
+  text-align: left;
+  border-bottom: 1px solid #e0e0e0;
+}
+
+.models-tab__table td {
+  padding: 0.625rem 0.75rem;
+  color: #1a1a1a;
+  vertical-align: top;
+  border-bottom: 1px solid #f0f0f0;
+}
+
+.models-tab__table a {
+  color: #1a73e8;
+  font-weight: 500;
+  text-decoration: none;
+}
+
+.models-tab__name {
+  font-weight: 500;
+}
+
+.models-tab__model-id {
+  margin-top: 0.125rem;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 0.75rem;
+  color: #666;
+}
+
+.models-tab__mono {
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 0.8125rem;
+}
+
+.models-tab__num {
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}
+
+.models-tab__muted {
+  color: #666;
+}
+
+/* Health dot */
+.models-tab__dot {
+  display: inline-block;
+  width: 0.5rem;
+  height: 0.5rem;
+  margin-right: 0.375rem;
+  border-radius: 50%;
+  background-color: #9aa0a6;
+}
+
+.models-tab__dot--healthy { background-color: #1e7e34; }
+.models-tab__dot--degraded { background-color: #f29900; }
+.models-tab__dot--unhealthy { background-color: #d93025; }
+
+/* Uploaded state badges. Four states, four distinguishable treatments --
+   "Not installed" and "Runtime unreachable" must not read the same, since
+   one is a thing to act on and the other a thing we could not determine. */
+.models-tab__state {
+  display: inline-block;
+  padding: 0.125rem 0.5rem;
+  font-size: 0.75rem;
+  font-weight: 500;
+  white-space: nowrap;
+  border-radius: 4px;
+}
+
+.models-tab__state--installed {
+  color: #1e7e34;
+  background-color: #e6f4ea;
+}
+
+.models-tab__state--not_installed {
+  color: #8a3f00;
+  background-color: #fff4e5;
+}
+
+.models-tab__state--installed_outside_management {
+  color: #1a73e8;
+  background-color: #e8f0fe;
+}
+
+.models-tab__state--runtime_unreachable {
+  color: #5f6368;
+  background-color: #f1f3f4;
+}
+
+/* Explanatory row beneath a non-installed model. Also the slot the future
+   Enable / Apply action drops into. */
+.models-tab__hint-row td {
+  padding-top: 0;
+  border-bottom: 1px solid #f0f0f0;
+}
+
+.models-tab__hint {
+  display: inline-block;
+  max-width: 60ch;
+  font-size: 0.8125rem;
+  line-height: 1.45;
+  color: #666;
+}
+
+.models-tab__hint a {
+  color: #1a73e8;
+}
+
+/* Create form */
+.models-tab__create {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.75rem;
+  align-items: flex-end;
+  margin-top: 1rem;
+  padding-top: 1rem;
+  border-top: 1px solid #f0f0f0;
+}
+
+.models-tab__create-field {
+  display: flex;
+  flex: 1 1 18rem;
+  flex-direction: column;
+  gap: 0.25rem;
+  min-width: 0;
+}
+
+.models-tab__create-label {
+  font-size: 0.75rem;
+  font-weight: 500;
+  color: #666;
+}
+
+.models-tab__create-input {
+  width: 100%;
+  padding: 0.4375rem 0.625rem;
+  font-size: 0.875rem;
+  border: 1px solid #ccc;
+  border-radius: 4px;
+}
+
+.models-tab__create-submit {
+  flex: 0 0 auto;
+  padding: 0.4375rem 1rem;
+  font-size: 0.875rem;
+  font-weight: 500;
+  color: #fff;
+  cursor: pointer;
+  background-color: #1a73e8;
+  border: 1px solid #1a73e8;
+  border-radius: 4px;
+}
+
+.models-tab__create-submit:disabled {
+  background-color: #a8c7fa;
+  border-color: #a8c7fa;
+  cursor: not-allowed;
+}
+
+.models-tab__error {
+  margin: 0.75rem 0 0 0;
+  padding: 0.5rem 0.625rem;
+  font-size: 0.8125rem;
+  color: #b3261e;
+  background-color: #fdecea;
+  border-radius: 4px;
+}
+
+.models-tab__error button {
+  margin-left: 0.5rem;
+  color: #b3261e;
+  text-decoration: underline;
+  cursor: pointer;
+  background: none;
+  border: none;
+}
+
+.models-tab__warning {
+  margin: 0 0 1rem 0;
+  padding: 0.625rem 0.75rem;
+  font-size: 0.875rem;
+  color: #8a3f00;
+  background-color: #fff4e5;
+  border: 1px solid #ffd9a8;
+  border-radius: 6px;
+}
+
+@media (max-width: 760px) {
+  .models-tab__section {
+    padding: 0.875rem;
+    overflow-x: auto;
+  }
+}

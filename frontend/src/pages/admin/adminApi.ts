@@ -14,7 +14,28 @@ import { buildApiUrl } from '../../config/api';
 
 export const ADMIN_TOKEN_KEY = 'ruth_admin_token';
 export const ADMIN_LOGIN_PATH = '/admin/login';
-export const ADMIN_HOME_PATH = '/admin/models';
+
+/** Where the standalone login page lands when no `next` was given. */
+export const ADMIN_HOME_PATH = '/settings/models';
+
+/**
+ * Called whenever the token is cleared because the server rejected it.
+ *
+ * Admin controls now live inside Settings, a page that works perfectly well
+ * signed out. A 401 there must put the affected section back into its
+ * signed-out state and leave the operator where they are — the old
+ * behaviour, a hard `location.replace` to /admin/login, would throw them
+ * out of the page mid-task and lose everything else on it.
+ *
+ * Set by SettingsLayout. Unset (the standalone pages) keeps the redirect,
+ * which is still right for a page that is nothing but admin content.
+ */
+type SessionExpiredHandler = () => void;
+let onSessionExpired: SessionExpiredHandler | null = null;
+
+export function setSessionExpiredHandler(handler: SessionExpiredHandler | null): void {
+  onSessionExpired = handler;
+}
 
 const ADMIN_API_PREFIX = '/api/v1/admin';
 const TIMEOUT_MS = 30_000;
@@ -85,13 +106,24 @@ async function errorFromResponse(response: Response): Promise<AdminApiError> {
 // Navigation helpers
 // ============================================================================
 
-/** Only same-origin admin paths are accepted as a post-login destination. */
+/**
+ * Only same-origin admin destinations are accepted after login.
+ *
+ * `/settings/` joined `/admin/` here when the admin pages moved into
+ * Settings. Both are allowed: `/admin/*` still resolves (as redirects) so
+ * old bookmarks and any link already in the wild keep working.
+ *
+ * The `//` check matters — `//evil.example` is a protocol-relative URL that
+ * `startsWith('/settings/')` would otherwise have to reject on its own.
+ */
+const ALLOWED_NEXT_PREFIXES = ['/settings/', '/admin/'] as const;
+
 export function safeNextPath(next: string | null): string {
   if (
     next &&
-    next.startsWith('/admin/') &&
     !next.startsWith('//') &&
-    !next.startsWith(ADMIN_LOGIN_PATH)
+    !next.startsWith(ADMIN_LOGIN_PATH) &&
+    ALLOWED_NEXT_PREFIXES.some((prefix) => next.startsWith(prefix))
   ) {
     return next;
   }
@@ -105,7 +137,24 @@ export function adminLoginUrl(returnTo?: string): string {
     : `${ADMIN_LOGIN_PATH}?next=${encodeURIComponent(next)}`;
 }
 
-function redirectToAdminLogin(): void {
+/**
+ * The token was rejected or is missing. Clear it and recover.
+ *
+ * Inside Settings the handler re-renders the admin sections as signed out,
+ * in place. Everywhere else we fall back to the login page.
+ *
+ * Clearing first, unconditionally, is what makes this safe against a
+ * redirect loop: the login page itself never calls adminFetch, and by the
+ * time anything else re-runs there is no token to be rejected a second
+ * time. A section that re-queries after this gets its signed-out branch,
+ * not another 401.
+ */
+function handleSessionExpired(): void {
+  clearAdminToken();
+  if (onSessionExpired) {
+    onSessionExpired();
+    return;
+  }
   window.location.replace(adminLoginUrl(window.location.pathname + window.location.search));
 }
 
@@ -131,12 +180,14 @@ async function send(path: string, init: RequestInit): Promise<Response> {
 
 /**
  * Authenticated admin request. On 401 (missing, expired or invalid token) the
- * token is cleared and the browser is sent to the admin login page.
+ * token is cleared and the session-expired handler runs: inside Settings
+ * that re-renders the admin sections as signed out; elsewhere it redirects
+ * to the admin login page.
  */
 export async function adminFetch<T>(path: string, init: RequestInit = {}): Promise<T> {
   const token = getAdminToken();
   if (!token) {
-    redirectToAdminLogin();
+    handleSessionExpired();
     throw new AdminApiError(401, 'Not signed in');
   }
 
@@ -148,8 +199,7 @@ export async function adminFetch<T>(path: string, init: RequestInit = {}): Promi
 
   const response = await send(path, { ...init, headers });
   if (response.status === 401) {
-    clearAdminToken();
-    redirectToAdminLogin();
+    handleSessionExpired();
     throw await errorFromResponse(response);
   }
   if (!response.ok) {
@@ -326,7 +376,7 @@ export function putChunk(
 ): Promise<void> {
   const token = getAdminToken();
   if (!token) {
-    redirectToAdminLogin();
+    handleSessionExpired();
     return Promise.reject(new AdminApiError(401, 'Not signed in'));
   }
   return new Promise((resolve, reject) => {
@@ -342,8 +392,7 @@ export function putChunk(
         return;
       }
       if (xhr.status === 401) {
-        clearAdminToken();
-        redirectToAdminLogin();
+        handleSessionExpired();
       }
       let message = xhr.statusText || `HTTP ${xhr.status}`;
       try {
@@ -453,7 +502,7 @@ export async function startNewProject(body: {
 }): Promise<StartProjectResult> {
   const token = getAdminToken();
   if (!token) {
-    redirectToAdminLogin();
+    handleSessionExpired();
     throw new AdminApiError(401, 'Not signed in');
   }
 
@@ -484,8 +533,7 @@ export async function startNewProject(body: {
   }
 
   if (response.status === 401) {
-    clearAdminToken();
-    redirectToAdminLogin();
+    handleSessionExpired();
     throw await errorFromResponse(response);
   }
   if (!response.ok) {

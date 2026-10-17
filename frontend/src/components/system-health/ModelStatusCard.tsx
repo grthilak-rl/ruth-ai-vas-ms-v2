@@ -31,7 +31,8 @@ export function ModelStatusCard({
   const [isExpanded, setIsExpanded] = useState(false);
 
   const displayInfo = getModelDisplay(model);
-  const modelName = humanizeModelId(model.model_id, isAdmin);
+  // Uploaded models carry the name an admin typed; prefer it over the slug.
+  const modelName = humanizeModelId(model.model_id, isAdmin, model.display_name);
   const healthClass = getHealthClass(model.health);
   const statusIcon = getStatusIcon(model.status, model.health);
 

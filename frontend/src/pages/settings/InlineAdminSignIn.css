@@ -1,0 +1,95 @@
+/* Inline admin sign-in.
+ *
+ * Deliberately quiet: it sits inside a section of an otherwise usable page
+ * and marks a boundary, so it should read as "this part needs a key", not
+ * as a login wall. Colours match AdminPages.css, which uses literals.
+ */
+
+.inline-signin {
+  padding: 0.875rem 1rem;
+  background-color: #f8f9fa;
+  border: 1px solid #e0e0e0;
+  border-radius: 6px;
+}
+
+.inline-signin__prompt {
+  margin: 0 0 0.75rem 0;
+  font-size: 0.875rem;
+  line-height: 1.5;
+  color: #333;
+}
+
+.inline-signin__lock {
+  margin-right: 0.375rem;
+}
+
+.inline-signin__fields {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.75rem;
+  align-items: flex-end;
+}
+
+.inline-signin__field {
+  display: flex;
+  flex: 1 1 12rem;
+  flex-direction: column;
+  gap: 0.25rem;
+  min-width: 0;
+}
+
+.inline-signin__label {
+  font-size: 0.75rem;
+  font-weight: 500;
+  color: #666;
+}
+
+.inline-signin__input {
+  width: 100%;
+  padding: 0.4375rem 0.625rem;
+  font-size: 0.875rem;
+  color: #1a1a1a;
+  background-color: #fff;
+  border: 1px solid #ccc;
+  border-radius: 4px;
+}
+
+.inline-signin__input:focus {
+  border-color: #1a73e8;
+  outline: 2px solid rgba(26, 115, 232, 0.2);
+  outline-offset: 0;
+}
+
+.inline-signin__submit {
+  flex: 0 0 auto;
+  padding: 0.4375rem 1rem;
+  font-size: 0.875rem;
+  font-weight: 500;
+  color: #fff;
+  background-color: #1a73e8;
+  border: 1px solid #1a73e8;
+  border-radius: 4px;
+  cursor: pointer;
+}
+
+.inline-signin__submit:disabled {
+  background-color: #a8c7fa;
+  border-color: #a8c7fa;
+  cursor: not-allowed;
+}
+
+.inline-signin__error {
+  margin: 0.75rem 0 0 0;
+  padding: 0.5rem 0.625rem;
+  font-size: 0.8125rem;
+  color: #b3261e;
+  background-color: #fdecea;
+  border-radius: 4px;
+}
+
+@media (max-width: 560px) {
+  .inline-signin__fields {
+    flex-direction: column;
+    align-items: stretch;
+  }
+}

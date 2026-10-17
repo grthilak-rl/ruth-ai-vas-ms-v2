@@ -16,4 +16,3 @@ export { ServiceStatusCard, type ServiceHealthStatus } from './ServiceStatusCard
 export { ModelStatusCard } from './ModelStatusCard';
 
 // Audit events
-export { AuditEventList, type AuditEvent, type AuditEventType } from './AuditEventList';

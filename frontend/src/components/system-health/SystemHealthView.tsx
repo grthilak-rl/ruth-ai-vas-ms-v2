@@ -7,7 +7,6 @@ import {
   getModelStoreDescription,
 } from './storeRuntimeStatus';
 import { ModelStatusCard } from './ModelStatusCard';
-import { AuditEventList, type AuditEvent } from './AuditEventList';
 import './SystemHealthView.css';
 
 interface SystemHealthViewProps {
@@ -17,10 +16,6 @@ interface SystemHealthViewProps {
   models: ModelStatusInfo[];
   /** Whether models data is loading */
   modelsLoading?: boolean;
-  /** Audit events (mock for now - would come from API) */
-  auditEvents?: AuditEvent[];
-  /** Whether audit events are loading */
-  auditLoading?: boolean;
   /** Callback to refresh health data */
   onRefresh?: () => void;
   /** Whether health data is currently refreshing */
@@ -35,7 +30,6 @@ interface SystemHealthViewProps {
  * Features:
  * - Service status cards with expandable detailed metrics
  * - Model health summary with expandable details
- * - Audit visibility for rollbacks and health changes
  * - Manual refresh button
  * - System uptime display
  *
@@ -48,8 +42,6 @@ export function SystemHealthView({
   health,
   models,
   modelsLoading = false,
-  auditEvents = [],
-  auditLoading = false,
   onRefresh,
   isRefreshing = false,
 }: SystemHealthViewProps) {
@@ -233,20 +225,6 @@ export function SystemHealthView({
             ))}
           </div>
         )}
-      </section>
-
-      {/* Audit Events Section */}
-      <section className="system-health-view__section">
-        <div className="system-health-view__section-header">
-          <h2 className="system-health-view__section-title">Recent Events</h2>
-        </div>
-        <div className="system-health-view__audit">
-          <AuditEventList
-            events={auditEvents}
-            isLoading={auditLoading}
-            maxItems={10}
-          />
-        </div>
       </section>
     </div>
   );

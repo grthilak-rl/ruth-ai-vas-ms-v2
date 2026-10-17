@@ -1,5 +1,5 @@
 import { NavLink } from 'react-router-dom';
-import { useIsAdmin, useIsSupervisor } from '../../state';
+import { useIsSupervisor } from '../../state';
 import { SystemStatusIndicator } from './SystemStatusIndicator';
 import { AlertsBadge } from './AlertsBadge';
 import './TopNav.css';
@@ -12,7 +12,7 @@ import './TopNav.css';
  * - Cameras (All)
  * - Violations (All) - with live badge, includes filtering for all statuses
  * - Analytics (Supervisor+)
- * - Settings (Admin only)
+ * - Settings (everyone; admin-only sections sign in inline)
  *
  * Note: History page was removed as the Violations page now includes
  * comprehensive filtering (status, date range, camera) that covers
@@ -21,7 +21,17 @@ import './TopNav.css';
  * Per F2 §Role-Based Visibility Summary:
  * - Operator: Overview, Cameras, Violations
  * - Supervisor: All Operator items + Analytics
- * - Admin: All Supervisor items + Settings
+ *
+ * Settings is deliberately NOT role-gated. It used to be hidden behind
+ * useIsAdmin(), which returns true for everybody — AuthContext hardcodes
+ * the role to 'admin' with a TODO and nothing ever calls login() — so the
+ * gate did nothing except promise to hide the page the day real auth
+ * arrives. The page itself is safe to show: its open tabs read only
+ * endpoints that need no credentials, and everything that mutates asks
+ * for the admin token inline.
+ *
+ * The separate "Model Management" item is gone; that page is now the
+ * AI Models tab of Settings.
  *
  * Rules:
  * - Highlight active route
@@ -31,8 +41,6 @@ import './TopNav.css';
 export function TopNav() {
   // Per F2: Analytics visible for Supervisor+ role
   const canAccessAnalytics = useIsSupervisor();
-  // Per F2: Settings visible only for Admin role
-  const canAccessSettings = useIsAdmin();
 
   return (
     <header className="top-nav">
@@ -95,26 +103,14 @@ export function TopNav() {
           </NavLink>
         )}
 
-        {/* Settings - Admin only */}
-        {canAccessSettings && (
-          <NavLink
-            to="/settings"
-            className={({ isActive }) =>
-              `top-nav__link ${isActive ? 'top-nav__link--active' : ''}`
-            }
-          >
-            Settings
-          </NavLink>
-        )}
-
-        {/* Model Management - visible to all; the page has its own admin login */}
+        {/* Settings - everyone; admin sections sign in inline */}
         <NavLink
-          to="/admin/models"
+          to="/settings"
           className={({ isActive }) =>
             `top-nav__link ${isActive ? 'top-nav__link--active' : ''}`
           }
         >
-          Model Management
+          Settings
         </NavLink>
       </nav>
 

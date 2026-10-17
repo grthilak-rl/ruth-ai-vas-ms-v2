@@ -121,10 +121,21 @@ export function getModelDisplay(model: ModelStatusInfo): ModelDisplayInfo {
  *
  * HARD RULE: Frontend MUST NOT display raw model_id to Operators.
  */
-export function humanizeModelId(modelId: string, isAdmin: boolean = false): string {
+export function humanizeModelId(
+  modelId: string,
+  isAdmin: boolean = false,
+  displayName?: string | null
+): string {
   if (!isAdmin) {
     // Operators see generic "Detection"
     return 'Detection';
+  }
+
+  // An uploaded model carries the name an admin actually typed; title-casing
+  // its slug instead ("Ppe Six Items") is strictly worse. Built-in models
+  // have no display_name and still fall through to the slug.
+  if (displayName) {
+    return displayName;
   }
 
   // Admins see humanized model name

@@ -12,9 +12,10 @@ export { BookmarkMonitoringPage } from './BookmarkMonitoringPage';
 export { AnalyticsPage } from './AnalyticsPage';
 export { CameraPerformancePage } from './CameraPerformancePage';
 export { ExportDataPage } from './ExportDataPage';
-export { SettingsPage } from './settings/SettingsPage';
-export { SystemHealthPage } from './settings/SystemHealthPage';
-export { ModelStatusPage } from './settings/ModelStatusPage';
+export { SettingsLayout } from './settings/SettingsLayout';
+export { SettingsModelsTab } from './settings/SettingsModelsTab';
+export { SettingsProjectTab } from './settings/SettingsProjectTab';
+export { SettingsSystemTab } from './settings/SettingsSystemTab';
 
 // Error pages (E11)
 export { ForbiddenPage } from './ForbiddenPage';

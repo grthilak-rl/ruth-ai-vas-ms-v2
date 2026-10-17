@@ -1,6 +1,6 @@
-import { createBrowserRouter } from 'react-router-dom';
+import { Navigate, createBrowserRouter, useParams } from 'react-router-dom';
 import { AppShell } from './components/AppShell';
-import { RequireSupervisor, RequireAdmin } from './components/guards';
+import { RequireSupervisor } from './components/guards';
 import {
   OverviewPage,
   AlertsPage,
@@ -13,18 +13,25 @@ import {
   AnalyticsPage,
   CameraPerformancePage,
   ExportDataPage,
-  SettingsPage,
-  SystemHealthPage,
-  ModelStatusPage,
+  SettingsLayout,
+  SettingsModelsTab,
+  SettingsProjectTab,
+  SettingsSystemTab,
   ForbiddenPage,
 } from './pages';
-import {
-  AdminLogin,
-  ModelDetailPage,
-  ModelManagementPage,
-  RequireAdminToken,
-  StartProjectPage,
-} from './pages/admin';
+import { AdminLogin, ModelDetailPage, RequireAdminToken } from './pages/admin';
+
+/**
+ * /admin/models/:modelPk -> /settings/models/:modelPk
+ *
+ * A component rather than a static redirect because the param has to be
+ * carried across; a plain <Navigate to="/settings/models"> would silently
+ * drop which model the link pointed at.
+ */
+function RedirectModelDetail() {
+  const { modelPk = '' } = useParams();
+  return <Navigate to={`/settings/models/${modelPk}`} replace />;
+}
 
 /**
  * Application Router (E11 Role-Protected)
@@ -33,10 +40,10 @@ import {
  *
  * Per F2 §Permission Enforcement:
  * - /analytics/* → Supervisor and Admin only
- * - /settings/* → Admin only
+ * - /settings/* → open; admin sections sign in inline (admin token)
  * - /forbidden → 403 page for unauthorized access
  *
- * Role guards (RequireSupervisor, RequireAdmin) redirect to /forbidden
+ * Role guards (RequireSupervisor) redirect to /forbidden
  * if the user lacks the required role.
  */
 export const router = createBrowserRouter([
@@ -119,30 +126,33 @@ export const router = createBrowserRouter([
         ),
       },
 
-      // Settings section - Admin only
+      // Settings - open to everyone; individual sections ask for the
+      // admin token inline. Deliberately NOT role-gated: the role in
+      // AuthContext is hardcoded to 'admin' with a TODO and nothing ever
+      // calls login(), so a role gate protects nothing today and would
+      // hide the whole page the moment real auth lands. Capability comes
+      // from the admin token alone (useAdminSession).
       {
         path: 'settings',
-        element: (
-          <RequireAdmin>
-            <SettingsPage />
-          </RequireAdmin>
-        ),
-      },
-      {
-        path: 'settings/health',
-        element: (
-          <RequireAdmin>
-            <SystemHealthPage />
-          </RequireAdmin>
-        ),
-      },
-      {
-        path: 'settings/models',
-        element: (
-          <RequireAdmin>
-            <ModelStatusPage />
-          </RequireAdmin>
-        ),
+        element: <SettingsLayout />,
+        children: [
+          { index: true, element: <Navigate to="/settings/models" replace /> },
+          { path: 'models', element: <SettingsModelsTab /> },
+          {
+            // Drill-down from the uploaded-models list. Keeps its route
+            // guard: unlike the tabs, it is nothing but admin content.
+            path: 'models/:modelPk',
+            element: (
+              <RequireAdminToken>
+                <ModelDetailPage />
+              </RequireAdminToken>
+            ),
+          },
+          { path: 'project', element: <SettingsProjectTab /> },
+          { path: 'system', element: <SettingsSystemTab /> },
+          // Old sub-page path.
+          { path: 'health', element: <Navigate to="/settings/system" replace /> },
+        ],
       },
 
       // 403 Forbidden page (E11)
@@ -151,35 +161,25 @@ export const router = createBrowserRouter([
         element: <ForbiddenPage />,
       },
 
-      // Admin area (Model Management). Gated by its own server-issued admin
-      // token (sessionStorage), not by the UI role in AuthContext.
+      // The admin area moved into Settings. The login page stays (it is
+      // still the redirect target for deep links and for a 401 raised
+      // outside Settings); everything else redirects, so links already in
+      // the wild keep working.
       {
         path: 'admin/login',
         element: <AdminLogin />,
       },
       {
         path: 'admin/models',
-        element: (
-          <RequireAdminToken>
-            <ModelManagementPage />
-          </RequireAdminToken>
-        ),
+        element: <Navigate to="/settings/models" replace />,
       },
       {
         path: 'admin/models/:modelPk',
-        element: (
-          <RequireAdminToken>
-            <ModelDetailPage />
-          </RequireAdminToken>
-        ),
+        element: <RedirectModelDetail />,
       },
       {
         path: 'admin/projects',
-        element: (
-          <RequireAdminToken>
-            <StartProjectPage />
-          </RequireAdminToken>
-        ),
+        element: <Navigate to="/settings/project" replace />,
       },
     ],
   },

@@ -4,4 +4,4 @@
  * Components for role-based route protection (E11).
  */
 
-export { RequireRole, RequireSupervisor, RequireAdmin } from './RequireRole';
+export { RequireRole, RequireSupervisor } from './RequireRole';
