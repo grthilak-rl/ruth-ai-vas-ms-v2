@@ -2,8 +2,8 @@
  * Viewing Pane Preferences
  *
  * localStorage persistence for the wall display:
- * - tile count (1 / 4 / 9 / 16)
- * - which camera occupies which tile
+ * - layout (rows x columns; the 1 / 4 / 9 / 16 presets are the square ones)
+ * - which camera occupies which grid position
  *
  * This is a fixed physical display. It is expected to come back from a power
  * cut showing exactly what it showed before, with nobody present to re-assign
@@ -14,122 +14,172 @@
  * in position 7". Changing one must not disturb the other.
  */
 
-/** Tiles per side. 1x1, 2x2, 3x3, 4x4 => 1, 4, 9, 16 tiles. */
-export type PaneGridSize = 1 | 2 | 3 | 4;
+import {
+  type PaneLayout,
+  cellKey,
+  isValidLayout,
+  parseCellKey,
+  PANE_GRID_SIZES,
+  type PaneGridSize,
+} from './viewingPaneLayout';
 
-export const PANE_GRID_SIZES: PaneGridSize[] = [1, 2, 3, 4];
+export {
+  type PaneGridSize,
+  type PaneLayout,
+  PANE_GRID_SIZES,
+  getPaneTileCount,
+  presetSizeOf,
+} from './viewingPaneLayout';
 
-const STORAGE_KEY_PANE_GRID_SIZE = 'ruth-ai-viewing-pane-grid-size';
-const STORAGE_KEY_PANE_TILES = 'ruth-ai-viewing-pane-tiles';
+const STORAGE_KEY_PANE_LAYOUT = 'ruth-ai-viewing-pane-layout';
+const STORAGE_KEY_PANE_CELLS = 'ruth-ai-viewing-pane-cells';
+
+// Pre-layout keys: a single preset size, and tiles keyed by reading-order
+// index. Read only to carry an existing wall over unchanged.
+const LEGACY_KEY_PANE_GRID_SIZE = 'ruth-ai-viewing-pane-grid-size';
+const LEGACY_KEY_PANE_TILES = 'ruth-ai-viewing-pane-tiles';
 
 const DEFAULT_PANE_GRID_SIZE: PaneGridSize = 2;
 
-/** Tile index (0-based, row-major) -> camera id. Sparse: gaps are empty tiles. */
-export type TileAssignments = Record<number, string>;
+/** "row,col" -> camera id. Sparse: gaps are empty tiles. */
+export type CellAssignments = Record<string, string>;
 
-export function getPaneTileCount(size: PaneGridSize): number {
-  return size * size;
-}
-
-export function getPaneGridSize(): PaneGridSize {
+function readLegacyGridSize(): PaneGridSize {
   try {
-    const saved = localStorage.getItem(STORAGE_KEY_PANE_GRID_SIZE);
+    const saved = localStorage.getItem(LEGACY_KEY_PANE_GRID_SIZE);
     if (saved) {
       const parsed = parseInt(saved, 10);
-      if (PANE_GRID_SIZES.includes(parsed as PaneGridSize)) {
-        return parsed as PaneGridSize;
-      }
+      if (PANE_GRID_SIZES.includes(parsed as PaneGridSize)) return parsed as PaneGridSize;
     }
   } catch (error) {
-    console.warn('[ViewingPane] Failed to read grid size:', error);
+    console.warn('[ViewingPane] Failed to read legacy grid size:', error);
   }
   return DEFAULT_PANE_GRID_SIZE;
 }
 
-export function setPaneGridSize(size: PaneGridSize): void {
+export function getPaneLayout(): PaneLayout {
   try {
-    localStorage.setItem(STORAGE_KEY_PANE_GRID_SIZE, String(size));
+    const saved = localStorage.getItem(STORAGE_KEY_PANE_LAYOUT);
+    if (saved) {
+      const parsed: unknown = JSON.parse(saved);
+      if (isValidLayout(parsed)) return { rows: parsed.rows, cols: parsed.cols };
+    }
   } catch (error) {
-    console.warn('[ViewingPane] Failed to save grid size:', error);
+    console.warn('[ViewingPane] Failed to read layout:', error);
+  }
+  const size = readLegacyGridSize();
+  return { rows: size, cols: size };
+}
+
+/**
+ * Whether a `storage` event may have changed the layout. The wall usually
+ * runs in a second window opened from Camera Monitoring, so this is how a
+ * layout picked in one window reaches the other. A null key means storage
+ * was cleared; the legacy key counts because getPaneLayout falls back to it.
+ */
+export function isPaneLayoutStorageKey(key: string | null): boolean {
+  return key === null || key === STORAGE_KEY_PANE_LAYOUT || key === LEGACY_KEY_PANE_GRID_SIZE;
+}
+
+export function setPaneLayout(layout: PaneLayout): void {
+  try {
+    localStorage.setItem(
+      STORAGE_KEY_PANE_LAYOUT,
+      JSON.stringify({ rows: layout.rows, cols: layout.cols })
+    );
+  } catch (error) {
+    console.warn('[ViewingPane] Failed to save layout:', error);
   }
 }
 
-export function getTileAssignments(): TileAssignments {
-  try {
-    const saved = localStorage.getItem(STORAGE_KEY_PANE_TILES);
-    if (!saved) return {};
+/**
+ * Rebuild rather than trust: a hand-edited or half-written value should
+ * degrade to "some tiles empty", never to a crash on a display nobody is
+ * watching.
+ */
+function sanitizeCells(parsed: unknown): CellAssignments {
+  if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) return {};
+  const cells: CellAssignments = {};
+  for (const [key, value] of Object.entries(parsed)) {
+    if (parseCellKey(key) && typeof value === 'string' && value) cells[key] = value;
+  }
+  return cells;
+}
 
-    const parsed = JSON.parse(saved);
+/**
+ * Carry a pre-layout wall over: reading-order index i on an N x N preset is
+ * position (i / N, i % N). Indices beyond N x N were hidden leftovers from a
+ * larger preset whose width is no longer known; any that fall outside the
+ * 5x5 maximum are dropped.
+ */
+function readLegacyCells(): CellAssignments {
+  try {
+    const saved = localStorage.getItem(LEGACY_KEY_PANE_TILES);
+    if (!saved) return {};
+    const parsed: unknown = JSON.parse(saved);
     if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) return {};
 
-    // Rebuild rather than trust: a hand-edited or half-written value should
-    // degrade to "some tiles empty", never to a crash on a display nobody is
-    // watching.
-    const assignments: TileAssignments = {};
+    const size = readLegacyGridSize();
+    const cells: CellAssignments = {};
     for (const [key, value] of Object.entries(parsed)) {
       const index = Number(key);
-      if (Number.isInteger(index) && index >= 0 && typeof value === 'string' && value) {
-        assignments[index] = value;
-      }
+      if (!Number.isInteger(index) || index < 0 || typeof value !== 'string' || !value) continue;
+      const k = cellKey(Math.floor(index / size), index % size);
+      if (parseCellKey(k)) cells[k] = value;
     }
-    return assignments;
+    return cells;
   } catch (error) {
-    console.warn('[ViewingPane] Failed to read tile assignments:', error);
+    console.warn('[ViewingPane] Failed to read legacy tile assignments:', error);
     return {};
   }
 }
 
-export function setTileAssignments(assignments: TileAssignments): void {
+export function getCellAssignments(): CellAssignments {
   try {
-    localStorage.setItem(STORAGE_KEY_PANE_TILES, JSON.stringify(assignments));
+    const saved = localStorage.getItem(STORAGE_KEY_PANE_CELLS);
+    if (saved !== null) return sanitizeCells(JSON.parse(saved));
   } catch (error) {
-    console.warn('[ViewingPane] Failed to save tile assignments:', error);
+    console.warn('[ViewingPane] Failed to read cell assignments:', error);
+    return {};
+  }
+  return readLegacyCells();
+}
+
+export function setCellAssignments(cells: CellAssignments): void {
+  try {
+    localStorage.setItem(STORAGE_KEY_PANE_CELLS, JSON.stringify(cells));
+  } catch (error) {
+    console.warn('[ViewingPane] Failed to save cell assignments:', error);
   }
 }
 
 /**
- * Assign a camera to a tile, or clear the tile when cameraId is null.
+ * Assign a camera to a grid position, or clear it when cameraId is null.
  *
- * A camera may occupy only one tile: assigning one that is already placed
- * moves it rather than duplicating it. Two tiles of the same feed would mean
- * two WebRTC consumers decoding identical video for no benefit, and on a wall
- * whose whole purpose is "see everything at once" a duplicate is a blind spot.
+ * A camera may occupy only one position: assigning one that is already placed
+ * moves it rather than duplicating it — including out of a position the
+ * current layout hides. Two tiles of the same feed would mean two WebRTC
+ * consumers decoding identical video for no benefit, and on a wall whose whole
+ * purpose is "see everything at once" a duplicate is a blind spot.
+ *
+ * There is deliberately no trim on layout change: positions outside the
+ * current layout keep their cameras, so 3x4 -> 2x2 -> 3x4 comes back intact.
  */
-export function assignTile(
-  assignments: TileAssignments,
-  tileIndex: number,
+export function assignCell(
+  cells: CellAssignments,
+  key: string,
   cameraId: string | null
-): TileAssignments {
-  const next: TileAssignments = { ...assignments };
+): CellAssignments {
+  const next: CellAssignments = { ...cells };
 
   if (cameraId) {
-    for (const [key, value] of Object.entries(next)) {
-      if (value === cameraId) delete next[Number(key)];
+    for (const [k, value] of Object.entries(next)) {
+      if (value === cameraId) delete next[k];
     }
-    next[tileIndex] = cameraId;
+    next[key] = cameraId;
   } else {
-    delete next[tileIndex];
+    delete next[key];
   }
 
-  return next;
-}
-
-/**
- * Drop assignments that fall outside the current grid.
- *
- * Only applied when the operator actually shrinks the grid — never on load —
- * so a 4x4 wall that is temporarily viewed at 2x2 does not silently lose the
- * other twelve assignments.
- */
-export function trimAssignmentsToGrid(
-  assignments: TileAssignments,
-  size: PaneGridSize
-): TileAssignments {
-  const capacity = getPaneTileCount(size);
-  const next: TileAssignments = {};
-  for (const [key, value] of Object.entries(assignments)) {
-    const index = Number(key);
-    if (index < capacity) next[index] = value;
-  }
   return next;
 }

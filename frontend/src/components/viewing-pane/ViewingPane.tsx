@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { LiveVideoPlayer } from '../video/LiveVideoPlayer';
 import { useDevicesQuery, deviceDisplayName } from '../../state';
 import type { Device } from '../../state';
@@ -6,17 +6,17 @@ import { activeModelIds } from '../../state/api/devices.api';
 import type { ModelConfig } from '../../types/geofencing';
 import { getSelectedCameraIds } from '../../utils/cameraGridPreferences';
 import {
-  type PaneGridSize,
-  type TileAssignments,
+  type CellAssignments,
   PANE_GRID_SIZES,
-  assignTile,
-  getPaneGridSize,
+  assignCell,
+  getCellAssignments,
   getPaneTileCount,
-  getTileAssignments,
-  setPaneGridSize,
-  setTileAssignments,
-  trimAssignmentsToGrid,
+  presetSizeOf,
+  setCellAssignments,
 } from '../../utils/viewingPanePreferences';
+import { visibleCellKeys } from '../../utils/viewingPaneLayout';
+import { GridLayoutPicker } from './GridLayoutPicker';
+import { usePaneLayout } from './usePaneLayout';
 import './ViewingPane.css';
 
 /**
@@ -45,8 +45,9 @@ export function ViewingPane() {
   const { data: devicesData } = useDevicesQuery();
   const cameras = useMemo(() => devicesData?.items ?? [], [devicesData]);
 
-  const [gridSize, setGridSizeState] = useState<PaneGridSize>(getPaneGridSize);
-  const [assignments, setAssignmentsState] = useState<TileAssignments>(getTileAssignments);
+  // Follows layout changes made on Camera Monitoring while this window is open.
+  const [layout, handleLayoutChange] = usePaneLayout();
+  const [assignments, setAssignmentsState] = useState<CellAssignments>(getCellAssignments);
   const [isFullscreen, setIsFullscreen] = useState(false);
 
   // Transient controls, the standard video-player pattern: any input reveals
@@ -97,7 +98,8 @@ export function ViewingPane() {
     };
   }, [revealControls, clearHideTimer]);
 
-  const tileCount = getPaneTileCount(gridSize);
+  const presetSize = presetSizeOf(layout);
+  const cellKeys = useMemo(() => visibleCellKeys(layout), [layout]);
 
   /**
    * Cameras offered in the tile dropdowns: the selection made on the
@@ -120,30 +122,18 @@ export function ViewingPane() {
 
   // Persist on every change: the display must survive a power cut with no
   // operator present to restore it.
-  const updateAssignments = useCallback((next: TileAssignments) => {
-    setAssignmentsState(next);
-    setTileAssignments(next);
+  // Functional update so the handler is stable and memoised tiles don't
+  // re-render every time some other tile's assignment changes.
+  const handleAssign = useCallback((key: string, cameraId: string | null) => {
+    setAssignmentsState((current) => {
+      const next = assignCell(current, key, cameraId);
+      setCellAssignments(next);
+      return next;
+    });
   }, []);
 
-  const handleAssign = useCallback(
-    (tileIndex: number, cameraId: string | null) => {
-      updateAssignments(assignTile(assignments, tileIndex, cameraId));
-    },
-    [assignments, updateAssignments]
-  );
-
-  const handleGridSizeChange = useCallback(
-    (size: PaneGridSize) => {
-      setGridSizeState(size);
-      setPaneGridSize(size);
-      // Trim only when shrinking, and only here — never on load — so viewing a
-      // 4x4 wall at 2x2 for a moment doesn't discard twelve assignments.
-      if (getPaneTileCount(size) < Object.keys(assignments).length) {
-        updateAssignments(trimAssignmentsToGrid(assignments, size));
-      }
-    },
-    [assignments, updateAssignments]
-  );
+  // Layout changes never trim assignments: positions the new layout hides
+  // keep their cameras, so shrinking and growing back restores the wall.
 
   // Fullscreen. Tracked via the fullscreenchange event rather than assumed
   // from our own toggle, so pressing Escape (or F11) keeps the button honest.
@@ -166,27 +156,47 @@ export function ViewingPane() {
     return () => document.removeEventListener('fullscreenchange', onChange);
   }, []);
 
-  /** Cameras already on the wall — offered as disabled elsewhere, so one feed can't occupy two tiles. */
-  const assignedCameraIds = useMemo(() => new Set(Object.values(assignments)), [assignments]);
+  /**
+   * Cameras visible on the wall — offered as disabled elsewhere, so one feed
+   * can't occupy two tiles. A camera parked in a position the current layout
+   * hides stays offered; picking it moves it here (see assignCell).
+   */
+  const assignedCameraIds = useMemo(() => {
+    const ids = new Set<string>();
+    for (const key of cellKeys) {
+      const id = assignments[key];
+      if (id) ids.add(id);
+    }
+    return ids;
+  }, [assignments, cellKeys]);
+
+  // Presets keep the aspect-locked 16:9 grid; custom layouts fill the screen
+  // and letterbox inside each tile instead.
+  const gridClass = presetSize
+    ? `viewing-pane__grid viewing-pane__grid--${presetSize}`
+    : 'viewing-pane__grid viewing-pane__grid--custom';
+  const gridStyle = presetSize
+    ? undefined
+    : { gridTemplate: `repeat(${layout.rows}, 1fr) / repeat(${layout.cols}, 1fr)` };
 
   return (
     <div className={`viewing-pane ${controlsVisible ? '' : 'viewing-pane--idle'}`}>
-      <div className={`viewing-pane__grid viewing-pane__grid--${gridSize}`}>
-        {Array.from({ length: tileCount }).map((_, tileIndex) => {
-          const cameraId = assignments[tileIndex];
+      <div className={gridClass} style={gridStyle}>
+        {cellKeys.map((key, tileIndex) => {
+          const cameraId = assignments[key];
           const camera = cameraId ? camerasById.get(cameraId) : undefined;
 
           if (!camera) {
             return (
               <div
-                key={tileIndex}
+                key={`cell:${key}`}
                 className="viewing-pane__tile viewing-pane__tile--empty"
               >
                 <select
                   className="viewing-pane__tile-picker"
                   value=""
                   aria-label={`Assign a camera to tile ${tileIndex + 1}`}
-                  onChange={(e) => handleAssign(tileIndex, e.target.value || null)}
+                  onChange={(e) => handleAssign(key, e.target.value || null)}
                 >
                   <option value="">Select camera…</option>
                   {availableCameras.map((option) => (
@@ -210,11 +220,14 @@ export function ViewingPane() {
           }
 
           return (
+            // Keyed by camera, not position: a camera that stays on screen
+            // through a layout change keeps its WebRTC connection.
             <ViewingPaneTile
-              key={tileIndex}
+              key={`cam:${camera.id}`}
               camera={camera}
+              cellKey={key}
               tileIndex={tileIndex}
-              onClear={() => handleAssign(tileIndex, null)}
+              onAssign={handleAssign}
             />
           );
         })}
@@ -241,14 +254,19 @@ export function ViewingPane() {
               key={size}
               type="button"
               className={`viewing-pane__toolbar-button ${
-                size === gridSize ? 'viewing-pane__toolbar-button--active' : ''
+                size === presetSize ? 'viewing-pane__toolbar-button--active' : ''
               }`}
-              onClick={() => handleGridSizeChange(size)}
-              aria-pressed={size === gridSize}
+              onClick={() => handleLayoutChange({ rows: size, cols: size })}
+              aria-pressed={size === presetSize}
             >
               {getPaneTileCount(size)}
             </button>
           ))}
+          <GridLayoutPicker
+            layout={layout}
+            fitCount={availableCameras.length}
+            onSelect={handleLayoutChange}
+          />
         </div>
         <button
           type="button"
@@ -264,11 +282,17 @@ export function ViewingPane() {
 
 interface ViewingPaneTileProps {
   camera: Device;
+  cellKey: string;
   tileIndex: number;
-  onClear: () => void;
+  onAssign: (cellKey: string, cameraId: string | null) => void;
 }
 
-function ViewingPaneTile({ camera, tileIndex, onClear }: ViewingPaneTileProps) {
+const ViewingPaneTile = memo(function ViewingPaneTile({
+  camera,
+  cellKey,
+  tileIndex,
+  onAssign,
+}: ViewingPaneTileProps) {
   const label = deviceDisplayName(camera);
   const streaming = camera.streaming;
 
@@ -309,7 +333,7 @@ function ViewingPaneTile({ camera, tileIndex, onClear }: ViewingPaneTileProps) {
       <button
         type="button"
         className="viewing-pane__tile-clear"
-        onClick={onClear}
+        onClick={() => onAssign(cellKey, null)}
         aria-label={`Clear ${label} from tile ${tileIndex + 1}`}
         title={`Clear ${label}`}
       >
@@ -317,4 +341,4 @@ function ViewingPaneTile({ camera, tileIndex, onClear }: ViewingPaneTileProps) {
       </button>
     </div>
   );
-}
+});

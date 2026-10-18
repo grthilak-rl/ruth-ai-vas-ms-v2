@@ -54,6 +54,16 @@
 .viewing-pane__grid--3 { grid-template: repeat(3, 1fr) / repeat(3, 1fr); }
 .viewing-pane__grid--4 { grid-template: repeat(4, 1fr) / repeat(4, 1fr); }
 
+/* Custom rows x columns (3x4, 2x5, ...): the grid fills the screen and
+   grid-template is set inline. Its tiles are generally not 16:9 (3x4 on a
+   16:9 screen gives 4:3 tiles), so here the slack becomes a letterbox inside
+   each tile instead of screen margin — see the 16:9 box rule below. */
+.viewing-pane__grid--custom {
+  width: 100dvw;
+  height: 100dvh;
+  aspect-ratio: auto;
+}
+
 /* ============================================================================
    Tiles
    ============================================================================ */
@@ -62,22 +72,36 @@
   position: relative;
   overflow: hidden;
   background-color: #000;
-  /* Each cell is exactly 16:9 because the grid is 16:9 split N x N evenly, so
-     the feed fits with no crop, no distortion and no letterbox. min-width/
-     min-height:0 stops grid's automatic min-content sizing from inflating a
-     cell and reintroducing the seams we just removed. */
+  /* min-width/min-height:0 stops grid's automatic min-content sizing from
+     inflating a cell and reintroducing the seams we just removed. */
   min-width: 0;
   min-height: 0;
+  /* A size container, so the player can size itself from the tile below. */
+  container-type: size;
+  display: flex;
+  align-items: center;
+  justify-content: center;
 }
 
-/* Neutralise the player's own card styling inside a tile.
+/* Neutralise the player's own card styling inside a tile, and make it the
+   16:9 box: the largest 16:9 rectangle that fits the tile, centred.
+
+   This is the one rule for every layout. In a preset the tile is itself 16:9,
+   so the box is the whole tile, edge to edge. In a custom layout the box is
+   letterboxed inside the tile — never stretched.
+
+   The PLAYER is letterboxed rather than the video (object-fit: contain on a
+   tile-sized <video>) because the detection canvas sizes itself from the
+   <video> element's box (LiveVideoPlayer.tsx). Video and canvas must share
+   the same 16:9 box, or every overlay box is drawn in the wrong place.
+
    LiveVideoPlayer is shared with the monitoring grid, where it is a rounded
-   card that letterboxes its video. On the wall it must be an edge-to-edge
-   pane, so the overrides live here rather than in the shared component. */
+   card, so the overrides live here rather than in the shared component. */
 .viewing-pane__tile .live-video-player {
-  width: 100%;
-  height: 100%;
-  aspect-ratio: auto;
+  width: min(100cqw, 100cqh * 16 / 9);
+  height: auto;
+  aspect-ratio: 16 / 9;
+  flex: none;
   border-radius: 0;
 }
 
@@ -86,7 +110,7 @@
   height: 100%;
   max-width: none;
   max-height: none;
-  /* Tile aspect == feed aspect == 16:9, so cover, contain and fill are
+  /* Box aspect == feed aspect == 16:9, so cover, contain and fill are
      geometrically identical here. cover is chosen so sub-pixel rounding at
      awkward viewport sizes crops an imperceptible sliver rather than exposing
      a hairline black bar. */

@@ -19,12 +19,13 @@ import {
   getMaxCameras,
 } from '../../utils/cameraGridPreferences';
 import {
-  type PaneGridSize,
   PANE_GRID_SIZES,
-  getPaneGridSize,
   getPaneTileCount,
-  setPaneGridSize,
+  presetSizeOf,
 } from '../../utils/viewingPanePreferences';
+import { FEED_ASPECT } from '../../utils/viewingPaneLayout';
+import { GridLayoutPicker } from '../viewing-pane/GridLayoutPicker';
+import { usePaneLayout } from '../viewing-pane/usePaneLayout';
 import { fetchModelsStatus, type ModelStatusInfo } from '../../state/api/models.api';
 import { type CameraModelsResponse } from '../../state/api/devices.api';
 import { ApiError } from '../../state/api/errors';
@@ -98,10 +99,12 @@ export function CameraMonitoringDashboard({
   // Grid size state
   const [gridSize, setGridSizeState] = useState<GridSize>(getGridSize());
 
-  // Tile count the Viewing Pane will open with. Stored in the pane's own
+  // Layout the Viewing Pane will open with. Stored in the pane's own
   // preferences so choosing it here and opening the wall agree, and so the
-  // wall keeps it across reloads.
-  const [paneGridSize, setPaneGridSizeState] = useState<PaneGridSize>(getPaneGridSize);
+  // wall keeps it across reloads. Shared live with an open wall window in
+  // both directions (see usePaneLayout).
+  const [paneLayout, setPaneLayout] = usePaneLayout();
+  const paneGridSize = presetSizeOf(paneLayout);
 
   // Selected cameras state
   const [selectedCameraIds, setSelectedCameraIdsState] = useState<string[]>(() =>
@@ -424,16 +427,26 @@ export function CameraMonitoringDashboard({
                 ? 'camera-monitoring-dashboard__viewing-pane-tile-button--active'
                 : ''
             }`}
-            onClick={() => {
-              setPaneGridSizeState(size);
-              setPaneGridSize(size);
-            }}
+            onClick={() => setPaneLayout({ rows: size, cols: size })}
             aria-pressed={size === paneGridSize}
             title={`${size}x${size} (${getPaneTileCount(size)} tiles)`}
           >
             {getPaneTileCount(size)}
           </button>
         ))}
+        {/* Custom rows x columns. Fit counts the cameras selected here — the
+            same list the wall offers in its tile pickers. The wall normally
+            runs on a 16:9 TV rather than in this window, so Fit assumes 16:9
+            instead of measuring this one. */}
+        <GridLayoutPicker
+          layout={paneLayout}
+          fitCount={selectedCameras.length}
+          onSelect={setPaneLayout}
+          viewportAspect={FEED_ASPECT}
+          variant="light"
+          triggerClassName="camera-monitoring-dashboard__viewing-pane-tile-button"
+          triggerActiveClassName="camera-monitoring-dashboard__viewing-pane-tile-button--active"
+        />
       </div>
       <button
         type="button"
