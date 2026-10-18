@@ -5,6 +5,75 @@ investigation. Newest first.
 
 ---
 
+## BL-12 · Frame-tap stalls: 6.3% of fetches take over a second
+
+**Status:** open, not investigated · **Found:** 2026-10-18 (measuring
+BL-10) · **Area:** `RuntimeRouter.fetch_frame` -> VAS frame tap
+
+**Finding.** Frame fetch is bimodal, and the slow mode is severe. From
+logging `fetch_seconds`, which the loop has always measured and then
+discarded into the budget:
+
+| | 20-min window | 13.5-hour corroboration |
+|---|---:|---:|
+| estimated fetches | 7,242 (6.1/s) | 284,433 (5.9/s) |
+| **P(fetch >= 500 ms)** | **6.10%** | **6.34%** |
+| body p50 / p95 / mean | 37 / 135 / 50 ms | 33 / 89 / 43 ms |
+| tail p50 / p95 / max | 1,085 / 2,805 / 3,568 ms | 1,087 / 2,687 / **12,483 ms** |
+| tail mean | 1,254 ms | 1,281 ms |
+| true mean (EWMA sees this) | 124 ms | 122 ms |
+
+**94% of fetches cost 37 ms and are nearly free. 6% cost over a second.**
+The mean of 122 ms describes neither mode and is the number the pacing
+budget has been reacting to all along.
+
+**It is uniform across the fleet.** Every one of the 12 cameras sits
+between 5.80% and 6.93% slow, with near-identical counts (1,373-1,551
+each over 13.5 h). That rules out a single bad camera, a single bad
+network path, or anything per-stream, and points at the shared frame-tap
+path.
+
+**Impact.** 18,033 stalls averaging 1.28 s in 13.5 hours is roughly
+**6.4 hours of cumulative wall time spent waiting for frames** — more
+than any pacing change on the table is worth. It also distorts every
+latency figure the system reports about itself, because the budget EWMA
+folds fetch and inference together.
+
+**Hypotheses, untested, in rough order of likelihood.**
+
+- *Keyframe or segment-boundary wait.* A tap that must wait for the next
+  I-frame would stall for up to a GOP interval. A ~1 s median tail is
+  suspiciously close to a 1-2 s GOP at these frame rates. **Testable:**
+  the stalls would cluster at a characteristic period per camera.
+- *Shared resource contention.* A connection pool, a lock, or a
+  single-threaded path in VAS that 12 cameras queue behind. **Testable:**
+  stalls would coincide *across* cameras.
+- *Timeout-and-retry.* A silent retry after a fixed timeout would make
+  the tail pile up near a round number. The tail p50 of 1,085 ms is
+  suggestively close to 1 s.
+- *HLS buffer rotation / `date_dir_rotator`* doing periodic work that
+  blocks reads.
+
+**Planned next measurement (read-only, cheap).** Correlate stall
+timestamps *across* cameras. The logs already carry `device_id` and a
+timestamp on every slow fetch, so no new instrumentation is needed:
+
+- If the 12 cameras stall **together**, it is a shared resource — look at
+  VAS's frame-tap path and its concurrency.
+- If they stall **independently**, it is per-stream — look at keyframe
+  cadence and the tap's buffering.
+- Also worth plotting the tail's inter-arrival times per camera: a
+  strong period points at a GOP or a rotation job.
+
+Raising `RUTH_SLOW_FETCH_SECONDS` sampling is not needed; slow fetches
+are already logged as a census.
+
+**Do not "fix" this by re-pacing around it.** BL-10 (a) would make the
+budget ignore fetch entirely, which would hide this fault rather than
+address it — see the note there.
+
+---
+
 ## BL-11 · A camera can stop being monitored silently, and nothing says so
 
 **Status:** open, operational · **Found:** 2026-10-17 (HPCL) · **Area:**
@@ -167,17 +236,51 @@ have caught it.
   30 s, so the reconciler cannot race an operator action still in flight.
 - **`starting` counts as present.** Treating it as missing would start a
   second session and trip `uq_stream_sessions_device_active`.
-- **Backoff and stop:** on failure, `consecutive_failures += 1`, record
-  `last_error`. **At 2 consecutive failures, stop attempting** and let it
-  surface through the B coverage signal as *failed*, distinct from
-  *not configured*. A success resets the counter to 0.
 - **Never resume** a camera with `devices.enabled = false` (retired in
   VAS) or `is_active = false` (absent from VAS). Both are states where
   starting would be wrong and would fail anyway.
 
+#### Failure handling (refined 2026-10-17)
+
+**Distinguish shared-dependency failures from per-camera ones.** If VAS
+or the target runtime is unreachable or unhealthy, *every* camera will
+fail to start — and counting those would park the entire fleet within two
+cycles over an outage that has nothing to do with any individual camera.
+Worse, the fleet would then stay parked after the dependency recovered,
+because parking is what stops retrying.
+
+- *Shared failure* (VAS unreachable, runtime unhealthy, DB unavailable):
+  **skip the cycle entirely**, do not touch `consecutive_failures` for
+  any camera, and raise **one** system-level alert naming the dependency.
+  One alert, not twelve.
+- *Per-camera failure* (model missing, stream will not start for this
+  camera, start rejected): `consecutive_failures += 1`, record
+  `last_error`.
+
+Detecting the difference cheaply: check the dependency once per cycle
+before iterating cameras, and treat a run where every attempt failed with
+the same dependency-shaped error as shared rather than per-camera.
+
+**Parked is not permanent.** Two consecutive per-camera failures stop the
+*fast* retry, not all retries. A parked camera is retried on a capped
+backoff — **5 min → 15 min → 60 min, then every 60 min** — so a camera
+that was broken for a fixable reason recovers on its own without anyone
+remembering it exists.
+
+- The alert **stays up** until a resume succeeds. Parking suppresses
+  retries, never the signal; the whole failure in this backlog item was a
+  silence, and the fix must not introduce a new one.
+- The counter resets to 0 on **success** or on **any operator action**
+  for that camera (picker change, explicit start). An operator touching a
+  camera is a statement that the situation changed, and they should not
+  have to wait out a 60-minute backoff to see the effect.
+- `last_attempt_at` drives the backoff, so it must be written on every
+  attempt including the ones that fail.
+
 Two failures at 60 s apart means a genuine problem is retried for about a
-minute and then parked — comfortably inside B's alert debounce, so the
-operator sees one actionable "failed" rather than a flapping alert.
+minute, then backs off — comfortably inside B's alert debounce, so the
+operator sees one actionable "failed" rather than a flapping alert, and
+the system keeps trying behind it.
 
 #### Interaction with B
 
@@ -188,6 +291,13 @@ switched off, or genuinely failed — and the derived `failed` flag tells
 them apart. Shipping B first means the metric exists to prove A works.
 
 ### Proposal B — make the gap visible (do this one first)
+
+**Implemented 2026-10-17.** `DeviceStreaming.inference_absent_since` on
+`GET /api/v1/devices`, `state/api/coverage.ts` for the classification, a
+"Monitoring coverage: N of M cameras" card above the service cards on
+Settings -> System, and a red **NOT MONITORED** badge on the camera grid
+cell. 20 tests in `state/api/__tests__/coverage.test.ts`, including a
+reproduction of the 74004 incident.
 
 Auto-resume reduces how often this happens; an alert is what catches it
 when it happens anyway, including for reasons nobody predicted. B is
@@ -279,6 +389,49 @@ GPU at 32% and a runtime idle two thirds of the time. Every lever tried so
 far (BL-5 offload, the store semaphore) sits downstream of this one.
 
 **Proposal — three candidate changes, in order of leverage per unit of risk.**
+
+**(a) PARKED 2026-10-18 — do not enable without reading BL-12.**
+The premise behind (a) was that fetch is a steady ~80 ms cost unfairly
+charged to the GPU budget. Measuring it showed the mean is right (122 ms)
+but the shape is not: fetch is **bimodal** — 37 ms for 94% of ticks and
+over a second for 6% (BL-12). That 6% is a fault, not a budgeting error.
+
+Two consequences:
+
+- Excluding fetch from the budget would make the system pace as though
+  fetch were free while one tick in sixteen still blocks for 1.3 s. The
+  budget is a crude throttle, but it is currently the only thing
+  *responding* to the stalls. Removing it masks BL-12.
+- **If (a) is ever revived, the interval floor must use a high percentile
+  of fetch, not the EWMA.** `min_tick_seconds` currently floors at
+  `fetch_estimate() + latency`, where `fetch_estimate()` is an EWMA — and
+  an EWMA of a bimodal distribution sits near neither mode. It would
+  under-floor the 6% of ticks that matter, which is exactly the case the
+  floor exists to protect. Track a p90/p95 of fetch instead.
+
+The flag ships off and stays off. The code and tests remain, so reviving
+it is a configuration change plus the floor fix above.
+
+**(a) implemented 2026-10-17, shipped dark.**
+`RUTH_BUDGET_EXCLUDE_FETCH` (default false) makes `record_latency` take
+inference time only. `fetch_seconds` is still recorded separately, into a
+fleet-wide EWMA, because the *scheduler* still needs it: a tick costs a
+fetch plus an inference in wall time whatever the GPU is doing, so
+`_multi_interval` is floored at `fetch + inference`. Without that floor
+the freed budget could hand back an interval shorter than the work it
+schedules, and the loop would fire every iteration immediately — spinning
+without gaining throughput. The floor is unconditional and inert today
+(a tick costs ~0.145 s against a ~2.3 s interval).
+
+Also added: sampled `Frame fetch` logging (`RUTH_FETCH_LOG_SAMPLE`,
+default 0.02) plus an unconditional line for any fetch over
+`RUTH_SLOW_FETCH_SECONDS` (0.5). `fetch_seconds` has been measured on
+every tick since multi-model sessions shipped and thrown straight into
+the budget, so its distribution has never been looked at — the 80 ms
+below is inferred from the achieved rate, and the flag should not be
+enabled until it is observed. Tests: `tests/unit/test_budget_exclude_fetch.py`
+(27), covering flag-off equivalence and the anti-spin floor across fleet
+sizes 1-100.
 
 - *(a) Stop counting fetch time as GPU time.* Record only the inference
   duration into the budget and account for fetch separately. On today's
