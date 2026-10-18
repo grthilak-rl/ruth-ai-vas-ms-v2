@@ -8,7 +8,8 @@ import {
   isAnyModelHealthy,
 } from '../../state';
 import type { Device } from '../../state';
-import { getGridSize, type GridSize } from '../../utils/cameraGridPreferences';
+import { getGridLayout } from '../../utils/cameraGridPreferences';
+import { type PaneLayout, layoutsEqual } from '../../utils/viewingPaneLayout';
 import './CameraGrid.css';
 
 /**
@@ -32,13 +33,17 @@ import './CameraGrid.css';
  * - Error: Error message with retry
  */
 export function CameraGrid() {
-  // Read grid size preference from localStorage (synced with Camera Monitoring page)
-  const [gridSize, setGridSizeState] = useState<GridSize>(getGridSize);
+  // Grid layout (rows x columns) from localStorage, synced with the Camera
+  // Monitoring page — custom layouts included.
+  const [gridLayout, setGridLayoutState] = useState<PaneLayout>(getGridLayout);
 
   // Listen for storage changes to sync with Camera Monitoring page
   useEffect(() => {
     const handleStorageChange = () => {
-      setGridSizeState(getGridSize());
+      setGridLayoutState((current) => {
+        const next = getGridLayout();
+        return layoutsEqual(current, next) ? current : next;
+      });
     };
 
     // Listen for storage events from other tabs
@@ -46,7 +51,10 @@ export function CameraGrid() {
 
     // Also check on focus (for same-tab changes)
     const handleFocus = () => {
-      setGridSizeState(getGridSize());
+      setGridLayoutState((current) => {
+        const next = getGridLayout();
+        return layoutsEqual(current, next) ? current : next;
+      });
     };
     window.addEventListener('focus', handleFocus);
 
@@ -56,7 +64,7 @@ export function CameraGrid() {
     };
   }, []);
 
-  const maxCameras = gridSize * gridSize;
+  const maxCameras = gridLayout.rows * gridLayout.cols;
 
   const {
     data: devicesData,
@@ -81,7 +89,7 @@ export function CameraGrid() {
 
   // Dynamic grid style based on preference
   const gridStyle = {
-    gridTemplateColumns: `repeat(${gridSize}, 1fr)`,
+    gridTemplateColumns: `repeat(${gridLayout.cols}, 1fr)`,
   };
 
   // Loading state

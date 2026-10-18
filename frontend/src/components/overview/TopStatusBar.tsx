@@ -9,7 +9,8 @@ import {
   isAnyModelHealthy,
   type Device,
 } from '../../state';
-import { getGridSize, type GridSize } from '../../utils/cameraGridPreferences';
+import { getGridLayout } from '../../utils/cameraGridPreferences';
+import { type PaneLayout, layoutsEqual } from '../../utils/viewingPaneLayout';
 import './TopStatusBar.css';
 
 /**
@@ -201,18 +202,25 @@ function CameraGridPanel({
   isModelHealthy,
   onRetry,
 }: CameraGridPanelProps) {
-  // Read grid size preference from localStorage (synced with Camera Monitoring page)
-  const [gridSize, setGridSizeState] = useState<GridSize>(getGridSize);
+  // Grid layout (rows x columns) from localStorage, synced with the Camera
+  // Monitoring page — custom layouts included.
+  const [gridLayout, setGridLayoutState] = useState<PaneLayout>(getGridLayout);
 
   // Listen for storage changes to sync with Camera Monitoring page
   useEffect(() => {
     const handleStorageChange = () => {
-      setGridSizeState(getGridSize());
+      setGridLayoutState((current) => {
+        const next = getGridLayout();
+        return layoutsEqual(current, next) ? current : next;
+      });
     };
 
     window.addEventListener('storage', handleStorageChange);
     const handleFocus = () => {
-      setGridSizeState(getGridSize());
+      setGridLayoutState((current) => {
+        const next = getGridLayout();
+        return layoutsEqual(current, next) ? current : next;
+      });
     };
     window.addEventListener('focus', handleFocus);
 
@@ -222,12 +230,12 @@ function CameraGridPanel({
     };
   }, []);
 
-  const maxCameras = gridSize * gridSize;
+  const maxCameras = gridLayout.rows * gridLayout.cols;
   const cameras = devices.slice(0, maxCameras);
 
   // Dynamic grid style based on preference
   const gridStyle = {
-    gridTemplateColumns: `repeat(${gridSize}, 1fr)`,
+    gridTemplateColumns: `repeat(${gridLayout.cols}, 1fr)`,
   };
 
   // Loading state

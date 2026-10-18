@@ -1,4 +1,4 @@
-import { useState, useEffect, useMemo, useCallback } from 'react';
+import { useState, useEffect, useMemo, useCallback, type CSSProperties } from 'react';
 import { useQueries, useQueryClient } from '@tanstack/react-query';
 import { CameraGridSelector } from './CameraGridSelector';
 import { CameraSelectorDropdown } from './CameraSelectorDropdown';
@@ -10,20 +10,28 @@ import type { AIModel } from './AIModelSelector';
 import type { Device } from '../../state';
 import type { ModelConfig } from '../../types/geofencing';
 import {
-  type GridSize,
-  getGridSize,
-  setGridSize,
+  getGridCells,
+  getGridLayout,
   getSelectedCameraIds,
+  seedGridCells,
+  setGridCells,
+  setGridLayout,
   setSelectedCameraIds,
-  autoSelectCameras,
-  getMaxCameras,
 } from '../../utils/cameraGridPreferences';
 import {
   PANE_GRID_SIZES,
   getPaneTileCount,
   presetSizeOf,
 } from '../../utils/viewingPanePreferences';
-import { FEED_ASPECT } from '../../utils/viewingPaneLayout';
+import {
+  type CellAssignments,
+  type PaneLayout,
+  FEED_ASPECT,
+  applySelection,
+  packIntoLayout,
+  visibleCameraIds,
+  visibleCellKeys,
+} from '../../utils/viewingPaneLayout';
 import { GridLayoutPicker } from '../viewing-pane/GridLayoutPicker';
 import { usePaneLayout } from '../viewing-pane/usePaneLayout';
 import { fetchModelsStatus, type ModelStatusInfo } from '../../state/api/models.api';
@@ -96,8 +104,14 @@ export function CameraMonitoringDashboard({
   showDisabled,
   onShowDisabledChange,
 }: CameraMonitoringDashboardProps) {
-  // Grid size state
-  const [gridSize, setGridSizeState] = useState<GridSize>(getGridSize());
+  // Grid layout (rows x columns) and which camera sits at which position.
+  // Positions are never trimmed on a layout change — shrinking hides tiles,
+  // growing back shows the same cameras where they were — the same model as
+  // the Viewing Pane, via the shared viewingPaneLayout maths.
+  //
+  // null cells = nothing saved yet; seeded below once the camera list loads.
+  const [gridLayout, setGridLayoutState] = useState<PaneLayout>(getGridLayout);
+  const [gridCells, setGridCellsState] = useState<CellAssignments | null>(getGridCells);
 
   // Layout the Viewing Pane will open with. Stored in the pane's own
   // preferences so choosing it here and opening the wall agree, and so the
@@ -106,10 +120,19 @@ export function CameraMonitoringDashboard({
   const [paneLayout, setPaneLayout] = usePaneLayout();
   const paneGridSize = presetSizeOf(paneLayout);
 
-  // Selected cameras state
-  const [selectedCameraIds, setSelectedCameraIdsState] = useState<string[]>(() =>
-    getSelectedCameraIds()
+  // The selection is now derived: the cameras the grid shows, reading order.
+  // It is still persisted because the Viewing Pane offers exactly these
+  // cameras in its tile pickers, and the selector dropdown edits it.
+  const selectedCameraIds = useMemo(
+    () => visibleCameraIds(gridCells ?? {}, gridLayout),
+    [gridCells, gridLayout]
   );
+
+  const commitGrid = useCallback((cells: CellAssignments, layout: PaneLayout) => {
+    setGridCellsState(cells);
+    setGridCells(cells);
+    setSelectedCameraIds(visibleCameraIds(cells, layout));
+  }, []);
 
   // Available AI models from backend
   const [availableModels, setAvailableModels] = useState<ModelStatusInfo[]>([]);
@@ -143,46 +166,61 @@ export function CameraMonitoringDashboard({
     loadModels();
   }, []);
 
-  // Seed the selection on first run. autoSelectCameras leaves an existing
-  // selection alone (beyond trimming to grid capacity), so this can no longer
-  // drop a saved camera that happens to be missing from the current list —
-  // which is what silently erased selections on refresh, since the result is
-  // persisted. Availability is handled at render time by `selectedCameras`.
+  // Seed positions once, when nothing is saved: first run, or a browser from
+  // before positions existed (seedGridCells reproduces what it showed then).
+  // Never re-seeded after that, and never pruned on availability: a camera
+  // that drops out of the list keeps its tile, which shows empty until the
+  // camera comes back.
   useEffect(() => {
-    if (cameras.length > 0) {
-      const cameraIds = cameras.map((c) => c.id);
-      const autoSelected = autoSelectCameras(cameraIds, gridSize, selectedCameraIds);
-      if (JSON.stringify(autoSelected) !== JSON.stringify(selectedCameraIds)) {
-        setSelectedCameraIdsState(autoSelected);
-        setSelectedCameraIds(autoSelected);
-      }
-    }
-  }, [cameras, gridSize]); // Intentionally not including selectedCameraIds to avoid infinite loop
+    if (gridCells !== null || cameras.length === 0) return;
+    commitGrid(
+      seedGridCells(gridLayout, cameras.map((c) => c.id), getSelectedCameraIds()),
+      gridLayout
+    );
+  }, [cameras, gridCells, gridLayout, commitGrid]);
 
-  // Handle grid size change
-  const handleGridSizeChange = (size: GridSize) => {
-    setGridSizeState(size);
-    setGridSize(size);
-
-    // Trim selected cameras if new grid is smaller
-    const maxCameras = getMaxCameras(size);
-    if (selectedCameraIds.length > maxCameras) {
-      const trimmed = selectedCameraIds.slice(0, maxCameras);
-      setSelectedCameraIdsState(trimmed);
-      setSelectedCameraIds(trimmed);
-    }
+  const handleGridLayoutChange = (layout: PaneLayout) => {
+    setGridLayoutState(layout);
+    setGridLayout(layout);
+    // Re-derive the persisted selection for the new layout; positions stay.
+    if (gridCells) commitGrid(gridCells, layout);
   };
 
-  // Handle camera selection change
+  // Fit promises every camera ends up on screen, so cameras parked outside
+  // the new layout move into its free tiles; visible ones stay put.
+  const handleGridFit = (layout: PaneLayout) => {
+    setGridLayoutState(layout);
+    setGridLayout(layout);
+    commitGrid(packIntoLayout(gridCells ?? {}, layout), layout);
+  };
+
+  // Dropdown checkboxes -> positions: kept cameras stay where they are, new
+  // ones fill the first free tiles (see applySelection).
   const handleCameraSelectionChange = (cameraIds: string[]) => {
-    setSelectedCameraIdsState(cameraIds);
-    setSelectedCameraIds(cameraIds);
+    commitGrid(applySelection(gridCells ?? {}, gridLayout, cameraIds), gridLayout);
   };
 
-  // Get selected cameras
-  const selectedCameras = useMemo(() => {
-    return cameras.filter((camera) => selectedCameraIds.includes(camera.id));
-  }, [cameras, selectedCameraIds]);
+  const camerasById = useMemo(() => {
+    const map = new Map<string, Device>();
+    for (const camera of cameras) map.set(camera.id, camera);
+    return map;
+  }, [cameras]);
+
+  // Distinct cameras on the grid, shown or parked, that exist right now:
+  // what Fit has to hold.
+  const gridCameraCount = useMemo(
+    () => new Set(Object.values(gridCells ?? {}).filter((id) => camerasById.has(id))).size,
+    [gridCells, camerasById]
+  );
+
+  // Cameras on screen that exist right now, reading order.
+  const selectedCameras = useMemo(
+    () =>
+      selectedCameraIds
+        .map((id) => camerasById.get(id))
+        .filter((camera): camera is Device => camera !== undefined),
+    [selectedCameraIds, camerasById]
+  );
 
   // What runs on each camera comes from the server. Cameras the devices list
   // reports as AI-enabled fetch their model list (configs included);
@@ -331,23 +369,39 @@ export function CameraMonitoringDashboard({
     return camera.is_active ? 'live' : 'offline';
   };
 
-  // Generate empty slots
-  const gridCells = useMemo(() => {
-    const maxCameras = getMaxCameras(gridSize);
-    const cells: Array<{ type: 'camera'; camera: Device } | { type: 'empty' }> = [];
+  // One tile per visible position: the camera there, or an empty slot (no
+  // camera assigned, or one that isn't in the list right now).
+  const gridTiles = useMemo(
+    () =>
+      visibleCellKeys(gridLayout).map((key) => {
+        const camera = gridCells?.[key] ? camerasById.get(gridCells[key]) : undefined;
+        return camera
+          ? { type: 'camera' as const, key, camera }
+          : { type: 'empty' as const, key };
+      }),
+    [gridLayout, gridCells, camerasById]
+  );
 
-    // Add selected cameras
-    selectedCameras.forEach((camera) => {
-      cells.push({ type: 'camera', camera });
-    });
-
-    // Add empty slots
-    for (let i = selectedCameras.length; i < maxCameras; i++) {
-      cells.push({ type: 'empty' });
-    }
-
-    return cells;
-  }, [selectedCameras, gridSize]);
+  // Square layouts keep their existing classes (and responsive rules);
+  // anything else sizes from CSS variables, bucketed by column count so the
+  // narrow-screen rules can still collapse wide layouts.
+  const isSquareGrid = gridLayout.rows === gridLayout.cols;
+  const gridClassName = isSquareGrid
+    ? `camera-monitoring-dashboard__grid camera-monitoring-dashboard__grid--${gridLayout.rows}x${gridLayout.cols}`
+    : `camera-monitoring-dashboard__grid camera-monitoring-dashboard__grid--custom ${
+        gridLayout.cols >= 4
+          ? 'camera-monitoring-dashboard__grid--custom-wide'
+          : gridLayout.cols === 3
+            ? 'camera-monitoring-dashboard__grid--custom-medium'
+            : ''
+      }`;
+  const gridStyle = isSquareGrid
+    ? undefined
+    : ({
+        '--grid-rows': gridLayout.rows,
+        '--grid-cols': gridLayout.cols,
+      } as CSSProperties);
+  const gridCapacity = gridLayout.rows * gridLayout.cols;
 
   // Open the wall in its OWN window, not this tab.
   //
@@ -464,11 +518,17 @@ export function CameraMonitoringDashboard({
     return (
       <div className="camera-monitoring-dashboard">
         <div className="camera-monitoring-dashboard__toolbar">
-          <CameraGridSelector currentSize={gridSize} onSizeChange={handleGridSizeChange} />
+          <CameraGridSelector
+            layout={gridLayout}
+            onLayoutChange={handleGridLayoutChange}
+            fitCount={gridCameraCount}
+            onFit={handleGridFit}
+          />
           <CameraSelectorDropdown
             cameras={cameras}
             selectedCameraIds={selectedCameraIds}
-            gridSize={gridSize}
+            maxCameras={gridCapacity}
+            layoutLabel={`${gridLayout.rows}×${gridLayout.cols}`}
             onSelectionChange={handleCameraSelectionChange}
           />
           <ShiftConfigDropdown />
@@ -476,8 +536,8 @@ export function CameraMonitoringDashboard({
           {disabledCamerasToggle}
           {viewingPaneControls}
         </div>
-        <div className={`camera-monitoring-dashboard__grid camera-monitoring-dashboard__grid--${gridSize}x${gridSize}`}>
-          {Array.from({ length: getMaxCameras(gridSize) }).map((_, index) => (
+        <div className={gridClassName} style={gridStyle}>
+          {Array.from({ length: gridCapacity }).map((_, index) => (
             <div key={index} className="camera-monitoring-dashboard__skeleton" />
           ))}
         </div>
@@ -513,11 +573,17 @@ export function CameraMonitoringDashboard({
     return (
       <div className="camera-monitoring-dashboard">
         <div className="camera-monitoring-dashboard__toolbar">
-          <CameraGridSelector currentSize={gridSize} onSizeChange={handleGridSizeChange} />
+          <CameraGridSelector
+            layout={gridLayout}
+            onLayoutChange={handleGridLayoutChange}
+            fitCount={gridCameraCount}
+            onFit={handleGridFit}
+          />
           <CameraSelectorDropdown
             cameras={cameras}
             selectedCameraIds={selectedCameraIds}
-            gridSize={gridSize}
+            maxCameras={gridCapacity}
+            layoutLabel={`${gridLayout.rows}×${gridLayout.cols}`}
             onSelectionChange={handleCameraSelectionChange}
           />
           <ShiftConfigDropdown />
@@ -541,11 +607,17 @@ export function CameraMonitoringDashboard({
   return (
     <div className="camera-monitoring-dashboard">
       <div className="camera-monitoring-dashboard__toolbar">
-        <CameraGridSelector currentSize={gridSize} onSizeChange={handleGridSizeChange} />
+        <CameraGridSelector
+            layout={gridLayout}
+            onLayoutChange={handleGridLayoutChange}
+            fitCount={gridCameraCount}
+            onFit={handleGridFit}
+          />
         <CameraSelectorDropdown
           cameras={cameras}
           selectedCameraIds={selectedCameraIds}
-          gridSize={gridSize}
+          maxCameras={gridCapacity}
+          layoutLabel={`${gridLayout.rows}×${gridLayout.cols}`}
           onSelectionChange={handleCameraSelectionChange}
         />
         <ShiftConfigDropdown />
@@ -554,13 +626,11 @@ export function CameraMonitoringDashboard({
         {viewingPaneControls}
       </div>
 
-      <div
-        className={`camera-monitoring-dashboard__grid camera-monitoring-dashboard__grid--${gridSize}x${gridSize}`}
-      >
-        {gridCells.map((cell, index) => {
+      <div className={gridClassName} style={gridStyle}>
+        {gridTiles.map((cell) => {
           if (cell.type !== 'camera') {
             return (
-              <div key={`empty-${index}`} className="camera-monitoring-dashboard__empty-cell">
+              <div key={`empty-${cell.key}`} className="camera-monitoring-dashboard__empty-cell">
                 <div className="camera-monitoring-dashboard__empty-cell-icon">+</div>
                 <p className="camera-monitoring-dashboard__empty-cell-text">Add Camera</p>
                 <p className="camera-monitoring-dashboard__empty-cell-subtext">

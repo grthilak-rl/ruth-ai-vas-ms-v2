@@ -11,9 +11,16 @@ import './GridLayoutPicker.css';
 
 interface GridLayoutPickerProps {
   layout: PaneLayout;
+  /**
+   * Whether `layout` is one the host has no preset button for, so the trigger
+   * shows it ("3 × 4 ▾"). Defaults to the wall's presets (square 1..4).
+   */
+  isCustom?: boolean;
   /** Cameras the Fit entry should hold: the monitoring page's selection. */
   fitCount: number;
   onSelect: (layout: PaneLayout) => void;
+  /** Fit's own handler, when applying it does more than choose a layout. Defaults to onSelect. */
+  onFit?: (layout: PaneLayout) => void;
   /**
    * Aspect of the screen the wall is shown on, for Fit's tie-breaks. Defaults
    * to this window, which is right on the wall itself; a picker hosted
@@ -22,6 +29,8 @@ interface GridLayoutPickerProps {
   viewportAspect?: number;
   /** 'dark' for the wall toolbar, 'light' for the Camera Monitoring toolbar. */
   variant?: 'dark' | 'light';
+  /** Which trigger edge the popover lines up with, so it stays on screen. */
+  align?: 'center' | 'start' | 'end';
   /** Trigger classes, so the button matches the toolbar hosting it. */
   triggerClassName?: string;
   triggerActiveClassName?: string;
@@ -37,10 +46,13 @@ interface GridLayoutPickerProps {
  */
 export function GridLayoutPicker({
   layout,
+  isCustom: isCustomProp,
   fitCount,
   onSelect,
+  onFit,
   viewportAspect,
   variant = 'dark',
+  align = 'center',
   triggerClassName = 'viewing-pane__toolbar-button',
   triggerActiveClassName = 'viewing-pane__toolbar-button--active',
 }: GridLayoutPickerProps) {
@@ -55,7 +67,7 @@ export function GridLayoutPicker({
   const cellRefs = useRef<Map<string, HTMLButtonElement>>(new Map());
   const popoverId = useId();
 
-  const isCustom = presetSizeOf(layout) === null;
+  const isCustom = isCustomProp ?? presetSizeOf(layout) === null;
   const fit = fitLayout(
     fitCount,
     viewportAspect ?? window.innerWidth / Math.max(window.innerHeight, 1)
@@ -88,8 +100,8 @@ export function GridLayoutPicker({
     return () => document.removeEventListener('pointerdown', onPointerDown);
   }, [open, close]);
 
-  const apply = (next: PaneLayout) => {
-    onSelect(next);
+  const apply = (next: PaneLayout, handler: (layout: PaneLayout) => void = onSelect) => {
+    handler(next);
     close(true);
   };
 
@@ -121,7 +133,9 @@ export function GridLayoutPicker({
 
   return (
     <div
-      className={`grid-layout-picker ${variant === 'light' ? 'grid-layout-picker--light' : ''}`}
+      className={`grid-layout-picker grid-layout-picker--align-${align} ${
+        variant === 'light' ? 'grid-layout-picker--light' : ''
+      }`}
       ref={rootRef}
     >
       <button
@@ -196,7 +210,7 @@ export function GridLayoutPicker({
             type="button"
             className="grid-layout-picker__fit"
             disabled={!fit}
-            onClick={() => fit && apply(fit)}
+            onClick={() => fit && apply(fit, onFit ?? onSelect)}
           >
             {fit
               ? `Fit ${fitCount} camera${fitCount === 1 ? '' : 's'} (${fit.rows} × ${fit.cols})`

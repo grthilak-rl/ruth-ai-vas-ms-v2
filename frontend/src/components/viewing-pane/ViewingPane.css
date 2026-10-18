@@ -271,6 +271,18 @@
   color: #fff;
 }
 
+/* Out-rank :hover above (a pseudo-class adds specificity), so hovering the
+   active button keeps it blue instead of fading to the inactive hover grey. */
+.viewing-pane__toolbar-button--active:hover {
+  background-color: #1d4ed8;
+  border-color: #1d4ed8;
+}
+
+.viewing-pane__toolbar-button:focus-visible {
+  outline: 2px solid #60a5fa;
+  outline-offset: 2px;
+}
+
 .viewing-pane__toolbar-label {
   font-size: 0.75rem;
   color: rgba(229, 231, 235, 0.7);

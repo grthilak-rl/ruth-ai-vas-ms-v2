@@ -1,7 +1,5 @@
 import { useState, useRef, useEffect } from 'react';
 import type { Device } from '../../state';
-import type { GridSize } from '../../utils/cameraGridPreferences';
-import { getMaxCameras } from '../../utils/cameraGridPreferences';
 import { useDeviceSync } from '../../state/hooks/useDeviceSync';
 import './CameraSelectorDropdown.css';
 
@@ -26,22 +24,24 @@ import './CameraSelectorDropdown.css';
 interface CameraSelectorDropdownProps {
   cameras: Device[];
   selectedCameraIds: string[];
-  gridSize: GridSize;
+  /** Tiles the grid shows: the most cameras that can be selected. */
+  maxCameras: number;
+  /** The grid's layout for the footer, e.g. "3×4". */
+  layoutLabel: string;
   onSelectionChange: (cameraIds: string[]) => void;
 }
 
 export function CameraSelectorDropdown({
   cameras,
   selectedCameraIds,
-  gridSize,
+  maxCameras,
+  layoutLabel,
   onSelectionChange,
 }: CameraSelectorDropdownProps) {
   const [isOpen, setIsOpen] = useState(false);
   const [tempSelection, setTempSelection] = useState<string[]>(selectedCameraIds);
   const dropdownRef = useRef<HTMLDivElement>(null);
   const { syncNow, isSyncing, lastSyncFailed } = useDeviceSync();
-
-  const maxCameras = getMaxCameras(gridSize);
 
   // Update temp selection when props change
   useEffect(() => {
@@ -228,7 +228,7 @@ export function CameraSelectorDropdown({
             </div>
 
             <div className="camera-selector-dropdown__footer-info">
-              Selected: {tempSelection.length} / {maxCameras} (max for {gridSize}×{gridSize} grid)
+              Selected: {tempSelection.length} / {maxCameras} (max for {layoutLabel} grid)
             </div>
           </div>
 

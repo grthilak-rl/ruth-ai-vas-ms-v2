@@ -91,17 +91,25 @@
   outline-offset: 2px;
 }
 
-/* ============================================================================
-   Light variant (Camera Monitoring toolbar)
-   ============================================================================
-   Anchored to the trigger's right edge rather than centred: the Viewing Pane
-   group is right-aligned on that toolbar, so a centred popover could run off
-   the right of the window. */
+/* Alignment: a picker near a window edge lines its popover up with the
+   trigger's near edge instead of centring it, so it can't run off screen. */
+.grid-layout-picker--align-start .grid-layout-picker__popover {
+  left: 0;
+  right: auto;
+  transform: none;
+}
 
-.grid-layout-picker--light .grid-layout-picker__popover {
+.grid-layout-picker--align-end .grid-layout-picker__popover {
   left: auto;
   right: 0;
   transform: none;
+}
+
+/* ============================================================================
+   Light variant (Camera Monitoring toolbar)
+   ============================================================================ */
+
+.grid-layout-picker--light .grid-layout-picker__popover {
   background-color: #fff;
   border-color: #dadce0;
   box-shadow: 0 4px 16px rgba(60, 64, 67, 0.25);

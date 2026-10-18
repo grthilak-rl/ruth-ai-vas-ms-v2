@@ -137,3 +137,122 @@ export function fitLayout(count: number, viewportAspect: number = FEED_ASPECT): 
   }
   return best;
 }
+
+// ============================================================================
+// Position-keyed slot assignments
+// ============================================================================
+// Shared by the wall and the Camera Monitoring grid: both keep cameras by grid
+// position and never trim on a layout change, so shrinking and growing back
+// restores every camera to where it was.
+
+/** "row,col" -> camera id. Sparse: gaps are empty tiles. */
+export type CellAssignments = Record<string, string>;
+
+/**
+ * Rebuild rather than trust: a hand-edited or half-written value should
+ * degrade to "some tiles empty", never to a crash on a display nobody is
+ * watching.
+ */
+export function sanitizeCellAssignments(parsed: unknown): CellAssignments {
+  if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) return {};
+  const cells: CellAssignments = {};
+  for (const [key, value] of Object.entries(parsed)) {
+    if (parseCellKey(key) && typeof value === 'string' && value) cells[key] = value;
+  }
+  return cells;
+}
+
+/**
+ * Assign a camera to a grid position, or clear it when cameraId is null.
+ *
+ * A camera may occupy only one position: assigning one that is already placed
+ * moves it rather than duplicating it — including out of a position the
+ * current layout hides. Two tiles of the same feed would mean two WebRTC
+ * consumers decoding identical video for no benefit.
+ */
+export function assignCell(
+  cells: CellAssignments,
+  key: string,
+  cameraId: string | null
+): CellAssignments {
+  const next: CellAssignments = { ...cells };
+
+  if (cameraId) {
+    for (const [k, value] of Object.entries(next)) {
+      if (value === cameraId) delete next[k];
+    }
+    next[key] = cameraId;
+  } else {
+    delete next[key];
+  }
+
+  return next;
+}
+
+/** Cameras a layout shows, in reading order. */
+export function visibleCameraIds(cells: CellAssignments, layout: PaneLayout): string[] {
+  const ids: string[] = [];
+  for (const key of visibleCellKeys(layout)) {
+    if (cells[key]) ids.push(cells[key]);
+  }
+  return ids;
+}
+
+/**
+ * Make the visible cameras match a list picked elsewhere (a checkbox list
+ * rather than per-tile pickers).
+ *
+ * Visible cameras that are still wanted stay exactly where they are; ones no
+ * longer wanted leave their tile empty; newly wanted ones fill the first free
+ * visible tiles in list order (moved out of a hidden position if they were
+ * parked in one). Anything beyond the free tiles is not placed. Hidden
+ * positions are otherwise left alone, so they still come back on grow.
+ */
+export function applySelection(
+  cells: CellAssignments,
+  layout: PaneLayout,
+  cameraIds: string[]
+): CellAssignments {
+  const keys = visibleCellKeys(layout);
+  const wanted = new Set(cameraIds);
+  let next: CellAssignments = { ...cells };
+
+  for (const key of keys) {
+    if (next[key] && !wanted.has(next[key])) delete next[key];
+  }
+
+  const onScreen = new Set(keys.map((key) => next[key]).filter(Boolean));
+  const free = keys.filter((key) => !next[key]);
+  for (const id of cameraIds) {
+    if (onScreen.has(id)) continue;
+    const key = free.shift();
+    if (!key) break;
+    next = assignCell(next, key, id);
+    onScreen.add(id);
+  }
+  return next;
+}
+
+/**
+ * Bring cameras parked outside a layout into its free tiles, in the reading
+ * order of where they were. Visible cameras do not move. Used by Fit, whose
+ * promise is that every camera ends up on screen.
+ */
+export function packIntoLayout(cells: CellAssignments, layout: PaneLayout): CellAssignments {
+  const keys = visibleCellKeys(layout);
+  const visible = new Set(keys);
+  const free = keys.filter((key) => !cells[key]);
+
+  const hidden = Object.keys(cells)
+    .filter((key) => !visible.has(key))
+    .map((key) => ({ key, pos: parseCellKey(key)! }))
+    .sort((a, b) => a.pos.row - b.pos.row || a.pos.col - b.pos.col);
+
+  let next: CellAssignments = { ...cells };
+  for (const { key } of hidden) {
+    const target = free.shift();
+    if (!target) break;
+    next = assignCell(next, target, cells[key]);
+  }
+  return next;
+}

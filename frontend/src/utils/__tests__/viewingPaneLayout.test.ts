@@ -4,13 +4,18 @@
 
 import { describe, expect, it } from 'vitest';
 import {
+  type CellAssignments,
   FEED_ASPECT,
+  applySelection,
   cellKey,
   containedBox,
   fitLayout,
   isValidLayout,
+  packIntoLayout,
   parseCellKey,
   presetSizeOf,
+  sanitizeCellAssignments,
+  visibleCameraIds,
   visibleCellKeys,
 } from '../viewingPaneLayout';
 
@@ -126,5 +131,62 @@ describe('cells and presets', () => {
     expect(isValidLayout({ rows: 2.5, cols: 2 })).toBe(false);
     expect(isValidLayout({ rows: '3', cols: 4 })).toBe(false);
     expect(isValidLayout(null)).toBe(false);
+  });
+});
+
+describe('position-keyed slots (shared by wall and Camera Monitoring)', () => {
+  // A full 3 x 4 grid: camera "c<r><c>" at (r, c).
+  const full34: CellAssignments = Object.fromEntries(
+    visibleCellKeys({ rows: 3, cols: 4 }).map((k) => [k, `c${k.replace(',', '')}`])
+  );
+
+  it('visibleCameraIds lists what a layout shows, reading order; shrinking keeps positions', () => {
+    expect(visibleCameraIds(full34, { rows: 2, cols: 2 })).toEqual(['c00', 'c01', 'c10', 'c11']);
+    expect(visibleCameraIds(full34, { rows: 3, cols: 4 })).toHaveLength(12);
+    expect(visibleCameraIds({ '0,1': 'a', '2,2': 'b' }, { rows: 2, cols: 2 })).toEqual(['a']);
+  });
+
+  it('applySelection keeps cameras in place, empties deselected tiles, fills free tiles in order', () => {
+    const cells = { '0,0': 'a', '0,1': 'b', '1,0': 'c' };
+    const next = applySelection(cells, { rows: 2, cols: 2 }, ['c', 'a', 'x', 'y']);
+    // a and c stay put; b's tile is freed and x takes the first free tile.
+    expect(next).toEqual({ '0,0': 'a', '0,1': 'x', '1,0': 'c', '1,1': 'y' });
+  });
+
+  it('applySelection moves a camera out of a hidden position and leaves other hidden ones alone', () => {
+    const cells = { '0,0': 'a', '3,3': 'parked', '4,4': 'other' };
+    const next = applySelection(cells, { rows: 2, cols: 2 }, ['a', 'parked']);
+    expect(next).toEqual({ '0,0': 'a', '0,1': 'parked', '4,4': 'other' });
+  });
+
+  it('applySelection drops what does not fit', () => {
+    expect(applySelection({}, { rows: 1, cols: 2 }, ['a', 'b', 'c'])).toEqual({ '0,0': 'a', '0,1': 'b' });
+  });
+
+  it('packIntoLayout moves parked cameras into free tiles in their reading order; visible ones stay', () => {
+    // 3x4 grid shrunk to 2x2, with one tile emptied, then Fit picks 2x3.
+    const cells = { ...full34 };
+    delete cells['0,1'];
+    const next = packIntoLayout(cells, { rows: 2, cols: 3 });
+    const shown = visibleCameraIds(next, { rows: 2, cols: 3 });
+    expect(shown).toHaveLength(6);
+    expect(next['0,0']).toBe('c00'); // visible: unchanged
+    expect(next['1,2']).toBe('c12'); // visible: unchanged
+    expect(next['0,1']).toBe('c03'); // first parked camera in reading order
+  });
+
+  it('Fit + pack puts every camera on screen (12 cameras parked behind a 2x2 -> 3x4)', () => {
+    const fit = fitLayout(12)!;
+    expect(fit).toEqual({ rows: 3, cols: 4 });
+    const next = packIntoLayout(full34, fit);
+    expect(new Set(visibleCameraIds(next, fit))).toEqual(new Set(Object.values(full34)));
+  });
+
+  it('sanitizeCellAssignments keeps only valid keys with non-empty string ids', () => {
+    expect(
+      sanitizeCellAssignments({ '0,0': 'ok', '9,9': 'out', '1': 'bad', '0,1': 5, '0,2': '' })
+    ).toEqual({ '0,0': 'ok' });
+    expect(sanitizeCellAssignments(['0,0'])).toEqual({});
+    expect(sanitizeCellAssignments(null)).toEqual({});
   });
 });

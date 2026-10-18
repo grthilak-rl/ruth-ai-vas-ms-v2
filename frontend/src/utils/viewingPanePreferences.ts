@@ -15,18 +15,22 @@
  */
 
 import {
+  type CellAssignments,
   type PaneLayout,
   cellKey,
   isValidLayout,
   parseCellKey,
   PANE_GRID_SIZES,
   type PaneGridSize,
+  sanitizeCellAssignments,
 } from './viewingPaneLayout';
 
 export {
+  type CellAssignments,
   type PaneGridSize,
   type PaneLayout,
   PANE_GRID_SIZES,
+  assignCell,
   getPaneTileCount,
   presetSizeOf,
 } from './viewingPaneLayout';
@@ -40,9 +44,6 @@ const LEGACY_KEY_PANE_GRID_SIZE = 'ruth-ai-viewing-pane-grid-size';
 const LEGACY_KEY_PANE_TILES = 'ruth-ai-viewing-pane-tiles';
 
 const DEFAULT_PANE_GRID_SIZE: PaneGridSize = 2;
-
-/** "row,col" -> camera id. Sparse: gaps are empty tiles. */
-export type CellAssignments = Record<string, string>;
 
 function readLegacyGridSize(): PaneGridSize {
   try {
@@ -93,20 +94,6 @@ export function setPaneLayout(layout: PaneLayout): void {
 }
 
 /**
- * Rebuild rather than trust: a hand-edited or half-written value should
- * degrade to "some tiles empty", never to a crash on a display nobody is
- * watching.
- */
-function sanitizeCells(parsed: unknown): CellAssignments {
-  if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) return {};
-  const cells: CellAssignments = {};
-  for (const [key, value] of Object.entries(parsed)) {
-    if (parseCellKey(key) && typeof value === 'string' && value) cells[key] = value;
-  }
-  return cells;
-}
-
-/**
  * Carry a pre-layout wall over: reading-order index i on an N x N preset is
  * position (i / N, i % N). Indices beyond N x N were hidden leftovers from a
  * larger preset whose width is no longer known; any that fall outside the
@@ -137,7 +124,7 @@ function readLegacyCells(): CellAssignments {
 export function getCellAssignments(): CellAssignments {
   try {
     const saved = localStorage.getItem(STORAGE_KEY_PANE_CELLS);
-    if (saved !== null) return sanitizeCells(JSON.parse(saved));
+    if (saved !== null) return sanitizeCellAssignments(JSON.parse(saved));
   } catch (error) {
     console.warn('[ViewingPane] Failed to read cell assignments:', error);
     return {};
@@ -151,35 +138,4 @@ export function setCellAssignments(cells: CellAssignments): void {
   } catch (error) {
     console.warn('[ViewingPane] Failed to save cell assignments:', error);
   }
-}
-
-/**
- * Assign a camera to a grid position, or clear it when cameraId is null.
- *
- * A camera may occupy only one position: assigning one that is already placed
- * moves it rather than duplicating it — including out of a position the
- * current layout hides. Two tiles of the same feed would mean two WebRTC
- * consumers decoding identical video for no benefit, and on a wall whose whole
- * purpose is "see everything at once" a duplicate is a blind spot.
- *
- * There is deliberately no trim on layout change: positions outside the
- * current layout keep their cameras, so 3x4 -> 2x2 -> 3x4 comes back intact.
- */
-export function assignCell(
-  cells: CellAssignments,
-  key: string,
-  cameraId: string | null
-): CellAssignments {
-  const next: CellAssignments = { ...cells };
-
-  if (cameraId) {
-    for (const [k, value] of Object.entries(next)) {
-      if (value === cameraId) delete next[k];
-    }
-    next[key] = cameraId;
-  } else {
-    delete next[key];
-  }
-
-  return next;
 }

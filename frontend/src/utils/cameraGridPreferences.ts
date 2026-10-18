@@ -2,21 +2,40 @@
  * Camera Grid Preferences Utility
  *
  * Manages localStorage persistence for:
- * - Grid size preference (1x1 through 5x5)
- * - Selected cameras for the grid
+ * - Grid layout (rows x columns; the 1x1..5x5 presets are the square ones)
+ * - Which camera occupies which grid position
+ * - Selected cameras (derived: the cameras the layout shows, reading order)
  * - Whether to show cameras disabled in VAS (off by default)
  *
  * Per F7 specification:
- * - Grid size persists across sessions (localStorage)
+ * - Grid layout persists across sessions (localStorage)
  * - Selected cameras persist across sessions (localStorage)
  * - AI model toggles are session-scoped (not persisted)
+ *
+ * A separate setting from the Viewing Pane's layout: this is the operator's
+ * working grid, that is the wall. The grid maths (layouts, Fit, position-keyed
+ * slots) is shared via viewingPaneLayout.ts.
  */
 
+import {
+  type CellAssignments,
+  type PaneLayout,
+  applySelection,
+  isValidLayout,
+  sanitizeCellAssignments,
+} from './viewingPaneLayout';
+
+/** Tiles per side for the square presets. */
 export type GridSize = 1 | 2 | 3 | 4 | 5;
 
-const STORAGE_KEY_GRID_SIZE = 'ruth-ai-camera-grid-size';
+export const GRID_SIZES: GridSize[] = [1, 2, 3, 4, 5];
+
+const STORAGE_KEY_GRID_LAYOUT = 'ruth-ai-camera-grid-layout';
+const STORAGE_KEY_GRID_CELLS = 'ruth-ai-camera-grid-cells';
 const STORAGE_KEY_SELECTED_CAMERAS = 'ruth-ai-selected-cameras';
 const STORAGE_KEY_SHOW_DISABLED = 'ruth-ai-show-disabled-cameras';
+// Pre-layout key: a single square size. Read only to carry a grid over.
+const LEGACY_KEY_GRID_SIZE = 'ruth-ai-camera-grid-size';
 const DEFAULT_GRID_SIZE: GridSize = 2; // 2x2 grid as default per F7
 
 /**
@@ -45,40 +64,67 @@ export function setShowDisabledCameras(show: boolean): void {
   }
 }
 
-/**
- * Get the saved grid size preference
- */
-export function getGridSize(): GridSize {
+function readLegacyGridSize(): GridSize {
   try {
-    const saved = localStorage.getItem(STORAGE_KEY_GRID_SIZE);
+    const saved = localStorage.getItem(LEGACY_KEY_GRID_SIZE);
     if (saved) {
       const parsed = parseInt(saved, 10);
-      if (parsed >= 1 && parsed <= 5) {
-        return parsed as GridSize;
-      }
+      if (parsed >= 1 && parsed <= 5) return parsed as GridSize;
     }
   } catch (error) {
-    console.warn('[GridPreferences] Failed to read grid size:', error);
+    console.warn('[GridPreferences] Failed to read legacy grid size:', error);
   }
   return DEFAULT_GRID_SIZE;
 }
 
-/**
- * Save grid size preference
- */
-export function setGridSize(size: GridSize): void {
+/** The saved grid layout; falls back to the pre-layout square size, then 2x2. */
+export function getGridLayout(): PaneLayout {
   try {
-    localStorage.setItem(STORAGE_KEY_GRID_SIZE, size.toString());
+    const saved = localStorage.getItem(STORAGE_KEY_GRID_LAYOUT);
+    if (saved) {
+      const parsed: unknown = JSON.parse(saved);
+      if (isValidLayout(parsed)) return { rows: parsed.rows, cols: parsed.cols };
+    }
   } catch (error) {
-    console.warn('[GridPreferences] Failed to save grid size:', error);
+    console.warn('[GridPreferences] Failed to read grid layout:', error);
+  }
+  const size = readLegacyGridSize();
+  return { rows: size, cols: size };
+}
+
+export function setGridLayout(layout: PaneLayout): void {
+  try {
+    localStorage.setItem(
+      STORAGE_KEY_GRID_LAYOUT,
+      JSON.stringify({ rows: layout.rows, cols: layout.cols })
+    );
+  } catch (error) {
+    console.warn('[GridPreferences] Failed to save grid layout:', error);
   }
 }
 
 /**
- * Get the maximum number of cameras that can fit in the current grid
+ * Which camera is at which grid position, or null when no positions have been
+ * saved yet (first run, or a browser from before positions existed). The
+ * dashboard seeds those from the camera list — see seedGridCells — because
+ * the order the old grid showed cameras in depends on that list.
  */
-export function getMaxCameras(gridSize: GridSize): number {
-  return gridSize * gridSize;
+export function getGridCells(): CellAssignments | null {
+  try {
+    const saved = localStorage.getItem(STORAGE_KEY_GRID_CELLS);
+    if (saved !== null) return sanitizeCellAssignments(JSON.parse(saved));
+  } catch (error) {
+    console.warn('[GridPreferences] Failed to read grid cells:', error);
+  }
+  return null;
+}
+
+export function setGridCells(cells: CellAssignments): void {
+  try {
+    localStorage.setItem(STORAGE_KEY_GRID_CELLS, JSON.stringify(cells));
+  } catch (error) {
+    console.warn('[GridPreferences] Failed to save grid cells:', error);
+  }
 }
 
 /**
@@ -111,29 +157,27 @@ export function setSelectedCameraIds(ids: string[]): void {
 }
 
 /**
- * Seed the camera selection when the operator hasn't made one yet.
+ * First positions for a grid with none saved.
  *
- * A saved selection is operator intent and is NEVER reconciled against the
- * currently-visible camera list. A camera can drop out of that list for
- * reasons that have nothing to do with the operator's choice — its stream is
- * down, VAS restarted (which resets every device's active flag), a sync
- * landed mid-flight — and pruning on that signal silently and permanently
- * forgets the selection, since the pruned result gets written back to
- * localStorage. Cameras that aren't currently available are filtered at
- * render time instead, so they return to the grid when they come back.
+ * Reproduces what the grid showed before positions existed: the selected
+ * cameras in camera-list order, reading order across the layout. Selected
+ * cameras missing from the list right now (stream down, VAS restarting, a
+ * sync mid-flight) are kept after them rather than dropped — a saved
+ * selection is operator intent and is never pruned on availability; such a
+ * tile renders empty and fills again when the camera returns. With no
+ * selection at all (first run), the first cameras in the list are used.
  */
-export function autoSelectCameras(
-  availableCameraIds: string[],
-  currentGridSize: GridSize,
-  currentSelectedIds: string[]
-): string[] {
-  const maxCameras = getMaxCameras(currentGridSize);
-
-  // Existing selection: honour it as-is, trimmed only to what the grid holds.
-  if (currentSelectedIds.length > 0) {
-    return currentSelectedIds.slice(0, maxCameras);
-  }
-
-  // First run, or the operator cleared the selection: seed from what's available.
-  return availableCameraIds.slice(0, maxCameras);
+export function seedGridCells(
+  layout: PaneLayout,
+  cameraIds: string[],
+  selectedIds: string[]
+): CellAssignments {
+  const ordered =
+    selectedIds.length > 0
+      ? [
+          ...cameraIds.filter((id) => selectedIds.includes(id)),
+          ...selectedIds.filter((id) => !cameraIds.includes(id)),
+        ]
+      : cameraIds;
+  return applySelection({}, layout, ordered);
 }

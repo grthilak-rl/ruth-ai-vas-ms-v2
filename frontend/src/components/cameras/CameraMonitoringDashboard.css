@@ -109,6 +109,14 @@
   grid-template-rows: repeat(5, 1fr);
 }
 
+/* Custom rows x columns (3x4, 2x5, ...), from the "Custom ▾" picker.
+   Sized from CSS variables rather than an inline grid-template so the
+   responsive rules below can still override it on narrow screens. */
+.camera-monitoring-dashboard__grid--custom {
+  grid-template-columns: repeat(var(--grid-cols), 1fr);
+  grid-template-rows: repeat(var(--grid-rows), 1fr);
+}
+
 /* Empty Cell */
 .camera-monitoring-dashboard__empty-cell {
   display: flex;
@@ -261,7 +269,8 @@
   }
 
   .camera-monitoring-dashboard__grid--4x4,
-  .camera-monitoring-dashboard__grid--5x5 {
+  .camera-monitoring-dashboard__grid--5x5,
+  .camera-monitoring-dashboard__grid--custom-wide {
     grid-template-columns: repeat(3, 1fr);
     grid-template-rows: repeat(auto-fill, 1fr);
   }
@@ -276,7 +285,9 @@
 
   .camera-monitoring-dashboard__grid--3x3,
   .camera-monitoring-dashboard__grid--4x4,
-  .camera-monitoring-dashboard__grid--5x5 {
+  .camera-monitoring-dashboard__grid--5x5,
+  .camera-monitoring-dashboard__grid--custom-medium,
+  .camera-monitoring-dashboard__grid--custom-wide {
     grid-template-columns: repeat(2, 1fr);
     grid-template-rows: repeat(auto-fill, 1fr);
   }
@@ -322,6 +333,19 @@
   color: #fff;
   background-color: #1a73e8;
   border-color: #1a73e8;
+}
+
+/* Must out-rank :hover above — a pseudo-class adds specificity, so plain
+   --active lost to it and a hovered active button went near-white with its
+   white text. Same blue family as the Open Viewing Pane button's hover. */
+.camera-monitoring-dashboard__viewing-pane-tile-button--active:hover {
+  background-color: #1765cc;
+  border-color: #1765cc;
+}
+
+.camera-monitoring-dashboard__viewing-pane-tile-button:focus-visible {
+  outline: 2px solid #1a73e8;
+  outline-offset: 2px;
 }
 
 .camera-monitoring-dashboard__viewing-pane-button {
