@@ -1,0 +1,17 @@
+{
+  "manifest_version": 1,
+  "model_id": "harness",
+  "display_name": "Harness",
+  "weights": "bestharness.pt",
+  "task": "detect",
+  "imgsz": 1280,
+  "classes": {"0": "harness", "1": "no harness"},
+  "rules": [
+    {"id": "missing_harness", "classes": ["no harness"], "min_confidence": 0.7,
+     "violation_type": "missing_harness", "severity": "critical"}
+  ],
+  "performance": {"inference_time_hint_ms": 40, "recommended_fps": 2},
+  "limits": {"max_memory_mb": 1536, "inference_timeout_ms": 5000},
+  "_trial": "TEMPORARY observation block, 2026-10-18. Intended for confined-space (IN) cameras only, where a harness is mandatory for everyone in frame, so the rule needs no zone. The weights screen weaker than any model except gloves (mAP50 0.625, recall 0.504) and those cameras are often infrared, which the training set almost certainly was not - so the trial summary splits by greyscale. Remove once judged.",
+  "diagnostics": {"summary_log_sample": 1.0, "predict_floor": 0.01}
+}

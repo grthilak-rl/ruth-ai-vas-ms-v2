@@ -248,7 +248,7 @@ def load_installer():
     return module
 
 
-@pytest.mark.parametrize("name", ["hard_hat", "safety_vest", "gloves", "goggles"])
+@pytest.mark.parametrize("name", ["hard_hat", "safety_vest", "gloves", "goggles", "harness"])
 def test_shipped_manifests_are_valid(name):
     """Unknown top-level keys (`diagnostics`, `_trial`) must not be rejected."""
     assert load_installer().manifest_problems(manifest(name)) == []
@@ -329,7 +329,7 @@ def drop_diagnostics(m):
     m.pop("diagnostics", None)
 
 
-TRIAL = {"goggles", "gloves"}
+TRIAL = {"goggles", "gloves", "harness"}
 NOT_IN_TRIAL = ["hard_hat", "safety_vest"]
 
 
@@ -348,7 +348,7 @@ def test_which_models_are_in_trial_mode():
         assert "_trial" not in manifest(name)
 
 
-@pytest.mark.parametrize("name", ["hard_hat", "safety_vest", "gloves", "goggles"])
+@pytest.mark.parametrize("name", ["hard_hat", "safety_vest", "gloves", "goggles", "harness"])
 def test_every_shipped_model_gates_violations_at_0_7(name):
     """The manifest floor is now the violation gate (backend side too).
 
@@ -566,3 +566,134 @@ def test_detection_count_matches_objects(plugin_with):
     FakeYOLO.next_rows = [[10, 10, 20, 20, 0.9, 0], [30, 30, 40, 40, 0.8, 1]]
     out = mod.infer(FRAME)
     assert out["detection_count"] == len(out["objects"]) == 2
+
+
+# --------------------------------------------------------------------------
+# Greyscale / infrared detection
+#
+# Confined-space cameras switch to IR at night. Those frames are three
+# channels wide but visually grey, and a model trained on daylight colour
+# can behave completely differently on them — so the trial summary has to
+# be splittable by it, and the split has to be right.
+# --------------------------------------------------------------------------
+
+
+def _grey_frame(value=120):
+    return np.full((720, 1280, 3), value, dtype=np.uint8)
+
+
+def _colour_frame():
+    f = np.zeros((720, 1280, 3), dtype=np.uint8)
+    f[:, :, 0] = 200   # B
+    f[:, :, 1] = 60    # G
+    f[:, :, 2] = 20    # R
+    return f
+
+
+def test_flat_grey_frame_is_greyscale(plugin_with, caplog):
+    mod = plugin_with("goggles", add_diagnostics)
+    with caplog.at_level("INFO"):
+        mod.infer(_grey_frame())
+    rec = next(r for r in caplog.records if r.message == "Store detection summary")
+    assert rec.greyscale is True
+    assert rec.channel_spread == 0.0
+
+
+def test_saturated_colour_frame_is_not_greyscale(plugin_with, caplog):
+    mod = plugin_with("goggles", add_diagnostics)
+    with caplog.at_level("INFO"):
+        mod.infer(_colour_frame())
+    rec = next(r for r in caplog.records if r.message == "Store detection summary")
+    assert rec.greyscale is False
+    assert rec.channel_spread > 100
+
+
+def test_true_ir_is_bit_exact_grey(plugin_with, caplog):
+    """What a real IR stream looks like: luma copied into all channels."""
+    mod = plugin_with("goggles", add_diagnostics)
+    with caplog.at_level("INFO"):
+        mod.infer(_grey_frame(90))
+    rec = next(r for r in caplog.records if r.message == "Store detection summary")
+    assert rec.channel_spread == 0.0 and rec.greyscale is True
+
+
+def test_slight_chroma_noise_still_reads_greyscale(plugin_with, caplog):
+    """Headroom for a stream that re-encodes, without reaching a grey scene."""
+    rng = np.random.default_rng(0)
+    f = np.full((720, 1280, 3), 110, dtype=np.int16)
+    f += rng.integers(-1, 2, size=f.shape)
+    mod = plugin_with("goggles", add_diagnostics)
+    with caplog.at_level("INFO"):
+        mod.infer(np.clip(f, 0, 255).astype(np.uint8))
+    rec = next(r for r in caplog.records if r.message == "Store detection summary")
+    assert 0 < rec.channel_spread <= mod.GREYSCALE_TOLERANCE
+    assert rec.greyscale is True
+
+
+def test_grey_painted_scene_is_not_infrared(plugin_with, caplog):
+    """Camera 75104: a colour camera pointed at a grey-painted scene.
+
+    It read 5.5 and the first threshold (6.0) wrongly called it IR. A low
+    channel spread means "little colour in this picture", which is not
+    the question being asked — only night-mode IR is a domain shift for
+    the model.
+    """
+    rng = np.random.default_rng(1)
+    f = np.full((720, 1280, 3), 128, dtype=np.int16)
+    f[:, :, 0] += rng.integers(0, 12, size=f.shape[:2])
+    mod = plugin_with("goggles", add_diagnostics)
+    with caplog.at_level("INFO"):
+        mod.infer(np.clip(f, 0, 255).astype(np.uint8))
+    rec = next(r for r in caplog.records if r.message == "Store detection summary")
+    assert rec.channel_spread > mod.GREYSCALE_TOLERANCE
+    assert rec.greyscale is False
+
+
+def test_tolerance_sits_in_the_observed_fleet_gap():
+    """Guards the calibration, not just the code.
+
+    The fleet shows two populations: IR at exactly 0.0, and everything
+    else at 5.3 or above. Raising the tolerance back through that gap
+    would re-label a grey scene as infrared and silently mix two
+    different things in the trial report.
+    """
+    import importlib.util
+    spec = importlib.util.spec_from_file_location("tol_probe", PLUGIN_SRC)
+    mod = importlib.util.module_from_spec(spec)
+    sys.modules.setdefault("ultralytics", types.SimpleNamespace(YOLO=FakeYOLO))
+    spec.loader.exec_module(mod)
+    assert 0 < mod.GREYSCALE_TOLERANCE < mod._OBSERVED_GREY_SCENE_SPREAD
+
+
+def test_greyscale_costs_nothing_when_not_in_trial(plugin_with, caplog):
+    """The spread is only computed for the summary line."""
+    mod = plugin_with("hard_hat", drop_diagnostics)
+    with caplog.at_level("INFO"):
+        out = mod.infer(_colour_frame())
+    assert "Store detection summary" not in caplog.text
+    assert "channel_spread" not in out["metadata"]
+
+
+def test_channel_spread_handles_a_single_channel_frame():
+    """Defensive: never raise inside the logging path."""
+    import importlib.util
+    spec = importlib.util.spec_from_file_location("cs_probe", PLUGIN_SRC)
+    mod = importlib.util.module_from_spec(spec)
+    sys.modules.setdefault("ultralytics", types.SimpleNamespace(YOLO=FakeYOLO))
+    spec.loader.exec_module(mod)
+    assert mod._channel_spread(np.zeros((10, 10), dtype=np.uint8)) == 0.0
+    assert mod._channel_spread(np.zeros((10, 10, 1), dtype=np.uint8)) == 0.0
+
+
+def test_harness_class_name_matches_the_weights_exactly():
+    """`no harness` has a SPACE where every other model uses a hyphen.
+
+    The rule's class list is matched against the manifest's own class
+    names, and the installer checks those against the weights. Writing
+    `no-harness` here would pass neither, but the failure mode worth
+    guarding is the one that passes validation and never fires.
+    """
+    m = manifest("harness")
+    assert m["classes"] == {"0": "harness", "1": "no harness"}
+    assert m["rules"][0]["classes"] == ["no harness"]
+    assert set(m["rules"][0]["classes"]) <= set(m["classes"].values())

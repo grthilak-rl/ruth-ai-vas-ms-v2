@@ -223,6 +223,48 @@ def _class_summary(objects: List[Dict[str, Any]]) -> Dict[str, Dict[str, Any]]:
     return summary
 
 
+#: Mean per-pixel channel difference at or below which a frame is treated
+#: as greyscale.
+#:
+#: Calibrated against the fleet, after a first guess of 6.0 was wrong.
+#: A true IR stream duplicates the luma into all three channels, so it
+#: reads **exactly 0.0** — camera 75130 does, on every frame. The value
+#: is not zero only to leave room for a stream that re-encodes with a
+#: little chroma noise.
+#:
+#: The trap this avoids: camera 75104 reads 5.5 and is NOT infrared, it
+#: is a colour camera pointed at a grey-painted scene. A low channel
+#: spread means "this picture has little colour in it", which is not the
+#: same question as "this sensor is in night mode" — and only the latter
+#: is a domain shift for the model. Observed fleet spreads are 0.0, then
+#: 5.3 and upward, so 1.0 sits well inside the gap.
+GREYSCALE_TOLERANCE = 1.0
+
+#: Highest spread observed from a camera that is NOT infrared (75104, a
+#: grey-painted scene). The tolerance must stay below it.
+_OBSERVED_GREY_SCENE_SPREAD = 5.3
+
+
+def _channel_spread(frame: np.ndarray) -> float:
+    """How far from grey a frame is, as a mean 0-255 channel difference.
+
+    Confined-space cameras switch to infrared at night and produce frames
+    that are structurally colour (three channels) but visually grey. A
+    model trained on daylight colour can behave completely differently on
+    those, so the trial summary has to be splittable by it.
+
+    Sampled on a stride rather than the whole frame: this runs per
+    inference, and a 16x16 stride over 1280x720 is ~3,600 pixels, which
+    is plenty to tell grey from colour.
+    """
+    if frame.ndim != 3 or frame.shape[2] < 3:
+        return 0.0
+    s = frame[::16, ::16, :3].astype(np.int16)
+    bg = np.abs(s[:, :, 0] - s[:, :, 1]).mean()
+    gr = np.abs(s[:, :, 1] - s[:, :, 2]).mean()
+    return round(float(max(bg, gr)), 2)
+
+
 def _objects_from_result(result: Any, names: Dict[str, str]) -> List[Dict[str, Any]]:
     """Ultralytics boxes -> plain dicts, coordinates in frame pixels."""
     objects: List[Dict[str, Any]] = []
@@ -313,11 +355,14 @@ def infer(frame: np.ndarray, config: Optional[Dict[str, Any]] = None, **kwargs) 
         # `config` is per-camera-per-model, so a trial can label its own
         # frames by setting {"camera_name": ...} there. Unset elsewhere,
         # which is why this reads "unknown" rather than failing.
+        spread = _channel_spread(frame)
         logger.info(
             "Store detection summary",
             extra={
                 "model_id": manifest["model_id"],
                 "camera_name": (config or {}).get("camera_name", "unknown"),
+                "channel_spread": spread,
+                "greyscale": spread <= GREYSCALE_TOLERANCE,
                 "detection_count": out["detection_count"],
                 "scored_count": len(scored),
                 "predict_floor": predict_floor,
