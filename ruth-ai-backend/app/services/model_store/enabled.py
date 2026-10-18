@@ -34,6 +34,15 @@ class StoreModelInfo:
     all_rules_need_zone: bool = False
     #: reports missing PPE, like the built-in ppe_detection
     reports_ppe: bool = False
+    #: The confidence a violation from this model must reach to be written.
+    #:
+    #: The plugin has already applied each rule's own ``min_confidence``
+    #: when it set ``violation_detected``; this is the weakest of those
+    #: floors, so gating on it can never contradict the plugin while still
+    #: refusing a manifest that ships something absurd. 1.0 when the
+    #: manifest has no usable rule — nothing can clear it, which is the
+    #: safe direction for a model we cannot characterise.
+    min_confidence: float = 1.0
 
 
 def _version_key(name: str) -> Tuple[int, ...]:
@@ -51,6 +60,11 @@ def _info_from_manifest(model_id: str, version: str, manifest: dict) -> StoreMod
         == ViolationType.PPE_VIOLATION
         for r in rules
     )
+    floors = [
+        float(r["min_confidence"])
+        for r in rules
+        if isinstance(r.get("min_confidence"), (int, float))
+    ]
     return StoreModelInfo(
         model_id=model_id,
         version=version,
@@ -58,6 +72,7 @@ def _info_from_manifest(model_id: str, version: str, manifest: dict) -> StoreMod
         zone_required_rules=zone_rules,
         all_rules_need_zone=bool(rules) and len(zone_rules) == len(rules),
         reports_ppe=reports_ppe,
+        min_confidence=min(floors) if floors else 1.0,
     )
 
 

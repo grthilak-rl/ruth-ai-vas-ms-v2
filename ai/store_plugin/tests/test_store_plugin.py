@@ -123,11 +123,12 @@ def test_violation_class_fires_and_present_class_does_not(plugin):
 
 
 def test_below_min_confidence_never_fires(plugin):
+    floor = manifest("hard_hat")["rules"][0]["min_confidence"]
     mod = plugin("hard_hat")
-    FakeYOLO.next_rows = [[400, 60, 450, 120, 0.49, 1]]
+    FakeYOLO.next_rows = [[400, 60, 450, 120, floor - 0.01, 1]]
     out = mod.infer(FRAME)
     assert out["violation_detected"] is False
-    assert out["objects"] == []  # filtered by the predict conf floor (0.5)
+    assert out["objects"] == []  # filtered by the predict conf floor
 
 
 def test_vest_reversed_class_order(plugin):
@@ -154,7 +155,7 @@ def test_predict_called_with_manifest_imgsz_and_floor(plugin):
     yolo = FakeYOLO.instances[0]
     assert yolo.weights.endswith("weights/bestvest.pt")
     assert yolo.calls[0]["imgsz"] == 1280
-    assert yolo.calls[0]["conf"] == 0.5
+    assert yolo.calls[0]["conf"] == manifest("safety_vest")["rules"][0]["min_confidence"]
     assert yolo.calls[0]["verbose"] is False
 
 
@@ -247,8 +248,9 @@ def load_installer():
     return module
 
 
-@pytest.mark.parametrize("name", ["hard_hat", "safety_vest", "gloves"])
+@pytest.mark.parametrize("name", ["hard_hat", "safety_vest", "gloves", "goggles"])
 def test_shipped_manifests_are_valid(name):
+    """Unknown top-level keys (`diagnostics`, `_trial`) must not be rejected."""
     assert load_installer().manifest_problems(manifest(name)) == []
 
 
@@ -277,3 +279,290 @@ def test_build_tree_layout(tmp_path):
     assert contract["model_id"] == "hard_hat" and contract["version"] == "1.0.0"
     assert isinstance(contract["performance"]["recommended_fps"], int)
     assert d.joinpath("inference.py").read_text() == PLUGIN_SRC.read_text()
+
+
+# --------------------------------------------------------------------------
+# Trial mode (per-model diagnostics)
+#
+# The whole point of trial mode is that it observes ONE model without
+# disturbing anything else on a live plant. So the tests that matter most
+# are the negative ones: what must NOT change for the models that do not
+# carry a diagnostics block.
+# --------------------------------------------------------------------------
+
+
+DIAGNOSTICS = {"summary_log_sample": 1.0, "predict_floor": 0.01}
+
+
+@pytest.fixture
+def plugin_with(tmp_path, monkeypatch):
+    """Like `plugin`, but the manifest can be edited before it is written."""
+
+    def make(name, mutate=None, tag="x"):
+        m = manifest(name)
+        if mutate:
+            mutate(m)
+        version_dir = tmp_path / f"{name}_{tag}" / "1.0.0"
+        (version_dir / "weights").mkdir(parents=True)
+        (version_dir / "weights" / m["weights"]).write_bytes(b"not a real model")
+        (version_dir / "store_manifest.json").write_text(json.dumps(m))
+        (version_dir / "inference.py").write_text(PLUGIN_SRC.read_text())
+        monkeypatch.setitem(sys.modules, "ultralytics", types.SimpleNamespace(YOLO=FakeYOLO))
+        spec = importlib.util.spec_from_file_location(
+            f"store_{name}_{tag}_inference", version_dir / "inference.py"
+        )
+        module = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(module)
+        return module
+
+    FakeYOLO.instances.clear()
+    FakeYOLO.next_rows = []
+    return make
+
+
+def add_diagnostics(m):
+    m["diagnostics"] = dict(DIAGNOSTICS)
+
+
+def drop_diagnostics(m):
+    """`goggles.json` ships in trial mode; strip it to get the plain case."""
+    m.pop("diagnostics", None)
+
+
+TRIAL = {"goggles", "gloves"}
+NOT_IN_TRIAL = ["hard_hat", "safety_vest"]
+
+
+def test_which_models_are_in_trial_mode():
+    """Documents the live trial, and fails once it is cleaned up.
+
+    When a model leaves trial mode its `diagnostics` and `_trial` keys go,
+    and this test must be updated with them — that coupling is the point.
+    """
+    for name in TRIAL:
+        m = manifest(name)
+        assert m["diagnostics"] == {"summary_log_sample": 1.0, "predict_floor": 0.01}
+        assert "_trial" in m, f"{name}: a trial must carry its own removal note"
+    for name in NOT_IN_TRIAL:
+        assert "diagnostics" not in manifest(name)
+        assert "_trial" not in manifest(name)
+
+
+@pytest.mark.parametrize("name", ["hard_hat", "safety_vest", "gloves", "goggles"])
+def test_every_shipped_model_gates_violations_at_0_7(name):
+    """The manifest floor is now the violation gate (backend side too).
+
+    It was max(manifest, session 0.7) before, so every model was really
+    gated at 0.7 whatever its manifest said. Setting them all to 0.7
+    makes that explicit and keeps behaviour identical on the day the
+    backend starts honouring the manifest. Changing one of these numbers
+    now changes real alert volume — see docs/model-store/STEP5_PROPOSAL
+    section 11 for the measured impact.
+    """
+    assert manifest(name)["rules"][0]["min_confidence"] == 0.7
+
+
+# --- the inertness guarantee -----------------------------------------------
+
+
+@pytest.mark.parametrize("name", NOT_IN_TRIAL)
+def test_models_not_under_observation_stay_clean(name):
+    """A model must never end up in trial mode by accident."""
+    assert "diagnostics" not in manifest(name)
+
+
+@pytest.mark.parametrize("name", ["hard_hat", "safety_vest", "gloves"])
+def test_without_diagnostics_predict_floor_is_the_rule_floor(plugin_with, name):
+    mod = plugin_with(name, drop_diagnostics)
+    mod.infer(FRAME)
+    rule_floor = min(r["min_confidence"] for r in manifest(name)["rules"])
+    assert FakeYOLO.instances[-1].calls[-1]["conf"] == rule_floor
+
+
+@pytest.mark.parametrize("name", ["hard_hat", "safety_vest", "gloves"])
+def test_without_diagnostics_nothing_is_logged(plugin_with, name, caplog):
+    mod = plugin_with(name, drop_diagnostics)
+    FakeYOLO.next_rows = [[400, 60, 450, 120, 0.95, 1], [10, 10, 20, 20, 0.90, 0]]
+    with caplog.at_level("INFO"):
+        mod.infer(FRAME)
+    assert "Store detection summary" not in caplog.text
+
+
+LEGACY_OUTPUT = json.loads((HERE / "legacy_output.json").read_text())
+LEGACY_ROWS = [
+    [400, 60, 450, 120, 0.95, 1],
+    [10, 10, 20, 20, 0.90, 0],
+    [500, 70, 560, 130, 0.60, 1],
+]
+
+
+@pytest.mark.parametrize("name", ["hard_hat", "safety_vest", "gloves"])
+def test_without_diagnostics_output_is_byte_identical_to_the_legacy_plugin(
+    plugin_with, name
+):
+    """The real guarantee: trial mode changes nothing for the other models.
+
+    Trial mode ships to all four models at once, because every installed
+    model gets a copy of this one file. So "it only affects goggles" has to
+    be proved rather than asserted.
+
+    `legacy_output.json` was generated from the plugin as it stood before
+    trial mode existed (commit 8c04049), and is compared byte for byte
+    against what this plugin produces now. A golden file rather than a
+    `git show`: the git version passes trivially once this change is
+    committed, which is exactly when the guarantee stops being checked.
+
+    The two documented additions (`detection_count` and
+    `metadata.class_summary`) are removed before comparing; everything else
+    must serialise identically.
+    """
+    FakeYOLO.next_rows = list(LEGACY_ROWS)
+    new_out = plugin_with(name, drop_diagnostics).infer(FRAME)
+
+    new_out.pop("detection_count")
+    new_out["metadata"].pop("class_summary")
+    # Wall-clock, so it differs between two runs of identical code. Assert
+    # it is still reported, then drop it from the comparison.
+    assert isinstance(new_out["metadata"].pop("inference_ms"), float)
+
+    assert json.dumps(new_out, sort_keys=True) == json.dumps(
+        LEGACY_OUTPUT[name], sort_keys=True
+    )
+
+
+def test_legacy_golden_covers_the_interesting_paths():
+    """Guards the guard: a golden of empty results would prove nothing."""
+    for name, out in LEGACY_OUTPUT.items():
+        assert out["objects"], name
+        assert out["metadata"]["rules_active"], name
+    # at least one model must actually fire on the golden rows
+    assert any(o["violation_detected"] for o in LEGACY_OUTPUT.values())
+
+
+# --- what trial mode adds --------------------------------------------------
+
+
+def test_diagnostics_lowers_only_the_predict_floor(plugin_with):
+    mod = plugin_with("goggles", add_diagnostics)
+    mod.infer(FRAME)
+    assert FakeYOLO.instances[-1].calls[-1]["conf"] == 0.01
+
+
+def test_overlay_still_uses_the_rule_floor(plugin_with):
+    """Sub-threshold boxes reach the summary but never the operator."""
+    mod = plugin_with("goggles", add_diagnostics)
+    FakeYOLO.next_rows = [
+        [10, 10, 20, 20, 0.80, 1],   # above the 0.7 rule floor
+        [30, 30, 40, 40, 0.08, 1],   # visible only because of predict_floor
+        [50, 50, 60, 60, 0.03, 0],
+    ]
+    out = mod.infer(FRAME)
+    assert [o["confidence"] for o in out["objects"]] == [0.80]
+    assert out["detection_count"] == 1
+    assert out["metadata"]["scored_count"] == 3
+    assert out["metadata"]["class_summary"] == {
+        "no-goggles": {"n": 2, "max_confidence": 0.80},
+        "goggles": {"n": 1, "max_confidence": 0.03},
+    }
+
+
+def test_violations_unchanged_by_the_lowered_floor(plugin_with):
+    """A rule fires on exactly the boxes it would have fired on at 0.25."""
+    rows = [
+        [10, 10, 20, 20, 0.80, 1],
+        [30, 30, 40, 40, 0.08, 1],
+        [50, 50, 60, 60, 0.03, 1],
+    ]
+    FakeYOLO.next_rows = list(rows)
+    plain = plugin_with("goggles", drop_diagnostics, tag="plain").infer(FRAME)
+    FakeYOLO.next_rows = list(rows)
+    trial = plugin_with("goggles", add_diagnostics, tag="trial").infer(FRAME)
+
+    for key in ("violation_detected", "violation_type", "severity", "confidence"):
+        assert trial[key] == plain[key], key
+    assert trial["detections"] == plain["detections"]
+    assert trial["violation_detected"] is True and trial["confidence"] == pytest.approx(0.80)
+
+
+def test_sub_threshold_only_still_reports_no_violation(plugin_with):
+    """The goggles case: the model sees something, but nothing rule-worthy."""
+    mod = plugin_with("goggles", add_diagnostics)
+    FakeYOLO.next_rows = [[30, 30, 40, 40, 0.08, 1], [50, 50, 60, 60, 0.12, 0]]
+    out = mod.infer(FRAME)
+    assert out["violation_detected"] is False
+    assert out["objects"] == [] and out["detection_count"] == 0
+    assert out["metadata"]["class_summary"]["no-goggles"]["max_confidence"] == 0.08
+
+
+def test_summary_carries_the_camera_from_config(plugin_with, caplog):
+    """`config` is the only per-camera channel the plugin is given."""
+    mod = plugin_with("goggles", add_diagnostics)
+    FakeYOLO.next_rows = [[30, 30, 40, 40, 0.08, 1]]
+    with caplog.at_level("INFO"):
+        mod.infer(FRAME, config={"camera_name": "75096"})
+    rec = next(r for r in caplog.records if r.message == "Store detection summary")
+    assert rec.camera_name == "75096"
+
+
+def test_summary_camera_is_unknown_without_config(plugin_with, caplog):
+    """A trial on a camera nobody labelled must still log, not crash."""
+    mod = plugin_with("goggles", add_diagnostics)
+    FakeYOLO.next_rows = [[30, 30, 40, 40, 0.08, 1]]
+    with caplog.at_level("INFO"):
+        mod.infer(FRAME)
+    rec = next(r for r in caplog.records if r.message == "Store detection summary")
+    assert rec.camera_name == "unknown"
+
+
+def test_camera_name_in_config_does_not_disturb_rules(plugin_with):
+    """config is also where zones live; an extra key must be inert."""
+    rows = [[10, 10, 20, 20, 0.95, 1]]
+    FakeYOLO.next_rows = list(rows)
+    plain = plugin_with("goggles", tag="a").infer(FRAME)
+    FakeYOLO.next_rows = list(rows)
+    labelled = plugin_with("goggles", tag="b").infer(FRAME, config={"camera_name": "75096"})
+    for k in ("violation_detected", "violation_type", "confidence", "detections", "objects"):
+        assert labelled[k] == plain[k], k
+
+
+def test_summary_is_logged_under_trial_mode(plugin_with, caplog):
+    mod = plugin_with("goggles", add_diagnostics)
+    FakeYOLO.next_rows = [[30, 30, 40, 40, 0.08, 1]]
+    with caplog.at_level("INFO"):
+        mod.infer(FRAME)
+    rec = next(r for r in caplog.records if r.message == "Store detection summary")
+    assert rec.model_id == "goggles"
+    assert rec.predict_floor == 0.01
+    assert rec.rule_floor == manifest("goggles")["rules"][0]["min_confidence"]
+    assert rec.scored_count == 1 and rec.detection_count == 0
+    assert rec.violation_detected is False
+
+
+def test_sample_rate_zero_logs_nothing(plugin_with, caplog):
+    def mutate(m):
+        m["diagnostics"] = {"summary_log_sample": 0.0, "predict_floor": 0.01}
+
+    mod = plugin_with("goggles", mutate)
+    FakeYOLO.next_rows = [[30, 30, 40, 40, 0.08, 1]]
+    with caplog.at_level("INFO"):
+        mod.infer(FRAME)
+    assert "Store detection summary" not in caplog.text
+    # ...but the floor is still lowered: the two knobs are independent.
+    assert FakeYOLO.instances[-1].calls[-1]["conf"] == 0.01
+
+
+def test_predict_floor_cannot_be_raised_above_the_rule_floor(plugin_with):
+    """A floor above min_confidence would silently stop violations firing."""
+    def mutate(m):
+        m["diagnostics"] = {"predict_floor": 0.9}
+
+    mod = plugin_with("goggles", mutate)
+    mod.infer(FRAME)
+    assert FakeYOLO.instances[-1].calls[-1]["conf"] == manifest("goggles")["rules"][0]["min_confidence"]
+
+
+def test_detection_count_matches_objects(plugin_with):
+    mod = plugin_with("safety_vest")
+    FakeYOLO.next_rows = [[10, 10, 20, 20, 0.9, 0], [30, 30, 40, 40, 0.8, 1]]
+    out = mod.infer(FRAME)
+    assert out["detection_count"] == len(out["objects"]) == 2

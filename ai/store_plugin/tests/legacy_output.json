@@ -1,0 +1,191 @@
+{
+  "gloves": {
+    "confidence": 0.95,
+    "detections": [
+      {
+        "bbox": [
+          400.0,
+          60.0,
+          450.0,
+          120.0
+        ],
+        "class_id": 1,
+        "class_name": "no-gloves",
+        "confidence": 0.95,
+        "label": "missing_gloves",
+        "rule_id": "missing_gloves"
+      }
+    ],
+    "metadata": {
+      "display_name": "Gloves",
+      "frame_shape": [
+        720,
+        1280,
+        3
+      ],
+      "imgsz": 1280,
+      "model_id": "gloves",
+      "plugin_version": "1.0.0",
+      "rules_active": [
+        "missing_gloves"
+      ],
+      "rules_inactive": [],
+      "source": "store"
+    },
+    "objects": [
+      {
+        "bbox": [
+          400.0,
+          60.0,
+          450.0,
+          120.0
+        ],
+        "class_id": 1,
+        "class_name": "no-gloves",
+        "confidence": 0.95,
+        "violation": true
+      },
+      {
+        "bbox": [
+          10.0,
+          10.0,
+          20.0,
+          20.0
+        ],
+        "class_id": 0,
+        "class_name": "gloves",
+        "confidence": 0.9,
+        "violation": false
+      }
+    ],
+    "severity": "high",
+    "violation_detected": true,
+    "violation_type": "missing_gloves"
+  },
+  "hard_hat": {
+    "confidence": 0.95,
+    "detections": [
+      {
+        "bbox": [
+          400.0,
+          60.0,
+          450.0,
+          120.0
+        ],
+        "class_id": 1,
+        "class_name": "no-hardhat",
+        "confidence": 0.95,
+        "label": "missing_hardhat",
+        "rule_id": "missing_hardhat"
+      }
+    ],
+    "metadata": {
+      "display_name": "Hard Hat",
+      "frame_shape": [
+        720,
+        1280,
+        3
+      ],
+      "imgsz": 1280,
+      "model_id": "hard_hat",
+      "plugin_version": "1.0.0",
+      "rules_active": [
+        "missing_hardhat"
+      ],
+      "rules_inactive": [],
+      "source": "store"
+    },
+    "objects": [
+      {
+        "bbox": [
+          400.0,
+          60.0,
+          450.0,
+          120.0
+        ],
+        "class_id": 1,
+        "class_name": "no-hardhat",
+        "confidence": 0.95,
+        "violation": true
+      },
+      {
+        "bbox": [
+          10.0,
+          10.0,
+          20.0,
+          20.0
+        ],
+        "class_id": 0,
+        "class_name": "hardhat",
+        "confidence": 0.9,
+        "violation": false
+      }
+    ],
+    "severity": "critical",
+    "violation_detected": true,
+    "violation_type": "missing_hardhat"
+  },
+  "safety_vest": {
+    "confidence": 0.9,
+    "detections": [
+      {
+        "bbox": [
+          10.0,
+          10.0,
+          20.0,
+          20.0
+        ],
+        "class_id": 0,
+        "class_name": "no-vest",
+        "confidence": 0.9,
+        "label": "missing_vest",
+        "rule_id": "missing_vest"
+      }
+    ],
+    "metadata": {
+      "display_name": "Safety Vest",
+      "frame_shape": [
+        720,
+        1280,
+        3
+      ],
+      "imgsz": 1280,
+      "model_id": "safety_vest",
+      "plugin_version": "1.0.0",
+      "rules_active": [
+        "missing_vest"
+      ],
+      "rules_inactive": [],
+      "source": "store"
+    },
+    "objects": [
+      {
+        "bbox": [
+          400.0,
+          60.0,
+          450.0,
+          120.0
+        ],
+        "class_id": 1,
+        "class_name": "vest",
+        "confidence": 0.95,
+        "violation": false
+      },
+      {
+        "bbox": [
+          10.0,
+          10.0,
+          20.0,
+          20.0
+        ],
+        "class_id": 0,
+        "class_name": "no-vest",
+        "confidence": 0.9,
+        "violation": true
+      }
+    ],
+    "severity": "critical",
+    "violation_detected": true,
+    "violation_type": "missing_vest"
+  }
+}

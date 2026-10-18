@@ -7,7 +7,7 @@
   "imgsz": 1280,
   "classes": {"0": "hardhat", "1": "no-hardhat"},
   "rules": [
-    {"id": "missing_hardhat", "classes": ["no-hardhat"], "min_confidence": 0.5,
+    {"id": "missing_hardhat", "classes": ["no-hardhat"], "min_confidence": 0.7,
      "violation_type": "missing_hardhat", "severity": "critical"}
   ],
   "performance": {"inference_time_hint_ms": 25, "recommended_fps": 2},

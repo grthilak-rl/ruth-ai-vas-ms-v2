@@ -7,7 +7,7 @@
   "imgsz": 1280,
   "classes": {"0": "no-vest", "1": "vest"},
   "rules": [
-    {"id": "missing_vest", "classes": ["no-vest"], "min_confidence": 0.5,
+    {"id": "missing_vest", "classes": ["no-vest"], "min_confidence": 0.7,
      "violation_type": "missing_vest", "severity": "critical"}
   ],
   "performance": {"inference_time_hint_ms": 40, "recommended_fps": 2},

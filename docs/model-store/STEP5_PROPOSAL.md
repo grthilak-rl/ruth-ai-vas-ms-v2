@@ -465,3 +465,137 @@ Differences from the text above:
   "<model> · <class> <confidence>", red for detections a rule fired on.
 - **Warning (C):** shown in the picker panel while `ppe_detection` and a store
   model with `reports_ppe` run on the same camera.
+
+## 10. Trial mode is the Apply gate (2026-10-18)
+
+Piece 3 automates Apply. Before it does, this is the missing step in the
+upload → Apply flow, learned from putting `goggles` on a live plant.
+
+**The problem Apply has as designed.** `POST /apply` takes a model from
+"an operator enabled it" to "it is running on cameras" in one move. There
+is no state in between in which the model is *observed*. That matters
+because an uploaded model can look perfect by every signal Apply can see
+and still be useless:
+
+| signal available at Apply | `goggles` |
+|---|---|
+| manifest valid | ✅ |
+| class names match the weights | ✅ |
+| `task=detect`, imgsz consistent | ✅ |
+| loads, reports healthy, 4/4 ready | ✅ |
+| **checkpoint `train_metrics`** | ✅ mAP50 0.898, recall 0.899 — second-best of four |
+| **actual behaviour on site imagery** | ✗ zero violation-class detections at any confidence; nothing above 0.276 |
+
+Validation metrics are a useful filter and not a gate: `gloves` would have
+been caught by them (mAP50 0.533), `goggles` passes them and is inert. The
+gap is a domain gap, and only frames from the plant close it.
+
+**Trial mode, implemented 2026-10-18.** A per-model manifest block, shipped
+by `install_enabled.py` like any other manifest change:
+
+```json
+"diagnostics": {"summary_log_sample": 1.0, "predict_floor": 0.01}
+```
+
+- `predict_floor` lowers the floor given to `model.predict` *below* the
+  rule's `min_confidence`, exposing the sub-threshold confidence
+  distribution. It can only lower it, never raise it.
+- Rules still evaluate at `min_confidence`, so **violations are
+  unchanged**, and `objects` is still filtered at the rule floor, so **the
+  live overlay is unchanged**. Only `metadata.class_summary` and the
+  "Store detection summary" log line see the extra detections.
+- `summary_log_sample` gates that log line, on its own and deliberately not
+  also on "a violation fired" — otherwise putting one model under
+  observation would make every model with violations start logging.
+- Absent the block both default off. Enforced by
+  `test_without_diagnostics_output_is_byte_identical_to_the_legacy_plugin`,
+  which compares against `legacy_output.json`, a golden snapshot of the
+  plugin as it stood at 8c04049. A golden file rather than a `git show`:
+  the git version starts passing trivially the moment the change is
+  committed, which is exactly when the guarantee stops being checked.
+
+Also fixed in the same change: the runtime has always logged
+`result.get("detection_count", 0)`, and the store plugin never set the key,
+so the field read 0 on every store inference ever made — 24,370 consecutive
+zeroes while `safety_vest` was firing violations. The plugin now sets it.
+No runtime image change was needed for any of this; the plugin file ships
+through `install_enabled.py` and a store-runtime restart.
+
+**What this implies for Apply (piece 3).** Apply should offer **trial** as
+a first-class state between `enabled` and running-for-real, rather than
+leaving it as a manifest field an operator has to know about:
+
+1. `POST /models/{id}/trial` — enable with `diagnostics` set, on an
+   operator-chosen camera subset, and ideally with a lowered
+   `min_confidence` recorded as diagnostic rather than shipping config.
+2. The Model Management page shows a **Trial** badge, the chosen cameras,
+   and a live per-class summary from `metadata.class_summary` — the numbers
+   this handover had to reconstruct from logs.
+3. **Promotion is explicit**: a model leaves trial only when someone looks
+   at the summary and says so. Apply then rewrites the manifest without
+   `diagnostics`, at the shipping `min_confidence`.
+4. **Trial should expire.** A model left in trial is a model nobody
+   decided about; after N days it should alarm rather than drift. The two
+   temporary settings on `goggles` are currently kept honest only by a
+   `_trial` note in the manifest and a test that fails when they are
+   removed.
+
+The cost is small — trial mode is about forty lines in the plugin — and it
+is the difference between discovering a model is inert in an hour and
+discovering it after it has been on twelve cameras for a fortnight
+reporting nothing and looking healthy. That is the same silent-success
+failure mode as BL-11, in a different place.
+
+## 11. The violation gate is the manifest's, not the session's (2026-10-18)
+
+Store models carry `min_confidence` per rule, and the plugin applies it
+when it sets `violation_detected`. The backend then applied
+`stream_sessions.confidence_threshold` (0.7 on every live session) on top,
+so the effective gate was `max(manifest, session)` and **the manifest
+number did nothing unless it was higher**.
+
+That is a silent failure, and it bit goggles: the runtime logged a
+violation at 0.417, the manifest said 0.4, and no row was written. Nothing
+reported the drop. The same gate is part of why gloves (best 0.286) has
+produced nothing.
+
+Store models are now gated on their own manifest floor
+(`StoreModelInfo.min_confidence`, the weakest of the model's rule floors —
+the only bound that cannot contradict the plugin). Built-in models have no
+manifest and keep the session threshold, as does any store model whose
+manifest cannot be read: falling back to the stricter value is the safe
+direction. Both gates were changed —
+[`_apply_violation_rules`](../../ruth-ai-backend/app/services/inference_loop.py)
+for multi-model sessions and the legacy single-model path — so the two
+cannot drift.
+
+**Shipped behaviour-preserving.** All four manifests were set to 0.7 in the
+same change, which is exactly the gate that was already in force. Nothing
+about alert volume moves on deploy, and every intermediate state during
+rollout is identical too: old manifests with old code, new manifests with
+old code, and new manifests with new code all gate at 0.7. Lowering a
+threshold is now a deliberate per-model decision.
+
+**What a lower threshold would cost**, measured over 20 h
+(2026-10-17 12:00 → 2026-10-18 08:00 UTC) by counting false→true edges in
+the plugin's own signal — the backend writes one row per edge — against
+the rows actually recorded:
+
+| model | manifest was | recorded at 0.7 | would be recorded | change |
+|---|---:|---:|---:|---|
+| safety_vest | 0.5 | 525 | 4,180 | **8.0×**, ~+5,300/day |
+| hard_hat | 0.5 | 74 | 166 | 2.2×, ~+110/day |
+| gloves | 0.5 | 0 | 3 | +4/day |
+| goggles | 0.4 | 0 | 13 (1 camera) | ~966/day projected at 12 |
+
+So dropping safety_vest back to 0.5 is an alert flood, and giving goggles
+a real violation path at 0.4 would produce ~966 alerts/day from a model
+that has never made a reliable detection. Both stay at 0.7 until evidence
+says otherwise. `docs/tools/violation_edges.py` reproduces the table.
+
+One consequence worth knowing: the rule floor is also the plugin's
+`model.predict(conf=...)` floor, so raising these to 0.7 means the live
+overlay now draws boxes at ≥0.7 rather than ≥0.5 for hard_hat and
+safety_vest. If that matters, a model can carry
+`"diagnostics": {"predict_floor": 0.5}` with no `summary_log_sample`,
+which restores the old overlay without logging anything.

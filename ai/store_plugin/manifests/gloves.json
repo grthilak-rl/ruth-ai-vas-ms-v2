@@ -7,9 +7,11 @@
   "imgsz": 1280,
   "classes": {"0": "gloves", "1": "no-gloves"},
   "rules": [
-    {"id": "missing_gloves", "classes": ["no-gloves"], "min_confidence": 0.5,
+    {"id": "missing_gloves", "classes": ["no-gloves"], "min_confidence": 0.7,
      "violation_type": "missing_gloves", "severity": "high"}
   ],
   "performance": {"inference_time_hint_ms": 40, "recommended_fps": 2},
-  "limits": {"max_memory_mb": 1536, "inference_timeout_ms": 5000}
+  "limits": {"max_memory_mb": 1536, "inference_timeout_ms": 5000},
+  "_trial": "TEMPORARY observation block, 2026-10-18. min_confidence 0.7 matches the gate that was already in force session-side, so alerting is unchanged; the diagnostics block only exposes what gloves sees below its rule floor, to re-check the 2026-10-17 'weights are weak' verdict against live frames. Remove once judged.",
+  "diagnostics": {"summary_log_sample": 1.0, "predict_floor": 0.01}
 }

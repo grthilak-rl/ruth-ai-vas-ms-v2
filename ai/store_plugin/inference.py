@@ -15,17 +15,45 @@ Result (the shape the backend consumes):
     severity            that rule's severity
     confidence          highest confidence among the firing detections
     detections          the boxes the violation is about (stored with it)
-    objects             every detection, for the live overlay
-    metadata            source "store", model/plugin identity, active rules
+    detection_count     len(objects); the runtime logs this field
+    objects             every detection at or above the rule floor, for the
+                        live overlay
+    metadata            source "store", model/plugin identity, active rules,
+                        and class_summary (per class: count and max
+                        confidence)
 
 A rule fires when a detection of one of its classes reaches its
 min_confidence. A rule with ``requires_zone`` only considers detections whose
 anchor (bottom centre) lies inside a zone of that type in ``config.zones``;
 with no such zone it is inactive and can never fire (fails closed).
+
+Trial mode
+----------
+An optional manifest block puts one model under observation without
+touching any other:
+
+    "diagnostics": {"summary_log_sample": 1.0, "predict_floor": 0.01}
+
+``predict_floor`` lowers the floor passed to ``model.predict`` *below* the
+rule's ``min_confidence``, so the sub-threshold confidence distribution
+becomes visible. Rules still evaluate at their own ``min_confidence``, so
+**violations are unchanged**, and ``objects`` is still filtered at the rule
+floor, so **the live overlay is unchanged** — operators do not get sprayed
+with low-confidence boxes. Only ``metadata.class_summary`` and the log line
+see the extra detections.
+
+``summary_log_sample`` is the probability of emitting a "Store detection
+summary" log record for a given frame. It is gated on this alone and not on
+whether a violation fired, so that enabling it for one model cannot make
+another model start logging.
+
+Absent the block, both default off and this file behaves exactly as it did
+before trial mode existed. That is enforced by a test.
 """
 
 import json
 import logging
+import random
 import threading
 import time
 from pathlib import Path
@@ -179,6 +207,22 @@ def apply_rules(
     }
 
 
+def _class_summary(objects: List[Dict[str, Any]]) -> Dict[str, Dict[str, Any]]:
+    """Per class: how many, and the best confidence seen.
+
+    Computed over every scored detection, including any below the rule
+    floor under trial mode — answering "did the model see anything at all?",
+    which a count of rule-passing boxes cannot.
+    """
+    summary: Dict[str, Dict[str, Any]] = {}
+    for obj in objects:
+        entry = summary.setdefault(obj["class_name"], {"n": 0, "max_confidence": 0.0})
+        entry["n"] += 1
+        if obj["confidence"] > entry["max_confidence"]:
+            entry["max_confidence"] = obj["confidence"]
+    return summary
+
+
 def _objects_from_result(result: Any, names: Dict[str, str]) -> List[Dict[str, Any]]:
     """Ultralytics boxes -> plain dicts, coordinates in frame pixels."""
     objects: List[Dict[str, Any]] = []
@@ -216,16 +260,34 @@ def infer(frame: np.ndarray, config: Optional[Dict[str, Any]] = None, **kwargs) 
 
     model, manifest, device = _ensure_loaded()
     rules = manifest.get("rules", [])
-    floor = min((r["min_confidence"] for r in rules), default=0.25)
+    diagnostics = manifest.get("diagnostics") or {}
+
+    # The rule floor is what the model is *judged* at. The predict floor can
+    # be lowered beneath it for observation, but never raised above it —
+    # that would silently stop rules firing.
+    rule_floor = min((r["min_confidence"] for r in rules), default=0.25)
+    predict_floor = rule_floor
+    configured = diagnostics.get("predict_floor")
+    if configured is not None:
+        predict_floor = min(rule_floor, float(configured))
 
     started = time.perf_counter()
     results = model.predict(
-        frame, imgsz=manifest["imgsz"], conf=floor, device=device, verbose=False
+        frame, imgsz=manifest["imgsz"], conf=predict_floor, device=device, verbose=False
     )
     inference_ms = (time.perf_counter() - started) * 1000.0
 
-    objects = _objects_from_result(results[0], manifest["classes"]) if results else []
+    scored = _objects_from_result(results[0], manifest["classes"]) if results else []
+    # Identity, not just equality, when no floor was lowered: the rest of the
+    # function must see exactly the list it always saw.
+    objects = (
+        scored
+        if predict_floor >= rule_floor
+        else [o for o in scored if o["confidence"] >= rule_floor]
+    )
+
     out = apply_rules(objects, manifest, config)
+    out["detection_count"] = len(objects)
     out["metadata"] = {
         "source": "store",
         "model_id": manifest["model_id"],
@@ -236,5 +298,33 @@ def infer(frame: np.ndarray, config: Optional[Dict[str, Any]] = None, **kwargs) 
         "rules_active": out.pop("rules_active"),
         "rules_inactive": out.pop("rules_inactive"),
         "frame_shape": list(frame.shape),
+        "class_summary": _class_summary(scored),
     }
+
+    # Trial mode only. Gated on the sample rate alone, deliberately: gating
+    # on "a violation fired" as well would make every model with violations
+    # start logging the moment one model is put under observation.
+    sample = float(diagnostics.get("summary_log_sample", 0.0))
+    if sample > 0.0 and random.random() < sample:
+        out["metadata"]["predict_floor"] = predict_floor
+        out["metadata"]["scored_count"] = len(scored)
+        # The plugin is handed only (frame, config): no request id, no
+        # stream id, so it cannot otherwise say which camera this was.
+        # `config` is per-camera-per-model, so a trial can label its own
+        # frames by setting {"camera_name": ...} there. Unset elsewhere,
+        # which is why this reads "unknown" rather than failing.
+        logger.info(
+            "Store detection summary",
+            extra={
+                "model_id": manifest["model_id"],
+                "camera_name": (config or {}).get("camera_name", "unknown"),
+                "detection_count": out["detection_count"],
+                "scored_count": len(scored),
+                "predict_floor": predict_floor,
+                "rule_floor": rule_floor,
+                "class_summary": out["metadata"]["class_summary"],
+                "violation_detected": out["violation_detected"],
+                "inference_ms": round(inference_ms, 1),
+            },
+        )
     return out

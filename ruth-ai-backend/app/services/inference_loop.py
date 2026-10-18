@@ -691,7 +691,11 @@ class InferenceLoopService:
                         }
                     state = self._violation_state[session_id]
 
-                    if violation_detected and confidence >= confidence_threshold:
+                    # Same per-model gate as the multi-model path, so a
+                    # single-model session does not behave differently.
+                    if violation_detected and confidence >= self._violation_threshold(
+                        model_id, confidence_threshold
+                    ):
                         # Get the zone ID from detections
                         detections = inference_result.get("detections", [])
                         current_zones = {d.get("zone_id") for d in detections if d.get("in_zone")}
@@ -1166,6 +1170,24 @@ class InferenceLoopService:
             self._latest_detections[device_id] = entry
         return True
 
+    def _violation_threshold(self, model_id: str, session_threshold: float) -> float:
+        """The confidence a violation must reach before it is written.
+
+        Store models carry their own threshold in the manifest rule that
+        produced the violation, and the plugin has already applied it. The
+        session-wide value (0.7 by default) was then applied on top, so the
+        effective gate was max(manifest, session) and the manifest number
+        did nothing unless it was higher — a model tuned to 0.4 could never
+        record anything. Store models are therefore gated on their own
+        manifest floor instead.
+
+        Built-in models have no manifest and keep the session threshold, as
+        does any store model whose manifest could not be read: falling back
+        to the stricter of the two is the safe direction.
+        """
+        info = enabled_store_models().get(model_id)
+        return info.min_confidence if info is not None else session_threshold
+
     async def _apply_violation_rules(
         self,
         session_id: UUID,
@@ -1185,8 +1207,9 @@ class InferenceLoopService:
         )
         violation_detected = inference_result.get("violation_detected", False)
         confidence = inference_result.get("confidence", 0.0)
+        threshold = self._violation_threshold(model_id, confidence_threshold)
 
-        if violation_detected and confidence >= confidence_threshold:
+        if violation_detected and confidence >= threshold:
             detections = inference_result.get("detections", [])
             current_zones = {d.get("zone_id") for d in detections if d.get("in_zone")}
             new_zones = current_zones - state["active_zones"]
