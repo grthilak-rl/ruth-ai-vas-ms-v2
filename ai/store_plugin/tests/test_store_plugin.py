@@ -248,7 +248,7 @@ def load_installer():
     return module
 
 
-@pytest.mark.parametrize("name", ["hard_hat", "safety_vest", "gloves", "goggles", "harness"])
+@pytest.mark.parametrize("name", ["hard_hat", "safety_vest", "gloves", "goggles", "harness", "no_goggles"])
 def test_shipped_manifests_are_valid(name):
     """Unknown top-level keys (`diagnostics`, `_trial`) must not be rejected."""
     assert load_installer().manifest_problems(manifest(name)) == []
@@ -329,7 +329,7 @@ def drop_diagnostics(m):
     m.pop("diagnostics", None)
 
 
-TRIAL = {"goggles", "gloves", "harness"}
+TRIAL = {"goggles", "gloves", "harness", "no_goggles"}
 NOT_IN_TRIAL = ["hard_hat", "safety_vest"]
 
 
@@ -348,7 +348,7 @@ def test_which_models_are_in_trial_mode():
         assert "_trial" not in manifest(name)
 
 
-@pytest.mark.parametrize("name", ["hard_hat", "safety_vest", "gloves", "goggles", "harness"])
+@pytest.mark.parametrize("name", ["hard_hat", "safety_vest", "gloves", "goggles", "harness", "no_goggles"])
 def test_every_shipped_model_gates_violations_at_0_7(name):
     """The manifest floor is now the violation gate (backend side too).
 
@@ -697,3 +697,28 @@ def test_harness_class_name_matches_the_weights_exactly():
     assert m["classes"] == {"0": "harness", "1": "no harness"}
     assert m["rules"][0]["classes"] == ["no harness"]
     assert set(m["rules"][0]["classes"]) <= set(m["classes"].values())
+
+
+def test_no_goggles_is_single_class_and_640():
+    """Two firsts, both easy to "tidy" into a bug later.
+
+    It has ONE class - the absence - so there is no compliant class to
+    fall back on and the rule's class list IS the whole vocabulary. And
+    it is the first store model trained at 640 rather than 1280; the
+    manifest imgsz must match training or the model sees a scale it was
+    never fitted on.
+    """
+    m = manifest("no_goggles")
+    assert m["classes"] == {"0": "no-goggles"}
+    assert m["rules"][0]["classes"] == ["no-goggles"]
+    assert m["imgsz"] == 640
+
+
+def test_goggles_models_coexist_without_clashing():
+    """Both stay installed; only the model_id has to be distinct."""
+    old, new = manifest("goggles"), manifest("no_goggles")
+    assert old["model_id"] != new["model_id"]
+    assert old["weights"] != new["weights"]
+    # Same violation_type on purpose - it is the same violation - which is
+    # exactly why running both on one camera would double-report.
+    assert old["rules"][0]["violation_type"] == new["rules"][0]["violation_type"]

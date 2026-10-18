@@ -1,0 +1,17 @@
+{
+  "manifest_version": 1,
+  "model_id": "no_goggles",
+  "display_name": "No Goggles",
+  "weights": "nogoggles.pt",
+  "task": "detect",
+  "imgsz": 640,
+  "classes": {"0": "no-goggles"},
+  "rules": [
+    {"id": "missing_goggles", "classes": ["no-goggles"], "min_confidence": 0.7,
+     "violation_type": "missing_goggles", "severity": "high"}
+  ],
+  "performance": {"inference_time_hint_ms": 25, "recommended_fps": 2},
+  "limits": {"max_memory_mb": 1024, "inference_timeout_ms": 5000},
+  "_trial": "TEMPORARY observation block, 2026-10-18. Single-class retrain of goggles, detecting only the absence. Trained at imgsz 640 (every other store model is 1280), so this is also the first test of whether 640 is enough for PPE at these camera distances. Emits the same violation_type as the goggles model, so enabling BOTH on one camera double-reports. Remove once judged.",
+  "diagnostics": {"summary_log_sample": 1.0, "predict_floor": 0.01}
+}
