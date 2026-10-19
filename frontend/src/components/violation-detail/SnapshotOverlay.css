@@ -52,7 +52,17 @@
   font-style: italic;
 }
 
+.snapshot-overlay__actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-shrink: 0;
+}
+
 .snapshot-overlay__download {
+  display: inline-block;
+  text-decoration: none;
+  line-height: 1.4;
   background-color: transparent;
   border: 1px solid #6b7280;
   border-radius: 4px;

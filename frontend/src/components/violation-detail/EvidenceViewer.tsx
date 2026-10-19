@@ -2,6 +2,7 @@ import { useState, useCallback } from 'react';
 import type { DetectionBoundingBox, ViolationEvidence } from '../../state/api';
 import { SnapshotOverlay } from './SnapshotOverlay';
 import { RequestClipButton } from './RequestClipButton';
+import { clipFilename } from './clipFilename';
 import './EvidenceViewer.css';
 
 // Default evidence when backend doesn't provide one
@@ -30,6 +31,11 @@ interface EvidenceViewerProps {
   boundingBoxes?: DetectionBoundingBox[] | null;
   /** Refetch the violation after a clip is requested or finishes. */
   onEvidenceChanged?: () => void;
+  /**
+   * Type for the downloaded clip's file name: the specific type when there
+   * is one (missing_gloves), else the family (fall_detected).
+   */
+  clipTypeSlug?: string;
 }
 
 /**
@@ -75,9 +81,12 @@ export function EvidenceViewer({
   violationId,
   boundingBoxes,
   onEvidenceChanged,
+  clipTypeSlug = 'violation',
 }: EvidenceViewerProps) {
   const [isVideoPlaying, setIsVideoPlaying] = useState(false);
   const [videoError, setVideoError] = useState(false);
+  // Bumped by Retry so the <video> remounts and refetches.
+  const [videoAttempt, setVideoAttempt] = useState(0);
 
   // Use default evidence if not provided
   const evidence = evidenceProp ?? DEFAULT_EVIDENCE;
@@ -97,7 +106,8 @@ export function EvidenceViewer({
   // Determine video availability. A null bookmark_status means no clip was
   // ever requested, which must not render as "preparing" - that spinner ran
   // forever on every violation before clips were wired up.
-  const isVideoReady = evidence.bookmark_status === 'ready' && evidence.bookmark_url;
+  const isVideoReady = evidence.bookmark_status === 'ready' && !!evidence.bookmark_url;
+  const clipUrl = isVideoReady ? evidence.bookmark_url : null;
   const isVideoPreparing = evidence.bookmark_status === 'pending' || evidence.bookmark_status === 'processing';
   const isVideoFailed = evidence.bookmark_status === 'failed';
 
@@ -109,16 +119,39 @@ export function EvidenceViewer({
     }
   }, [isVideoReady]);
 
-  // Handle video error
+  // Keep the player open on error so its "Video playback failed / Retry"
+  // message is actually seen. Closing it here made a failed load look like
+  // a button that does nothing.
   const handleVideoError = useCallback(() => {
     setVideoError(true);
-    setIsVideoPlaying(false);
   }, []);
 
   // Handle close video
   const handleCloseVideo = useCallback(() => {
     setIsVideoPlaying(false);
   }, []);
+
+  const showsImage = Boolean(isSnapshotReady && primaryUrl);
+
+  const playButton =
+    !isVideoPlaying && isVideoReady ? (
+      <div className="evidence-viewer__play-overlay">
+        <button type="button" className="evidence-viewer__play-button" onClick={handlePlayVideo}>
+          ▶ Play Evidence
+        </button>
+      </div>
+    ) : null;
+
+  // Same-origin, so the download attribute names the file.
+  const downloadClipLink = clipUrl ? (
+    <a
+      className="snapshot-overlay__download"
+      href={clipUrl}
+      download={clipFilename(cameraName, clipTypeSlug, timestamp)}
+    >
+      ⬇ Download clip
+    </a>
+  ) : null;
 
   // No evidence at all
   const hasNoEvidence = isSnapshotFailed && (isVideoFailed || (!evidence.bookmark_url && !isVideoPreparing));
@@ -147,7 +180,7 @@ export function EvidenceViewer({
                 className="evidence-viewer__retry"
                 onClick={() => {
                   setVideoError(false);
-                  setIsVideoPlaying(true);
+                  setVideoAttempt((n) => n + 1);
                 }}
               >
                 Retry
@@ -155,6 +188,7 @@ export function EvidenceViewer({
             </div>
           ) : (
             <video
+              key={videoAttempt}
               className="evidence-viewer__video"
               src={evidence.bookmark_url}
               controls
@@ -181,20 +215,25 @@ export function EvidenceViewer({
               }
               violationId={violationId}
               // On the image, not on the snapshot box: that box also holds
-              // the overlay controls, so bottom-anchoring against it put
-              // this tag on top of "Show detection overlay".
-              stageBadge={
-                <span
-                  className="evidence-viewer__source"
-                  title={
-                    primaryIsFrame
-                      ? 'The exact frame the model analysed, so the boxes line up.'
-                      : 'A snapshot taken shortly after the detection, so the boxes may not line up.'
-                  }
-                >
-                  {primaryIsFrame ? 'inferred frame' : 'scene snapshot'}
-                </span>
+              // the overlay controls, so anything anchored against it lands
+              // on the controls bar ("inferred frame" sat on the overlay
+              // toggle; Play straddled the image and the bar).
+              stageOverlay={
+                <>
+                  <span
+                    className="evidence-viewer__source"
+                    title={
+                      primaryIsFrame
+                        ? 'The exact frame the model analysed, so the boxes line up.'
+                        : 'A snapshot taken shortly after the detection, so the boxes may not line up.'
+                    }
+                  >
+                    {primaryIsFrame ? 'inferred frame' : 'scene snapshot'}
+                  </span>
+                  {playButton}
+                </>
               }
+              extraControls={downloadClipLink}
             />
           </>
         ) : isSnapshotPreparing ? (
@@ -223,20 +262,8 @@ export function EvidenceViewer({
           </div>
         )}
 
-        {/* Play video button (overlay on snapshot) */}
-        {!isVideoPlaying && isVideoReady && (
-          <div className="evidence-viewer__play-overlay">
-            {isVideoReady ? (
-              <button
-                type="button"
-                className="evidence-viewer__play-button"
-                onClick={handlePlayVideo}
-              >
-                ▶ Play Evidence
-              </button>
-            ) : null}
-          </div>
-        )}
+        {/* No image to draw on (placeholder): Play sits on the placeholder. */}
+        {!showsImage && playButton}
       </div>
 
       {/* Clip: request it when there is none, show progress while it is cut */}
@@ -251,6 +278,8 @@ export function EvidenceViewer({
         <span className="evidence-viewer__timestamp">
           {formatTimestamp(timestamp)}
         </span>
+        {/* No controls bar without an image: the clip download lives here. */}
+        {!showsImage && downloadClipLink}
         {isVideoFailed && !isVideoPreparing && (
           <span className="evidence-viewer__video-status">
             Video clip unavailable

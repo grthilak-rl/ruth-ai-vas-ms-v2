@@ -68,10 +68,15 @@
 
 /* Play overlay */
 .evidence-viewer__play-overlay {
+  /* Positioned against the image (.snapshot-overlay__stage) when there is
+     one, otherwise against the placeholder box: bottom-centre, fully inside
+     the picture and clear of the controls bar below it. */
   position: absolute;
-  bottom: 1rem;
+  z-index: 2;
+  bottom: 12px;
   left: 50%;
   transform: translateX(-50%);
+  line-height: 1.4;
 }
 
 .evidence-viewer__play-button {

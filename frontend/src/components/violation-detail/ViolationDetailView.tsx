@@ -183,6 +183,7 @@ export function ViolationDetailView({
             <EvidenceViewer
               evidence={violation.evidence}
               cameraName={violation.camera_name}
+              clipTypeSlug={violation.type_detail || violation.type}
               timestamp={violation.timestamp}
               violationId={violation.id}
               boundingBoxes={violation.bounding_boxes}
