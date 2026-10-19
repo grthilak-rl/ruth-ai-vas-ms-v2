@@ -28,6 +28,26 @@
   padding: 1rem;
 }
 
+.incident-card--selected {
+  background-color: #f6f9fe;
+  box-shadow: inset 0 0 0 1px #1a73e8;
+}
+
+.incident-card__select {
+  display: flex;
+  align-items: flex-start;
+  width: 1rem;
+  padding-top: 0.25rem;
+  margin-right: -0.25rem;
+}
+
+.incident-card__select input {
+  width: 1rem;
+  height: 1rem;
+  margin: 0;
+  cursor: pointer;
+}
+
 /* 4:3, matching the server-side crop (320x240). */
 .incident-card__thumb {
   flex-shrink: 0;

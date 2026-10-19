@@ -2,6 +2,7 @@ import type { Violation } from '../../state/api';
 import type { ConfidenceCategory } from '../../state';
 import { SeverityBadge } from '../alerts/SeverityBadge';
 import { cameraHeadline, cameraNumber } from '../../utils/violationDisplay';
+import { dismissReasonLabel } from '../../utils/dismissReasons';
 import {
   LABEL_SEPARATOR,
   violationDetailLabel,
@@ -129,6 +130,18 @@ export function ViolationMetadata({
             {statusLabel}
           </dd>
         </div>
+
+        {violation.status === 'dismissed' && violation.dismiss_reason && (
+          <div className="violation-metadata__item">
+            <dt className="violation-metadata__label">Dismissed as</dt>
+            <dd className="violation-metadata__value">
+              {dismissReasonLabel(violation.dismiss_reason)}
+              {violation.resolution_notes && (
+                <span className="violation-metadata__note">“{violation.resolution_notes}”</span>
+              )}
+            </dd>
+          </div>
+        )}
 
         <div className="violation-metadata__item">
           <dt className="violation-metadata__label">Detected</dt>

@@ -237,6 +237,30 @@ class Settings(BaseSettings):
         ),
     )
 
+    # False-alarm dismissals copied for the AI engineer
+    labelling_root: str = Field(
+        default="/store/labelling",
+        description=(
+            "Where false-alarm dismissals are exported (false_positives/<model>/"
+            "<date>/). /store is the model store volume, /mnt/storage/ruth-models "
+            "on the host."
+        ),
+    )
+
+    # Clip status: background sync from VAS
+    clip_sync_enabled: bool = Field(
+        default=True,
+        description="Poll VAS for clips still being prepared, so cards show 🎞 without a page visit.",
+    )
+    clip_sync_interval_seconds: int = Field(default=20, ge=5, le=3600)
+    clip_sync_batch_size: int = Field(default=50, ge=1, le=500)
+    clip_sync_max_age_hours: int = Field(
+        default=48,
+        ge=1,
+        le=24 * 30,
+        description="Clips requested longer ago than this are no longer polled.",
+    )
+
     # Violations page: repeated violations shown as one incident
     incident_gap_minutes: int = Field(
         default=5,

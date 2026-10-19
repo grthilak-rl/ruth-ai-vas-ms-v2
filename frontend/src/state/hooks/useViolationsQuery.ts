@@ -8,6 +8,7 @@ import {
   fetchViolationTypes,
   fetchIncidents,
   updateViolationStatus,
+  bulkUpdateViolations,
   getConfidenceCategory as apiGetConfidenceCategory,
   getConfidenceLabel,
 } from '../api';
@@ -16,6 +17,8 @@ import type {
   Violation,
   ConfidenceCategory,
   UpdateViolationRequest,
+  ViolationBulkRequest,
+  ViolationBulkResponse,
 } from '../api';
 
 /**
@@ -56,35 +59,23 @@ export function useIncidentsQuery(filters?: ViolationFilters) {
 }
 
 /**
- * Apply one status change to many violations (an incident's group action,
- * or a single row).
+ * Bulk review / dismiss through POST /violations/bulk — used by bulk select,
+ * incident group actions and single rows alike, so every path validates the
+ * same way and false alarms always reach the labelling export.
  *
- * A few requests at a time rather than a burst, and one cache refresh at
- * the end rather than one per violation. Never throws: the caller gets the
- * ids that succeeded and failed, so a partial failure can be reported
- * precisely instead of all-or-nothing.
+ * One request and one cache refresh. Throws only when the request itself
+ * fails; per-violation outcomes come back in `updated` / `skipped`.
  */
-export function useApplyViolationStatus() {
+export function useBulkViolationAction() {
   const queryClient = useQueryClient();
 
   return useCallback(
-    async (ids: string[], update: UpdateViolationRequest) => {
-      const succeeded: string[] = [];
-      const failed: string[] = [];
-      const queue = [...ids];
-      const worker = async () => {
-        for (let id = queue.shift(); id !== undefined; id = queue.shift()) {
-          try {
-            await updateViolationStatus(id, update);
-            succeeded.push(id);
-          } catch {
-            failed.push(id);
-          }
-        }
-      };
-      await Promise.all(Array.from({ length: Math.min(4, ids.length) }, worker));
-      await queryClient.invalidateQueries({ queryKey: queryKeys.violations.all });
-      return { succeeded, failed };
+    async (request: ViolationBulkRequest): Promise<ViolationBulkResponse> => {
+      try {
+        return await bulkUpdateViolations(request);
+      } finally {
+        await queryClient.invalidateQueries({ queryKey: queryKeys.violations.all });
+      }
     },
     [queryClient]
   );

@@ -1,4 +1,5 @@
 import { Link } from 'react-router-dom';
+import { alertsListPath } from '../../utils/alertsListMemory';
 import './ViolationNotFound.css';
 
 /**
@@ -22,7 +23,7 @@ export function ViolationNotFound() {
         <p className="violation-not-found__message">
           This violation may have been removed or the link is incorrect.
         </p>
-        <Link to="/alerts" className="violation-not-found__link">
+        <Link to={alertsListPath()} className="violation-not-found__link">
           Back to Violations
         </Link>
       </div>

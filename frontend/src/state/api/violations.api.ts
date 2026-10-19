@@ -7,6 +7,7 @@
  * - GET /api/v1/violations
  * - GET /api/v1/violations/types
  * - GET /api/v1/violations/incidents
+ * - POST /api/v1/violations/bulk
  * - GET /api/v1/violations/{id}
  * - PATCH /api/v1/violations/{id}
  *
@@ -24,6 +25,8 @@ import type {
   ViolationsQueryParams,
   ViolationTypesResponse,
   IncidentListResponse,
+  ViolationBulkRequest,
+  ViolationBulkResponse,
   EvidenceStatus,
 } from './types';
 import {
@@ -119,6 +122,16 @@ export async function fetchIncidents(
 ): Promise<IncidentListResponse> {
   const response = await apiGet<unknown>(`${VIOLATIONS_PATH}/incidents${buildQueryString(params)}`);
   return assertResponse(response, isIncidentListResponse, 'IncidentListResponse');
+}
+
+/**
+ * Mark reviewed, or dismiss with a reason, many violations in one request.
+ * Violations that cannot make the change are skipped and listed, not failed.
+ */
+export async function bulkUpdateViolations(
+  request: ViolationBulkRequest
+): Promise<ViolationBulkResponse> {
+  return (await apiPost<ViolationBulkResponse>(`${VIOLATIONS_PATH}/bulk`, request)) as ViolationBulkResponse;
 }
 
 /**

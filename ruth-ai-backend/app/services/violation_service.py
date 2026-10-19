@@ -438,6 +438,7 @@ class ViolationService:
         *,
         reviewed_by: str | None = None,
         resolution_notes: str | None = None,
+        dismiss_reason: str | None = None,
     ) -> Violation:
         """Transition violation to a new status.
 
@@ -447,7 +448,8 @@ class ViolationService:
             violation_id: Violation UUID
             new_status: Target status
             reviewed_by: Operator identifier (for REVIEWED/RESOLVED transitions)
-            resolution_notes: Notes about resolution (for RESOLVED)
+            resolution_notes: Notes (RESOLVED), or the dismissal note (DISMISSED)
+            dismiss_reason: Why it was dismissed (DISMISSED only)
 
         Returns:
             Updated Violation entity
@@ -458,7 +460,31 @@ class ViolationService:
             ViolationStateError: Invalid transition
         """
         violation = await self.get_violation_by_id(violation_id)
+        return self.apply_transition(
+            violation,
+            new_status,
+            reviewed_by=reviewed_by,
+            resolution_notes=resolution_notes,
+            dismiss_reason=dismiss_reason,
+        )
+
+    def apply_transition(
+        self,
+        violation: Violation,
+        new_status: ViolationStatus,
+        *,
+        reviewed_by: str | None = None,
+        resolution_notes: str | None = None,
+        dismiss_reason: str | None = None,
+    ) -> Violation:
+        """Apply a status change to an already-loaded violation.
+
+        The rules of transition_status without the fetch, so a bulk action
+        can load many rows in one query and validate each. Raises the same
+        errors; does not commit.
+        """
         current_status = violation.status
+        violation_id = violation.id
 
         logger.info(
             "Transitioning violation status",
@@ -491,6 +517,14 @@ class ViolationService:
 
         if new_status == ViolationStatus.RESOLVED and resolution_notes:
             violation.resolution_notes = resolution_notes[:2000]  # Truncate to limit
+
+        # Dismissal records why (and the note, which was previously dropped).
+        if new_status == ViolationStatus.DISMISSED:
+            violation.dismiss_reason = dismiss_reason
+            if resolution_notes:
+                violation.resolution_notes = resolution_notes[:2000]
+        elif new_status == ViolationStatus.OPEN:
+            violation.dismiss_reason = None  # reopened: the reason no longer applies
 
         logger.info(
             "Violation status transitioned",

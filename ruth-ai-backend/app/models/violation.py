@@ -116,6 +116,14 @@ class Violation(Base, TimestampMixin):
         index=True,
     )
 
+    # Why it was dismissed (app/services/dismiss_reasons.DismissReason), set
+    # with status DISMISSED and cleared on reopen. Plain text, not an enum.
+    dismiss_reason: Mapped[str | None] = mapped_column(
+        String(32),
+        nullable=True,
+        index=True,
+    )
+
     status: Mapped[ViolationStatus] = mapped_column(
         ENUM(
             ViolationStatus,

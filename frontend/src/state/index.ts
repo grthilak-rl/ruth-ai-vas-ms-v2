@@ -185,7 +185,7 @@ export {
   useViolationsQuery,
   useViolationTypesQuery,
   useIncidentsQuery,
-  useApplyViolationStatus,
+  useBulkViolationAction,
   useAlertsBadgeQuery,
   useViolationQuery,
   useUpdateViolationMutation,

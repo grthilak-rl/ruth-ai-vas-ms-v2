@@ -1,4 +1,3 @@
-import { useState } from 'react';
 import { Link } from 'react-router-dom';
 import type { Incident, Violation, ViolationStatus } from '../../state/api';
 import { getConfidenceDisplay, useViolationsQuery } from '../../state';
@@ -21,6 +20,12 @@ interface IncidentCardProps {
   onMemberAction: (incident: Incident, violation: Violation, action: IncidentAction) => void;
   isPending?: boolean;
   error?: string | null;
+  /** Expanded to list its violations (kept in the URL by the page) */
+  expanded: boolean;
+  onToggleExpand: (incident: Incident) => void;
+  /** Bulk selection; the checkbox shows only while something is open */
+  selected?: boolean;
+  onToggleSelect?: (incident: Incident) => void;
 }
 
 function formatRelativeTime(timestamp: string): string {
@@ -89,8 +94,11 @@ export function IncidentCard({
   onMemberAction,
   isPending = false,
   error = null,
+  expanded,
+  onToggleExpand,
+  selected = false,
+  onToggleSelect,
 }: IncidentCardProps) {
-  const [expanded, setExpanded] = useState(false);
   const latest = incident.representative;
   const headline = cameraHeadline(incident);
   const typeLabel = incident.detail_label ?? incident.type_label;
@@ -99,10 +107,22 @@ export function IncidentCard({
 
   return (
     <article
-      className={`incident-card incident-card--${severity}`}
+      className={`incident-card incident-card--${severity}${selected ? ' incident-card--selected' : ''}`}
       aria-label={`${typeLabel} on ${headline}, ${incident.count} violation${incident.count === 1 ? '' : 's'}`}
     >
       <div className="incident-card__main">
+        {onToggleSelect && (
+          <div className="incident-card__select">
+            {openCount > 0 && (
+              <input
+                type="checkbox"
+                checked={selected}
+                onChange={() => onToggleSelect(incident)}
+                aria-label={`Select ${typeLabel} on ${headline} (${openCount} open)`}
+              />
+            )}
+          </div>
+        )}
         <Link to={`/alerts/${latest.id}`} className="incident-card__thumb" aria-label="Open the latest violation">
           <Thumbnail violation={latest} alt={`${typeLabel} on ${headline}`} />
         </Link>
@@ -171,7 +191,7 @@ export function IncidentCard({
               <button
                 type="button"
                 className="incident-card__action incident-card__action--expand"
-                onClick={() => setExpanded((e) => !e)}
+                onClick={() => onToggleExpand(incident)}
                 aria-expanded={expanded}
               >
                 {expanded ? 'Hide violations ▴' : `Show all ${incident.count} ▾`}

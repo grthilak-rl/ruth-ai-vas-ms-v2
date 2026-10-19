@@ -1,52 +1,10 @@
-import { useState, useCallback, useMemo } from 'react';
+import { useCallback, useMemo } from 'react';
 import type { ViolationStatus, Device, ViolationTypeOption, Severity } from '../../state/api';
 import { deviceDisplayName } from '../../state/api';
 import { buildTypeFilterEntries } from '../../utils/violationLabels';
 import { SEVERITY_LEVELS, severityLabel } from '../../utils/violationDisplay';
-import { cameraAreas } from './alertFilters';
+import { DEFAULT_FILTERS, cameraAreas, type AlertFilters, type DateRange } from './alertFilters';
 import './AlertsFilterSidebar.css';
-
-/**
- * Filter state interface
- */
-export interface AlertFilters {
-  /** Selected statuses (empty = all) */
-  statuses: ViolationStatus[];
-  /** Start date for date range filter */
-  dateFrom: string | null;
-  /** End date for date range filter */
-  dateTo: string | null;
-  /** Selected camera ID (null = all) */
-  cameraId: string | null;
-  /**
-   * Selected violation type ('' = all): a family ('ppe_violation') or one
-   * specific type ('ppe_violation:missing_gloves'). See violationLabels.
-   */
-  violationType: string;
-  /** Selected severities (empty = all) */
-  severities: Severity[];
-  /** Selected camera area / manway (null = all) */
-  area: string | null;
-}
-
-
-/**
- * Default filter state
- */
-export const DEFAULT_FILTERS: AlertFilters = {
-  statuses: ['open'], // Default to open violations
-  dateFrom: null,
-  dateTo: null,
-  cameraId: null,
-  violationType: '',
-  severities: [],
-  area: null,
-};
-
-/**
- * Date preset options
- */
-type DatePreset = 'today' | 'last7days' | 'last30days' | 'custom';
 
 interface AlertsFilterSidebarProps {
   /** Current filter state */
@@ -73,82 +31,13 @@ const STATUS_OPTIONS: { value: ViolationStatus; label: string }[] = [
   { value: 'resolved', label: 'Resolved' },
 ];
 
-/**
- * Date preset options
- */
-const DATE_PRESETS: { value: DatePreset; label: string }[] = [
+const DATE_RANGES: { value: DateRange; label: string }[] = [
   { value: 'today', label: 'Today' },
-  { value: 'last7days', label: 'Last 7 Days' },
-  { value: 'last30days', label: 'Last 30 Days' },
+  { value: '7d', label: 'Last 7 Days' },
+  { value: '30d', label: 'Last 30 Days' },
+  { value: 'all', label: 'All Time' },
   { value: 'custom', label: 'Custom Range' },
 ];
-
-/**
- * Get date range for preset
- */
-function getDateRangeForPreset(preset: DatePreset): { from: string | null; to: string | null } {
-  const now = new Date();
-  const today = new Date(now.getFullYear(), now.getMonth(), now.getDate());
-
-  switch (preset) {
-    case 'today':
-      return {
-        from: today.toISOString().split('T')[0],
-        to: today.toISOString().split('T')[0],
-      };
-    case 'last7days': {
-      const weekAgo = new Date(today);
-      weekAgo.setDate(weekAgo.getDate() - 7);
-      return {
-        from: weekAgo.toISOString().split('T')[0],
-        to: today.toISOString().split('T')[0],
-      };
-    }
-    case 'last30days': {
-      const monthAgo = new Date(today);
-      monthAgo.setDate(monthAgo.getDate() - 30);
-      return {
-        from: monthAgo.toISOString().split('T')[0],
-        to: today.toISOString().split('T')[0],
-      };
-    }
-    case 'custom':
-      return { from: null, to: null };
-  }
-}
-
-/**
- * Determine active preset from date range
- */
-function getActivePreset(dateFrom: string | null, dateTo: string | null): DatePreset | null {
-  if (!dateFrom && !dateTo) return null;
-
-  const now = new Date();
-  const today = new Date(now.getFullYear(), now.getMonth(), now.getDate());
-  const todayStr = today.toISOString().split('T')[0];
-
-  // Check if today
-  if (dateFrom === todayStr && dateTo === todayStr) {
-    return 'today';
-  }
-
-  // Check if last 7 days
-  const weekAgo = new Date(today);
-  weekAgo.setDate(weekAgo.getDate() - 7);
-  if (dateFrom === weekAgo.toISOString().split('T')[0] && dateTo === todayStr) {
-    return 'last7days';
-  }
-
-  // Check if last 30 days
-  const monthAgo = new Date(today);
-  monthAgo.setDate(monthAgo.getDate() - 30);
-  if (dateFrom === monthAgo.toISOString().split('T')[0] && dateTo === todayStr) {
-    return 'last30days';
-  }
-
-  // Custom range
-  return 'custom';
-}
 
 /**
  * Alerts Filter Sidebar Component
@@ -166,17 +55,6 @@ export function AlertsFilterSidebar({
   typeOptions,
   typeOptionsLoading = false,
 }: AlertsFilterSidebarProps) {
-  // Track whether custom date inputs are shown
-  const [showCustomDates, setShowCustomDates] = useState(
-    getActivePreset(filters.dateFrom, filters.dateTo) === 'custom'
-  );
-
-  // Determine active preset
-  const activePreset = useMemo(
-    () => getActivePreset(filters.dateFrom, filters.dateTo),
-    [filters.dateFrom, filters.dateTo]
-  );
-
   // Handle status toggle
   const handleStatusToggle = useCallback((status: ViolationStatus) => {
     const newStatuses = filters.statuses.includes(status)
@@ -189,19 +67,13 @@ export function AlertsFilterSidebar({
     });
   }, [filters, onFiltersChange]);
 
-  // Handle date preset selection
-  const handlePresetSelect = useCallback((preset: DatePreset) => {
-    if (preset === 'custom') {
-      setShowCustomDates(true);
-      return;
-    }
-
-    setShowCustomDates(false);
-    const { from, to } = getDateRangeForPreset(preset);
+  // Handle date range selection. Custom keeps any dates already entered.
+  const handleRangeSelect = useCallback((range: DateRange) => {
     onFiltersChange({
       ...filters,
-      dateFrom: from,
-      dateTo: to,
+      range,
+      dateFrom: range === 'custom' ? filters.dateFrom : null,
+      dateTo: range === 'custom' ? filters.dateTo : null,
     });
   }, [filters, onFiltersChange]);
 
@@ -258,7 +130,6 @@ export function AlertsFilterSidebar({
 
   // Handle clear all filters
   const handleClearAll = useCallback(() => {
-    setShowCustomDates(false);
     onFiltersChange(DEFAULT_FILTERS);
   }, [onFiltersChange]);
 
@@ -267,8 +138,7 @@ export function AlertsFilterSidebar({
     return (
       filters.statuses.length !== 1 ||
       filters.statuses[0] !== 'open' ||
-      filters.dateFrom !== null ||
-      filters.dateTo !== null ||
+      filters.range !== DEFAULT_FILTERS.range ||
       filters.cameraId !== null ||
       filters.violationType !== '' ||
       filters.severities.length > 0 ||
@@ -313,24 +183,22 @@ export function AlertsFilterSidebar({
       <section className="alerts-filter-sidebar__section">
         <h3 className="alerts-filter-sidebar__section-title">Date Range</h3>
         <div className="alerts-filter-sidebar__presets">
-          {DATE_PRESETS.map(({ value, label }) => (
+          {DATE_RANGES.map(({ value, label }) => (
             <button
               key={value}
               type="button"
               className={`alerts-filter-sidebar__preset ${
-                (value === 'custom' && showCustomDates) ||
-                (value !== 'custom' && activePreset === value)
-                  ? 'alerts-filter-sidebar__preset--active'
-                  : ''
+                filters.range === value ? 'alerts-filter-sidebar__preset--active' : ''
               }`}
-              onClick={() => handlePresetSelect(value)}
+              onClick={() => handleRangeSelect(value)}
+              aria-pressed={filters.range === value}
             >
               {label}
             </button>
           ))}
         </div>
 
-        {showCustomDates && (
+        {filters.range === 'custom' && (
           <div className="alerts-filter-sidebar__date-inputs">
             <div className="alerts-filter-sidebar__date-field">
               <label htmlFor="date-from" className="alerts-filter-sidebar__date-label">

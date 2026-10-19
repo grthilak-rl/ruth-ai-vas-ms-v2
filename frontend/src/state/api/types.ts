@@ -200,6 +200,12 @@ export interface HealthResponse {
 export type Severity = 'critical' | 'high' | 'medium' | 'low';
 
 /**
+ * Why a violation was dismissed. The first four are false alarms and copy
+ * the inferred frame to the labelling set; "duplicate" is not.
+ */
+export type DismissReason = 'object' | 'wrong_person' | 'ppe_worn' | 'other_false_alarm' | 'duplicate';
+
+/**
  * Violation type (extensible)
  */
 export type ViolationType = 'fall_detected' | string;
@@ -354,6 +360,12 @@ export interface Violation {
   camera_area?: string | null;
   /** Which side of the area the camera watches */
   camera_in_out?: string | null;
+
+  /** Why it was dismissed; null when not dismissed or dismissed before reasons */
+  dismiss_reason?: DismissReason | null;
+
+  /** Operator's note on resolution or dismissal */
+  resolution_notes?: string | null;
 
   /** Reference to device - camera MAY be deleted */
   camera_id: UUID;
@@ -926,10 +938,38 @@ export interface Incident {
   representative: Violation;
 }
 
+export type SeverityCounts = Record<Severity, number>;
+
+/** The summary strip: totals for the current filters, across all pages. */
+export interface IncidentSummary {
+  open_violations: number;
+  violations_by_severity: SeverityCounts;
+  incidents_by_severity: SeverityCounts;
+  cameras: number;
+  top_area: string | null;
+  top_area_violations: number;
+}
+
 export interface IncidentListResponse {
   items: Incident[];
   total: number;
   violations_total: number;
   gap_minutes: number;
   max_span_minutes: number;
+  /** Absent from older backends */
+  summary?: IncidentSummary;
+}
+
+/** POST /api/v1/violations/bulk */
+export interface ViolationBulkRequest {
+  ids: UUID[];
+  action: 'review' | 'dismiss';
+  dismiss_reason?: DismissReason;
+  note?: string;
+}
+
+export interface ViolationBulkResponse {
+  updated: UUID[];
+  skipped: Array<{ id: UUID; reason: string; status?: string | null }>;
+  labelling: { exported: number; no_frame: number; failed: number; capped: number } | null;
 }

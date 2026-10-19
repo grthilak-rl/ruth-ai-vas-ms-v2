@@ -5,7 +5,8 @@
  */
 
 export { AlertsList } from './AlertsList';
-export { AlertsFilterSidebar, DEFAULT_FILTERS, type AlertFilters } from './AlertsFilterSidebar';
+export { AlertsFilterSidebar } from './AlertsFilterSidebar';
+export { DEFAULT_FILTERS, type AlertFilters, type DateRange } from './alertFilters';
 export { IncidentCard, type IncidentAction } from './IncidentCard';
 export { SeverityBadge } from './SeverityBadge';
 export { StatusBadge } from './StatusBadge';

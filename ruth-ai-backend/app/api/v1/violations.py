@@ -34,6 +34,8 @@ from app.models import (
 )
 from app.schemas import (
     ErrorResponse,
+    ViolationBulkRequest,
+    ViolationBulkResponse,
     IncidentListResponse,
     IncidentResponse,
     SnapshotCreateRequest,
@@ -49,10 +51,22 @@ from app.schemas import (
     ViolationTypesResponse,
 )
 from app.models.enums import ViolationType
+from app.services.false_positive_export import (
+    ExportItem,
+    export_false_positives,
+    is_false_alarm,
+)
 from app.services.frame_thumbnails import render_thumbnail
 from app.services.incidents import group_incidents
 from app.services.violation_labels import ViolationLabeler
 from app.services.violation_severity import SEVERITY_LEVELS
+from app.models.dismiss_reasons import DismissReason
+from app.schemas.violation import (
+    BulkSkipped,
+    IncidentSummary,
+    LabellingExport,
+    SeverityCounts,
+)
 from app.services import (
     EvidenceVASError,
     NoActiveStreamError,
@@ -77,6 +91,78 @@ def camera_fields(device: Device | None) -> dict:
         "camera_area": (device.manway or "").strip() or None,
         "camera_in_out": (device.in_out or "").strip() or None,
     }
+
+
+async def export_dismissed_false_alarms(
+    db,
+    violations: list[Violation],
+    reason: DismissReason | str | None,
+    note: str | None,
+    dismissed_by: str | None,
+) -> LabellingExport | None:
+    """Copy dismissed false alarms' inferred frames to the labelling set.
+
+    Never raises: a failed copy is logged and counted, and the dismissal
+    stands. Returns None when the reason is not a false alarm.
+    """
+    if not violations or not is_false_alarm(reason):
+        return None
+    settings = get_settings()
+    ids = [v.id for v in violations]
+    frames = dict(
+        (
+            await db.execute(
+                select(Evidence.violation_id, Evidence.file_path).where(
+                    Evidence.violation_id.in_(ids),
+                    Evidence.evidence_type == EvidenceType.FRAME,
+                    Evidence.status == EvidenceStatus.READY,
+                )
+            )
+        ).all()
+    )
+    devices = {
+        d.id: d
+        for d in (
+            await db.execute(select(Device).where(Device.id.in_({v.device_id for v in violations})))
+        ).scalars()
+    }
+    labeler = ViolationLabeler.current()
+    items = []
+    for v in violations:
+        cam = camera_fields(devices.get(v.device_id))
+        items.append(
+            ExportItem(
+                violation_id=v.id,
+                model_id=v.model_id,
+                model_version=v.model_version,
+                type=getattr(v.type, "value", v.type),
+                type_detail=v.type_detail,
+                severity=labeler.severity(v),
+                confidence=v.confidence,
+                timestamp=v.timestamp,
+                camera_name=v.camera_name,
+                camera_display_name=cam["camera_display_name"],
+                camera_area=cam["camera_area"],
+                camera_in_out=cam["camera_in_out"],
+                bounding_boxes=v.bounding_boxes,
+                frame_file=frames.get(v.id),
+                group_key=f"{v.device_id}:{v.type_detail or getattr(v.type, 'value', v.type)}",
+            )
+        )
+    try:
+        result = await run_in_threadpool(
+            export_false_positives,
+            items,
+            reason,
+            note,
+            frame_root=Path(settings.evidence_frame_dir),
+            labelling_root=Path(settings.labelling_root),
+            dismissed_by=dismissed_by,
+        )
+    except Exception as e:  # noqa: BLE001 - the dismissal must stand regardless
+        logger.error("False-positive export crashed", error=str(e), count=len(items))
+        return LabellingExport(failed=len(items))
+    return LabellingExport(**result.as_dict())
 
 
 def apply_violation_filters(
@@ -306,6 +392,7 @@ async def list_violations(
                 reviewed_by=v.reviewed_by,
                 reviewed_at=v.reviewed_at,
                 resolution_notes=v.resolution_notes,
+                dismiss_reason=v.dismiss_reason,
                 evidence=build_evidence_summary(list(v.evidence)),
                 created_at=v.created_at,
                 updated_at=v.updated_at,
@@ -370,6 +457,115 @@ def build_type_options(rows, labeler: ViolationLabeler) -> list[ViolationTypeOpt
         else:
             option.details.sort(key=lambda d: (-d.count, d.label))
     return sorted(families.values(), key=lambda o: (-o.count, o.label))
+
+
+async def summarize_incidents(db, rows, incidents, labeler: ViolationLabeler) -> IncidentSummary:
+    """Totals across every incident matching the filters, not just the page."""
+    by_severity = {level: 0 for level in SEVERITY_LEVELS}
+    open_violations = 0
+    per_device: dict = {}
+    for row in rows:
+        by_severity[labeler.severity(row)] += 1
+        if getattr(row.status, "value", row.status) == ViolationStatus.OPEN.value:
+            open_violations += 1
+        per_device[row.device_id] = per_device.get(row.device_id, 0) + 1
+
+    incident_severity = {level: 0 for level in SEVERITY_LEVELS}
+    for incident in incidents:
+        incident_severity[incident.severity(labeler.severity)] += 1
+
+    per_area: dict[str, int] = {}
+    if per_device:
+        manways = await db.execute(
+            select(Device.id, Device.manway).where(Device.id.in_(list(per_device)))
+        )
+        for device_id, manway in manways.all():
+            area = (manway or "").strip()
+            if area:
+                per_area[area] = per_area.get(area, 0) + per_device[device_id]
+    top_area = max(per_area, key=lambda a: (per_area[a], a)) if per_area else None
+
+    return IncidentSummary(
+        open_violations=open_violations,
+        violations_by_severity=SeverityCounts(**by_severity),
+        incidents_by_severity=SeverityCounts(**incident_severity),
+        cameras=len(per_device),
+        top_area=top_area,
+        top_area_violations=per_area.get(top_area, 0) if top_area else 0,
+    )
+
+
+@router.post(
+    "/violations/bulk",
+    response_model=ViolationBulkResponse,
+    status_code=status.HTTP_200_OK,
+    summary="Change many violations at once",
+    description=(
+        "Mark reviewed, or dismiss with a reason, up to 1000 violations in one "
+        "transaction. Each is validated like PATCH /violations/{id}; ones that "
+        "cannot make the transition are skipped and listed, not failed. "
+        "False-alarm dismissals export their inferred frames for labelling."
+    ),
+    responses={422: {"model": ErrorResponse, "description": "Invalid request"}},
+)
+async def bulk_update_violations(
+    request: ViolationBulkRequest,
+    violation_service: ViolationServiceDep,
+    db: DBSession,
+) -> ViolationBulkResponse:
+    new_status = ViolationStatus.REVIEWED if request.action == "review" else ViolationStatus.DISMISSED
+    reason = request.dismiss_reason.value if request.dismiss_reason and request.action == "dismiss" else None
+    ids = list(dict.fromkeys(request.ids))  # de-duplicate, keep order
+
+    rows = await db.execute(select(Violation).where(Violation.id.in_(ids)))
+    by_id = {v.id: v for v in rows.scalars().all()}
+
+    updated: list[Violation] = []
+    skipped: list[BulkSkipped] = []
+    for vid in ids:
+        violation = by_id.get(vid)
+        if violation is None:
+            skipped.append(BulkSkipped(id=vid, reason="not_found"))
+            continue
+        try:
+            violation_service.apply_transition(
+                violation,
+                new_status,
+                reviewed_by=request.reviewed_by,
+                resolution_notes=request.note,
+                dismiss_reason=reason,
+            )
+        except ViolationTerminalStateError:
+            skipped.append(BulkSkipped(id=vid, reason="terminal_state", status=violation.status.value))
+            continue
+        except ViolationStateError:
+            skipped.append(BulkSkipped(id=vid, reason="invalid_transition", status=violation.status.value))
+            continue
+        updated.append(violation)
+
+    # Commit before exporting: a labelling copy must never exist for a
+    # violation whose dismissal did not stick.
+    await db.commit()
+    logger.info(
+        "Bulk violation update",
+        action=request.action,
+        reason=reason,
+        requested=len(ids),
+        updated=len(updated),
+        skipped=len(skipped),
+    )
+
+    labelling = None
+    if new_status == ViolationStatus.DISMISSED:
+        labelling = await export_dismissed_false_alarms(
+            db, updated, request.dismiss_reason, request.note, request.reviewed_by
+        )
+
+    return ViolationBulkResponse(
+        updated=[v.id for v in updated],
+        skipped=skipped,
+        labelling=labelling,
+    )
 
 
 @router.get(
@@ -500,6 +696,7 @@ async def list_incidents(
                     reviewed_by=rep_v.reviewed_by,
                     reviewed_at=rep_v.reviewed_at,
                     resolution_notes=rep_v.resolution_notes,
+                    dismiss_reason=rep_v.dismiss_reason,
                     evidence=build_evidence_summary(list(rep_v.evidence)),
                     created_at=rep_v.created_at,
                     updated_at=rep_v.updated_at,
@@ -513,6 +710,7 @@ async def list_incidents(
         violations_total=len(rows),
         gap_minutes=settings.incident_gap_minutes,
         max_span_minutes=settings.incident_max_span_minutes,
+        summary=await summarize_incidents(db, rows, incidents, labeler),
     )
 
 
@@ -599,6 +797,7 @@ async def get_violation(
         reviewed_by=violation.reviewed_by,
         reviewed_at=violation.reviewed_at,
         resolution_notes=violation.resolution_notes,
+        dismiss_reason=violation.dismiss_reason,
         evidence=build_evidence_summary(evidence_list),
         event_count=event_count,
         created_at=violation.created_at,
@@ -665,6 +864,11 @@ async def update_violation_status(
             new_status,
             reviewed_by=request.reviewed_by,
             resolution_notes=request.resolution_notes,
+            dismiss_reason=(
+                request.dismiss_reason.value
+                if request.dismiss_reason and new_status == ViolationStatus.DISMISSED
+                else None
+            ),
         )
     except ViolationNotFoundError as e:
         raise HTTPException(
@@ -700,6 +904,14 @@ async def update_violation_status(
         new_status=new_status.value,
     )
 
+    # Export only after the dismissal is committed: a labelling copy must
+    # never exist for a violation that is not actually dismissed.
+    if new_status == ViolationStatus.DISMISSED and is_false_alarm(request.dismiss_reason):
+        await db.commit()
+        await export_dismissed_false_alarms(
+            db, [violation], request.dismiss_reason, request.resolution_notes, request.reviewed_by
+        )
+
     return ViolationResponse(
         id=violation.id,
         **ViolationLabeler.current().type_fields(violation),
@@ -715,6 +927,7 @@ async def update_violation_status(
         reviewed_by=violation.reviewed_by,
         reviewed_at=violation.reviewed_at,
         resolution_notes=violation.resolution_notes,
+        dismiss_reason=violation.dismiss_reason,
         evidence=None,  # Not needed for status update response
         created_at=violation.created_at,
         updated_at=violation.updated_at,
