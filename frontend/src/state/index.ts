@@ -183,6 +183,9 @@ export {
   getGlobalStatusDisplay,
   // Violations
   useViolationsQuery,
+  useViolationTypesQuery,
+  useIncidentsQuery,
+  useBulkViolationAction,
   useAlertsBadgeQuery,
   useViolationQuery,
   useUpdateViolationMutation,

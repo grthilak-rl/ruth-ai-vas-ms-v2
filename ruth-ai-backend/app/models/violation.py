@@ -105,6 +105,25 @@ class Violation(Base, TimestampMixin):
         index=True,
     )
 
+    # How severe the firing rule says this is (critical/high/medium/low) —
+    # the manifest's judgement, not the model's confidence. Recorded at write
+    # time; see app/services/violation_severity.py. NULL only for rows that
+    # bypassed the write path (e.g. restored from an archive), which resolve
+    # at read time.
+    severity: Mapped[str | None] = mapped_column(
+        String(16),
+        nullable=True,
+        index=True,
+    )
+
+    # Why it was dismissed (app/services/dismiss_reasons.DismissReason), set
+    # with status DISMISSED and cleared on reopen. Plain text, not an enum.
+    dismiss_reason: Mapped[str | None] = mapped_column(
+        String(32),
+        nullable=True,
+        index=True,
+    )
+
     status: Mapped[ViolationStatus] = mapped_column(
         ENUM(
             ViolationStatus,

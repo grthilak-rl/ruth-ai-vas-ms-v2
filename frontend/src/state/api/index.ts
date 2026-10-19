@@ -53,6 +53,17 @@ export type {
   Violation,
   ViolationsListResponse,
   ViolationsQueryParams,
+  ViolationTypeDetailOption,
+  ViolationTypeOption,
+  ViolationTypesResponse,
+  Severity,
+  SeverityCounts,
+  DismissReason,
+  Incident,
+  IncidentSummary,
+  IncidentListResponse,
+  ViolationBulkRequest,
+  ViolationBulkResponse,
 
   // Devices
   StreamState,
@@ -119,6 +130,10 @@ export {
   getEvidenceDisplayState,
   fetchClipAvailability,
   requestViolationClip,
+  fetchViolationTypes,
+  fetchIncidents,
+  buildQueryString,
+  bulkUpdateViolations,
 } from './violations.api';
 export type {
   ClipAvailability,

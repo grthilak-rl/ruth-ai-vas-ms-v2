@@ -1,10 +1,14 @@
+import { useCallback } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { queryKeys, type ViolationFilters } from '../queryKeys';
 import { POLLING_INTERVALS } from '../pollingIntervals';
 import {
   fetchViolations,
   fetchViolation,
+  fetchViolationTypes,
+  fetchIncidents,
   updateViolationStatus,
+  bulkUpdateViolations,
   getConfidenceCategory as apiGetConfidenceCategory,
   getConfidenceLabel,
 } from '../api';
@@ -13,6 +17,8 @@ import type {
   Violation,
   ConfidenceCategory,
   UpdateViolationRequest,
+  ViolationBulkRequest,
+  ViolationBulkResponse,
 } from '../api';
 
 /**
@@ -31,6 +37,63 @@ export function useViolationsQuery(filters?: ViolationFilters) {
     queryFn: () => fetchViolations(filters),
     refetchInterval: POLLING_INTERVALS.VIOLATIONS,
     staleTime: POLLING_INTERVALS.VIOLATIONS / 2,
+    refetchIntervalInBackground: false,
+  });
+}
+
+/**
+ * Incidents Query Hook — the Violations page's list.
+ *
+ * Same polling as the violations list, so a repeat that arrives while the
+ * page is open extends its incident's count in place.
+ */
+export function useIncidentsQuery(filters?: ViolationFilters) {
+  return useQuery({
+    queryKey: queryKeys.violations.incidents(filters),
+    queryFn: () => fetchIncidents(filters),
+    refetchInterval: POLLING_INTERVALS.VIOLATIONS,
+    staleTime: POLLING_INTERVALS.VIOLATIONS / 2,
+    refetchIntervalInBackground: false,
+    placeholderData: (previous) => previous,
+  });
+}
+
+/**
+ * Bulk review / dismiss through POST /violations/bulk — used by bulk select,
+ * incident group actions and single rows alike, so every path validates the
+ * same way and false alarms always reach the labelling export.
+ *
+ * One request and one cache refresh. Throws only when the request itself
+ * fails; per-violation outcomes come back in `updated` / `skipped`.
+ */
+export function useBulkViolationAction() {
+  const queryClient = useQueryClient();
+
+  return useCallback(
+    async (request: ViolationBulkRequest): Promise<ViolationBulkResponse> => {
+      try {
+        return await bulkUpdateViolations(request);
+      } finally {
+        await queryClient.invalidateQueries({ queryKey: queryKeys.violations.all });
+      }
+    },
+    [queryClient]
+  );
+}
+
+/**
+ * Violation Types Query Hook
+ *
+ * Families and specific types that occur, for the Alerts type filter. Types
+ * change only when a model starts reporting something new, so this polls
+ * far less often than the list.
+ */
+export function useViolationTypesQuery() {
+  return useQuery({
+    queryKey: queryKeys.violations.types,
+    queryFn: fetchViolationTypes,
+    staleTime: 60_000,
+    refetchInterval: 5 * 60_000,
     refetchIntervalInBackground: false,
   });
 }

@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useRef, useState, type ReactNode } from 'react';
 import type { DetectionBoundingBox } from '../../state/api';
 import './SnapshotOverlay.css';
 
@@ -11,6 +11,14 @@ interface SnapshotOverlayProps {
   alt: string;
   /** Used to name the exported file */
   violationId: string;
+  /**
+   * Drawn over the image itself, e.g. the "inferred frame" tag and the
+   * "Play Evidence" button. Rendered inside the stage so it is positioned
+   * against the picture, never against the controls bar underneath it.
+   */
+  stageOverlay?: ReactNode;
+  /** More controls beside "Download annotated", e.g. "Download clip". */
+  extraControls?: ReactNode;
 }
 
 /** Box + label colors, matching the live-view PPE overlay (PPE_COLORS). */
@@ -150,6 +158,8 @@ export function SnapshotOverlay({
   boundingBoxes,
   alt,
   violationId,
+  stageOverlay,
+  extraControls,
 }: SnapshotOverlayProps) {
   const imgRef = useRef<HTMLImageElement>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
@@ -303,6 +313,7 @@ export function SnapshotOverlay({
           className="snapshot-overlay__canvas"
           aria-hidden="true"
         />
+        {stageOverlay}
       </div>
 
       {hasBoxes ? (
@@ -319,20 +330,24 @@ export function SnapshotOverlay({
             </span>
           </label>
 
-          <button
-            type="button"
-            className="snapshot-overlay__download"
-            onClick={handleDownloadAnnotated}
-            disabled={!isImageLoaded || isExporting}
-          >
-            {isExporting ? 'Preparing…' : '⬇ Download annotated'}
-          </button>
+          <div className="snapshot-overlay__actions">
+            {extraControls}
+            <button
+              type="button"
+              className="snapshot-overlay__download"
+              onClick={handleDownloadAnnotated}
+              disabled={!isImageLoaded || isExporting}
+            >
+              {isExporting ? 'Preparing…' : '⬇ Download annotated'}
+            </button>
+          </div>
         </div>
       ) : (
         <div className="snapshot-overlay__controls">
           <span className="snapshot-overlay__no-boxes">
             No detection regions recorded for this violation
           </span>
+          {extraControls && <div className="snapshot-overlay__actions">{extraControls}</div>}
         </div>
       )}
     </div>

@@ -158,6 +158,12 @@ def manifest_problems(manifest: Dict[str, Any]) -> List[str]:
             p.append(f"rule {rid}: violation_type required")
         if rule.get("severity") not in SEVERITIES:
             p.append(f"rule {rid}: severity must be one of {sorted(SEVERITIES)}")
+        # Optional: the label violations from this rule are shown under
+        # ("Missing gloves"). Absent, Ruth uses a built-in label or the
+        # title-cased violation_type.
+        label = rule.get("display_name")
+        if label is not None and (not isinstance(label, str) or not label.strip() or len(label) > 64):
+            p.append(f"rule {rid}: display_name must be a non-empty string of at most 64 characters")
     perf = manifest.get("performance", {})
     for key in ("inference_time_hint_ms", "recommended_fps"):
         # The backend's registration schema declares these int: a float

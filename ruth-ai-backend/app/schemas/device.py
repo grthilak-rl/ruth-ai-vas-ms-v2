@@ -43,6 +43,22 @@ class DeviceStreaming(BaseModel):
         serialization_alias="model_config",
     )
 
+    # Camera health from VAS, measured from evidence (frame-tap age, newest
+    # recording segment). video_live above is derived from video_state when
+    # VAS provides it. Null when VAS doesn't report health (older VAS, or
+    # before its first health pass).
+    video_state: str | None = Field(
+        None, description="live | stalled | offline | idle | disabled"
+    )
+    last_frame_at: datetime | None = Field(None, description="Last decoded frame seen by VAS")
+    recording_state: str | None = Field(
+        None, description="recording | stopped | idle | disabled"
+    )
+    last_segment_at: datetime | None = Field(
+        None, description="Newest recording segment; 'stopped since' when recording_state=stopped"
+    )
+    segments_today: int | None = Field(None, description="Segments recorded since UTC midnight")
+
     # Monitoring coverage (BL-11). Set only when no inference session is
     # running: when the most recent session ended. NULL while inference is
     # active, and ALSO null when inference has never run on this camera —

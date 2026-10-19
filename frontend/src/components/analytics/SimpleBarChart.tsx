@@ -11,6 +11,10 @@ export interface BarChartData {
   label: string;
   value: number;
   percentage?: number;
+  /** Smaller second line under the label, e.g. the family of a specific type */
+  sublabel?: string;
+  /** Hover text when the label is cut short; defaults to the label */
+  title?: string;
 }
 
 interface SimpleBarChartProps {
@@ -54,7 +58,12 @@ export function SimpleBarChart({
 
         return (
           <div key={index} className="simple-bar-chart__row">
-            <div className="simple-bar-chart__label">{item.label}</div>
+            <div className="simple-bar-chart__label" title={item.title ?? item.label}>
+              {item.label}
+              {item.sublabel && (
+                <span className="simple-bar-chart__sublabel">{item.sublabel}</span>
+              )}
+            </div>
             <div className="simple-bar-chart__bar-container">
               <div
                 className="simple-bar-chart__bar"

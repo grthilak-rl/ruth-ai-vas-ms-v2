@@ -39,6 +39,7 @@ from app.schemas import (
     ViolationTrendsResponse,
 )
 from app.services.export_service import ExportService
+from app.services.violation_labels import ViolationLabeler
 
 router = APIRouter(tags=["Analytics"])
 logger = get_logger(__name__)
@@ -269,30 +270,44 @@ async def _get_type_breakdown(
     time_filter,
     total: int,
 ) -> list[TypeBreakdown]:
-    """Get violation type breakdown."""
+    """Violation breakdown by family and specific type.
+
+    Every family that has specific types is broken down by them ("PPE
+    Violation · Missing gloves", "Zone Intrusion · Tank level critically
+    high"); a family without any stays a single row. Rows of a mixed family
+    with no specific type are labelled with the family alone.
+    """
     stmt = (
         select(
             Violation.type,
+            Violation.type_detail,
             func.count(Violation.id).label("count"),
         )
         .select_from(Violation)
         .where(time_filter)
-        .group_by(Violation.type)
+        .group_by(Violation.type, Violation.type_detail)
         .order_by(func.count(Violation.id).desc())
     )
 
     result = await db.execute(stmt)
-    rows = result.all()
+    return build_type_breakdown(result.all(), total, ViolationLabeler.current())
 
-    return [
+
+def build_type_breakdown(rows, total: int, labeler: ViolationLabeler) -> list[TypeBreakdown]:
+    """(type, type_detail, count) rows -> labelled breakdown, largest first."""
+    breakdown = [
         TypeBreakdown(
             type=row.type.value,
-            type_display=row.type.value.replace("_", " ").title(),
+            type_detail=row.type_detail,
+            type_display=labeler.combined_label(row.type, row.type_detail),
+            type_label=labeler.family_label(row.type),
+            detail_label=labeler.detail_label(row.type_detail),
             count=row.count,
             percentage=round((row.count / total * 100) if total > 0 else 0, 1),
         )
         for row in rows
     ]
+    return sorted(breakdown, key=lambda b: (-b.count, b.type_display))
 
 
 async def _get_status_breakdown(

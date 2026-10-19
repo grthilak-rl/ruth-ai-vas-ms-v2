@@ -74,8 +74,18 @@ class CameraBreakdown(BaseModel):
 class TypeBreakdown(BaseModel):
     """Violation type breakdown."""
 
-    type: str = Field(..., description="Violation type identifier")
-    type_display: str = Field(..., description="Human-readable type name")
+    type: str = Field(..., description="Violation type identifier (family)")
+    type_detail: str | None = Field(
+        None,
+        description="Specific type within the family; null for the family's rows with none",
+    )
+    type_display: str = Field(
+        ..., description="Human-readable name, e.g. 'PPE Violation · Missing gloves'"
+    )
+    type_label: str = Field("", description="Family label, e.g. 'PPE Violation'")
+    detail_label: str | None = Field(
+        None, description="Specific label, e.g. 'Missing gloves'; null for a family-only row"
+    )
     count: int = Field(..., description="Number of violations")
     percentage: float = Field(..., description="Percentage of total (0-100)")
 

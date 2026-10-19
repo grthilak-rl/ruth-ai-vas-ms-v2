@@ -2,6 +2,7 @@ import { useMemo } from 'react';
 import { Link } from 'react-router-dom';
 import { useViolationsQuery, getConfidenceLabel } from '../../state';
 import type { Violation } from '../../state';
+import { violationShortLabel } from '../../utils/violationLabels';
 import './RecentViolations.css';
 
 /** Maximum violations to display (reduced for compact layout) */
@@ -134,7 +135,7 @@ interface ViolationRowProps {
 function ViolationRow({ violation }: ViolationRowProps) {
   const confidenceLabel = getConfidenceLabel(violation.confidence);
   const timeAgo = formatTimeAgo(violation.timestamp);
-  const typeLabel = formatViolationType(violation.type);
+  const typeLabel = violationShortLabel(violation);
 
   return (
     <Link
@@ -152,26 +153,6 @@ function ViolationRow({ violation }: ViolationRowProps) {
       <span className="recent-violations__time">{timeAgo}</span>
     </Link>
   );
-}
-
-/**
- * Format violation type for display
- */
-function formatViolationType(type: string): string {
-  switch (type) {
-    case 'fall_detected':
-      return 'Fall Detected';
-    case 'ppe_violation':
-      return 'PPE Violation';
-    case 'unauthorized_access':
-      return 'Unauthorized Entry';
-    default:
-      // Convert snake_case to Title Case
-      return type
-        .split('_')
-        .map((word) => word.charAt(0).toUpperCase() + word.slice(1))
-        .join(' ');
-  }
 }
 
 /**

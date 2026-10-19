@@ -1,8 +1,9 @@
 import { useState, useCallback } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
-import type { Violation } from '../../state/api';
+import type { DismissReason, Violation } from '../../state/api';
 import {
   useAcknowledgeViolation,
+  useBulkViolationAction,
   useDismissViolation,
   getConfidenceCategory,
   getConfidenceDisplay,
@@ -12,8 +13,10 @@ import {
 import { EvidenceViewer } from './EvidenceViewer';
 import { ViolationMetadata } from './ViolationMetadata';
 import { ViolationActions } from './ViolationActions';
-import { DismissConfirmationDialog } from '../alerts/DismissConfirmationDialog';
+import { DismissReasonDialog } from '../alerts/DismissReasonDialog';
+import { summarizeBulkResult } from '../alerts/bulkResult';
 import { Toast, type ToastType } from '../alerts/Toast';
+import { alertsListPath } from '../../utils/alertsListMemory';
 import './ViolationDetailView.css';
 
 interface ViolationDetailViewProps {
@@ -47,6 +50,7 @@ export function ViolationDetailView({
   // Action mutations
   const acknowledgeMutation = useAcknowledgeViolation();
   const dismissMutation = useDismissViolation();
+  const bulk = useBulkViolationAction();
 
   // Action state
   const [pendingAction, setPendingAction] = useState<'acknowledge' | 'dismiss' | 'escalate' | 'resolve' | null>(null);
@@ -92,29 +96,38 @@ export function ViolationDetailView({
     setIsDismissDialogOpen(true);
   }, []);
 
-  // Handle dismiss confirm
-  const handleDismissConfirm = useCallback(async () => {
-    setActionError(null);
-    setPendingAction('dismiss');
+  // Handle dismiss confirm: always with a reason, through the same bulk
+  // endpoint as the list, so a false alarm reaches the labelling export.
+  const handleDismissConfirm = useCallback(
+    async (reason: DismissReason, note: string | undefined) => {
+      setActionError(null);
+      setPendingAction('dismiss');
 
-    try {
-      await dismissMutation.dismiss(violation.id);
-      setIsDismissDialogOpen(false);
-      setToast({
-        message: 'Violation dismissed',
-        type: 'success',
-        isVisible: true,
-      });
-      // Navigate back to violations list after dismiss
-      setTimeout(() => navigate('/alerts'), 1500);
-    } catch (err) {
-      setIsDismissDialogOpen(false);
-      const message = err instanceof Error ? err.message : 'Couldn\'t dismiss. Please try again.';
-      setActionError(message);
-    } finally {
-      setPendingAction(null);
-    }
-  }, [dismissMutation, violation.id, navigate]);
+      try {
+        const result = await bulk({ ids: [violation.id], action: 'dismiss', dismiss_reason: reason, note });
+        setIsDismissDialogOpen(false);
+        if (result.updated.length === 0) {
+          setActionError('This violation was already reviewed or dismissed elsewhere.');
+          onRefetch();
+          return;
+        }
+        setToast({
+          message: summarizeBulkResult(result, 'dismiss'),
+          type: (result.labelling?.failed ?? 0) > 0 ? 'error' : 'success',
+          isVisible: true,
+        });
+        // Back to the list the operator came from
+        setTimeout(() => navigate(alertsListPath()), 1500);
+      } catch (err) {
+        setIsDismissDialogOpen(false);
+        const message = err instanceof Error ? err.message : 'Couldn\'t dismiss. Please try again.';
+        setActionError(message);
+      } finally {
+        setPendingAction(null);
+      }
+    },
+    [bulk, violation.id, navigate, onRefetch]
+  );
 
   // Handle dismiss cancel
   const handleDismissCancel = useCallback(() => {
@@ -146,7 +159,7 @@ export function ViolationDetailView({
         type: 'success',
         isVisible: true,
       });
-      setTimeout(() => navigate('/alerts'), 1500);
+      setTimeout(() => navigate(alertsListPath()), 1500);
     } catch (err) {
       const message = err instanceof Error ? err.message : 'Couldn\'t resolve. Please try again.';
       setActionError(message);
@@ -171,7 +184,7 @@ export function ViolationDetailView({
       <div className="violation-detail">
         {/* Back navigation */}
         <nav className="violation-detail__nav">
-          <Link to="/alerts" className="violation-detail__back">
+          <Link to={alertsListPath()} className="violation-detail__back">
             ← Back to Alerts
           </Link>
         </nav>
@@ -183,6 +196,7 @@ export function ViolationDetailView({
             <EvidenceViewer
               evidence={violation.evidence}
               cameraName={violation.camera_name}
+              clipTypeSlug={violation.type_detail || violation.type}
               timestamp={violation.timestamp}
               violationId={violation.id}
               boundingBoxes={violation.bounding_boxes}
@@ -238,9 +252,10 @@ export function ViolationDetailView({
         </section>
       </div>
 
-      {/* Dismiss confirmation dialog */}
-      <DismissConfirmationDialog
+      {/* Dismiss with a reason */}
+      <DismissReasonDialog
         isOpen={isDismissDialogOpen}
+        count={1}
         onConfirm={handleDismissConfirm}
         onCancel={handleDismissCancel}
         isPending={pendingAction === 'dismiss'}

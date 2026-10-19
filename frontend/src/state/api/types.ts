@@ -195,6 +195,17 @@ export interface HealthResponse {
 // ============================================================================
 
 /**
+ * Rule severity, most to least severe (from the model's manifest)
+ */
+export type Severity = 'critical' | 'high' | 'medium' | 'low';
+
+/**
+ * Why a violation was dismissed. The first four are false alarms and copy
+ * the inferred frame to the labelling set; "duplicate" is not.
+ */
+export type DismissReason = 'object' | 'wrong_person' | 'ppe_worn' | 'other_false_alarm' | 'duplicate';
+
+/**
  * Violation type (extensible)
  */
 export type ViolationType = 'fall_detected' | string;
@@ -241,6 +252,8 @@ export interface ViolationEvidence {
    */
   frame_url?: string | null;
   frame_status?: EvidenceStatus | null;
+  /** The inferred frame cropped around the detection, for cards (320x240). */
+  frame_thumb_url?: string | null;
   /** Proxied URL - only valid if snapshot_status = "ready" */
   snapshot_url: string | null;
 
@@ -323,8 +336,36 @@ export interface Violation {
   /** Unique identifier - treat as opaque UUID */
   id: UUID;
 
-  /** Detection type */
+  /** Detection type: the family (fall_detected, ppe_violation, ...) */
   type: ViolationType;
+
+  /**
+   * The specific type the model reported (e.g. missing_gloves), or null when
+   * it reported nothing more specific than `type`. Absent from older backends.
+   */
+  type_detail?: string | null;
+
+  /** Human label for the family ("PPE Violation"), from the backend. */
+  type_label?: string;
+
+  /** Human label for the specific type ("Missing gloves"), or null. */
+  detail_label?: string | null;
+
+  /** Firing rule's severity from its manifest (not confidence). */
+  severity?: Severity;
+
+  /** Camera display name, e.g. "REFORMER1_OUT_75081" (null when unknown) */
+  camera_display_name?: string | null;
+  /** Camera's area / manway, e.g. "REFORMER1" */
+  camera_area?: string | null;
+  /** Which side of the area the camera watches */
+  camera_in_out?: string | null;
+
+  /** Why it was dismissed; null when not dismissed or dismissed before reasons */
+  dismiss_reason?: DismissReason | null;
+
+  /** Operator's note on resolution or dismissal */
+  resolution_notes?: string | null;
 
   /** Reference to device - camera MAY be deleted */
   camera_id: UUID;
@@ -443,6 +484,20 @@ export interface DeviceStreaming {
    * Optional: absent on backends older than the coverage signal.
    */
   inference_absent_since?: ISOTimestamp | null;
+
+  /**
+   * Camera feed health measured by VAS from evidence (last decoded frame,
+   * newest recording segment). video_live is derived from video_state when
+   * present. Optional/null: absent on older backends, and null until VAS's
+   * first health pass. See state/api/cameraFeeds.ts.
+   */
+  video_state?: 'live' | 'stalled' | 'offline' | 'idle' | 'disabled' | null;
+  last_frame_at?: ISOTimestamp | null;
+  recording_state?: 'recording' | 'stopped' | 'idle' | 'disabled' | null;
+  /** Newest recording segment — "stopped since" when recording_state is stopped. */
+  last_segment_at?: ISOTimestamp | null;
+  /** Segments recorded since UTC midnight. */
+  segments_today?: number | null;
 
   /**
    * Every model running on this camera (model_id is the first). Optional:
@@ -689,8 +744,17 @@ export interface AnalyticsSummaryResponse {
  * Note (F6 §7.1): Always specify sort_by - never assume default order.
  */
 export interface ViolationsQueryParams {
-  /** Filter by status */
-  status?: ViolationStatus;
+  /** Filter by status (one, or several) */
+  status?: ViolationStatus | ViolationStatus[];
+
+  /** Filter by severity (several allowed) */
+  severity?: Severity[];
+
+  /** Filter by camera area (manway) */
+  area?: string;
+
+  /** Pagination offset, for endpoints that page by offset */
+  offset?: number;
 
   /** Filter by camera ID */
   camera_id?: UUID;
@@ -700,6 +764,15 @@ export interface ViolationsQueryParams {
 
   /** Filter violations before this timestamp (ISO 8601) */
   until?: ISOTimestamp;
+
+  /** Filter by family (e.g. ppe_violation) */
+  type?: ViolationType;
+
+  /**
+   * Filter by specific type (e.g. missing_gloves); 'none' selects violations
+   * with no specific type.
+   */
+  type_detail?: string;
 
   /** Sort field - REQUIRED to avoid ordering assumptions */
   sort_by?: 'timestamp' | 'created_at' | 'updated_at';
@@ -820,4 +893,97 @@ export interface ChatMessage {
 
   /** Execution time in ms (assistant messages only) */
   executionTimeMs?: number | null;
+}
+
+/**
+ * One specific type within a family, for the type filter.
+ *
+ * Source: GET /api/v1/violations/types
+ */
+export interface ViolationTypeDetailOption {
+  /** Specific type, or null for the family's violations with none */
+  type_detail: string | null;
+  label: string;
+  count: number;
+}
+
+/** A violation family and the specific types seen under it. */
+export interface ViolationTypeOption {
+  type: ViolationType;
+  label: string;
+  count: number;
+  /** Empty when the family has no specific types */
+  details: ViolationTypeDetailOption[];
+}
+
+export interface ViolationTypesResponse {
+  items: ViolationTypeOption[];
+}
+
+/**
+ * Repeated violations of one type on one camera, shown as one card.
+ *
+ * Source: GET /api/v1/violations/incidents
+ */
+export interface Incident {
+  incident_id: string;
+  camera_id: UUID;
+  camera_name: string;
+  camera_display_name?: string | null;
+  camera_area?: string | null;
+  camera_in_out?: string | null;
+  type: ViolationType;
+  type_detail: string | null;
+  type_label: string;
+  detail_label: string | null;
+  /** Worst member severity */
+  severity: Severity;
+  /** Violations in the incident (after filters) */
+  count: number;
+  open_count: number;
+  first_at: ISOTimestamp;
+  last_at: ISOTimestamp;
+  has_clip: boolean;
+  /** Members, newest first */
+  violation_ids: UUID[];
+  /** Members still open, newest first: what group actions apply to */
+  open_violation_ids: UUID[];
+  /** The latest member */
+  representative: Violation;
+}
+
+export type SeverityCounts = Record<Severity, number>;
+
+/** The summary strip: totals for the current filters, across all pages. */
+export interface IncidentSummary {
+  open_violations: number;
+  violations_by_severity: SeverityCounts;
+  incidents_by_severity: SeverityCounts;
+  cameras: number;
+  top_area: string | null;
+  top_area_violations: number;
+}
+
+export interface IncidentListResponse {
+  items: Incident[];
+  total: number;
+  violations_total: number;
+  gap_minutes: number;
+  max_span_minutes: number;
+  /** Absent from older backends */
+  summary?: IncidentSummary;
+}
+
+/** POST /api/v1/violations/bulk */
+export interface ViolationBulkRequest {
+  ids: UUID[];
+  action: 'review' | 'dismiss';
+  dismiss_reason?: DismissReason;
+  note?: string;
+}
+
+export interface ViolationBulkResponse {
+  updated: UUID[];
+  skipped: Array<{ id: UUID; reason: string; status?: string | null }>;
+  labelling: { exported: number; no_frame: number; failed: number; capped: number } | null;
 }

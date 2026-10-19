@@ -13,6 +13,8 @@ import type {
   HealthStatus,
   Violation,
   ViolationsListResponse,
+  ViolationTypesResponse,
+  IncidentListResponse,
   ViolationEvidence,
   EvidenceStatus,
   ViolationStatus,
@@ -233,6 +235,52 @@ export function isViolationsListResponse(value: unknown): value is ViolationsLis
 
   // Validate each item
   return items.every(isViolation);
+}
+
+/**
+ * Validate ViolationTypesResponse (GET /api/v1/violations/types)
+ */
+export function isViolationTypesResponse(value: unknown): value is ViolationTypesResponse {
+  if (!isObject(value) || !isArray(value.items)) return false;
+  return value.items.every(
+    (option) =>
+      isObject(option) &&
+      isString(option.type) &&
+      isString(option.label) &&
+      isNumber(option.count) &&
+      isArray(option.details) &&
+      option.details.every(
+        (detail) =>
+          isObject(detail) &&
+          isStringOrNull(detail.type_detail) &&
+          isString(detail.label) &&
+          isNumber(detail.count)
+      )
+  );
+}
+
+/**
+ * Validate IncidentListResponse (GET /api/v1/violations/incidents)
+ *
+ * Each incident's representative is a full Violation and validated as one;
+ * the rest is checked for the fields the cards rely on.
+ */
+export function isIncidentListResponse(value: unknown): value is IncidentListResponse {
+  if (!isObject(value) || !isArray(value.items) || !isNumber(value.total)) return false;
+  return value.items.every(
+    (incident) =>
+      isObject(incident) &&
+      isString(incident.incident_id) &&
+      isString(incident.camera_id) &&
+      isString(incident.type) &&
+      isNumber(incident.count) &&
+      isNumber(incident.open_count) &&
+      isString(incident.first_at) &&
+      isString(incident.last_at) &&
+      isArray(incident.violation_ids) &&
+      isArray(incident.open_violation_ids) &&
+      isViolation(incident.representative)
+  );
 }
 
 /**

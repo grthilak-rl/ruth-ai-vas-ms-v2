@@ -133,6 +133,17 @@ class Device(BaseModel):
     display_name: str | None = None
     created_at: datetime | None = None
     updated_at: datetime | None = None
+    # Camera health measured by VAS from evidence — frame-tap age and the
+    # newest recording segment — rather than from is_active / stream state,
+    # which say what VAS intended to run. All None from a VAS that predates
+    # them, or before VAS's first health pass after boot.
+    #   video_state      live | stalled | offline | idle | disabled
+    #   recording_state  recording | stopped | idle | disabled
+    video_state: str | None = None
+    last_frame_at: datetime | None = None
+    recording_state: str | None = None
+    last_segment_at: datetime | None = None
+    segments_today: int | None = None
 
 
 class DeviceStatus(BaseModel):

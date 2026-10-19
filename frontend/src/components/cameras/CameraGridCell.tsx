@@ -5,6 +5,7 @@ import { deviceDisplayName } from '../../state';
 import { CameraNamingEditor } from './CameraNamingEditor';
 import type { Device } from '../../state';
 import { cameraCoverage, formatAbsentFor } from '../../state/api/coverage';
+import { describeFeedProblem, feedProblem } from '../../state/api/cameraFeeds';
 import { activeModelIds } from '../../state/api/devices.api';
 import type { ModelConfig } from '../../types/geofencing';
 import './CameraGridCell.css';
@@ -110,6 +111,11 @@ export function CameraGridCell({
   const coverage = useMemo(() => cameraCoverage(camera), [camera]);
   const isUncovered = coverage.state === 'uncovered';
 
+  // Feed health from VAS (frames + recording segments). Takes precedence
+  // over the coverage badge: with no video there is nothing to monitor, and
+  // "NOT MONITORED" would send the operator to the AI instead of the camera.
+  const feed = useMemo(() => feedProblem(camera), [camera]);
+
   const isDetectionActive = detectionStatus === 'active' || detectionStatus === 'degraded';
   const showOverlays = detectionStatus === 'active';
 
@@ -192,7 +198,15 @@ export function CameraGridCell({
           inOut={camera.in_out}
           displayName={label}
         />
-        {isUncovered ? (
+        {feed ? (
+          <span
+            className="camera-grid-cell__detection camera-grid-cell__detection--unmonitored"
+            title={describeFeedProblem(camera)}
+            data-testid="feed-badge"
+          >
+            ⚠ {feed === 'no_video' ? 'NO VIDEO' : 'NOT RECORDING'}
+          </span>
+        ) : isUncovered ? (
           <span
             className="camera-grid-cell__detection camera-grid-cell__detection--unmonitored"
             title={`Video is streaming but nothing is analysing it — no detection for ${formatAbsentFor(coverage.absentForMs)}.`}

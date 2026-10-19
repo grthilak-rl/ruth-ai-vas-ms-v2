@@ -1,6 +1,7 @@
 import { Link } from 'react-router-dom';
 import type { Violation } from '../../state';
 import { getConfidenceCategory, getConfidenceDisplay } from '../../state';
+import { violationShortLabel } from '../../utils/violationLabels';
 import './CameraViolationsList.css';
 
 interface CameraViolationsListProps {
@@ -70,7 +71,7 @@ function ViolationItem({ violation }: { violation: Violation }) {
           aria-hidden="true"
         />
         <span className="camera-violations-list__type">
-          {formatViolationType(violation.type)}
+          {violationShortLabel(violation)}
         </span>
         <span
           className={`camera-violations-list__confidence camera-violations-list__confidence--${confidenceCategory}`}
@@ -84,17 +85,6 @@ function ViolationItem({ violation }: { violation: Violation }) {
       </Link>
     </li>
   );
-}
-
-/**
- * Format violation type for display
- */
-function formatViolationType(type: string): string {
-  // Convert snake_case to Title Case
-  return type
-    .split('_')
-    .map((word) => word.charAt(0).toUpperCase() + word.slice(1))
-    .join(' ');
 }
 
 /**

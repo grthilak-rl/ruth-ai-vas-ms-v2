@@ -3,6 +3,7 @@ import type { Device, HealthResponse, ModelStatusInfo } from '../../state';
 import { formatUptime } from '../../state';
 import { ServiceStatusCard, type ServiceHealthStatus } from './ServiceStatusCard';
 import { MonitoringCoverage } from './MonitoringCoverage';
+import { CameraFeeds } from './CameraFeeds';
 import {
   deriveStoreRuntimeStatus,
   getModelStoreDescription,
@@ -159,6 +160,8 @@ export function SystemHealthView({
       {/* Above the service cards on purpose: a degraded Redis is worth
           knowing, a camera nobody is watching is worth knowing first.
           See BL-11. */}
+      {/* Feeds first: a camera with no video can't be monitored at all. */}
+      <CameraFeeds devices={devices} isLoading={devicesLoading} />
       <MonitoringCoverage devices={devices} isLoading={devicesLoading} />
 
       <section className="system-health-view__section">

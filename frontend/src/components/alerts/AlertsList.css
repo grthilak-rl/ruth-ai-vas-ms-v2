@@ -12,6 +12,69 @@
   gap: 0.75rem;
 }
 
+.alerts-list__bulk {
+  position: sticky;
+  top: -1.5rem; /* the scrolling pane's top padding */
+  z-index: 5;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.5rem 0.75rem;
+  margin-bottom: 0.75rem;
+  padding: 0.5rem 0.75rem;
+  background-color: #f8f9fa;
+  border: 1px solid #e0e0e0;
+  border-radius: 6px;
+  font-size: 0.8125rem;
+}
+
+.alerts-list__bulk-select {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.375rem;
+  font-weight: 500;
+  cursor: pointer;
+}
+
+.alerts-list__bulk-count {
+  font-weight: 600;
+  color: #1a1a1a;
+}
+
+.alerts-list__bulk-hint {
+  color: #777;
+}
+
+.alerts-list__bulk-action,
+.alerts-list__bulk-clear {
+  padding: 0.3rem 0.7rem;
+  font-family: inherit;
+  font-size: 0.8125rem;
+  font-weight: 500;
+  color: #555;
+  background-color: #fff;
+  border: 1px solid #ccc;
+  border-radius: 4px;
+  cursor: pointer;
+}
+
+.alerts-list__bulk-action--review {
+  color: #1a73e8;
+  background-color: #e8f0fe;
+  border-color: transparent;
+}
+
+.alerts-list__bulk-action:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
+.alerts-list__bulk-clear {
+  margin-left: auto;
+  border-color: transparent;
+  background: none;
+}
+
 /* Error state (F4: friendly message + retry) */
 .alerts-list__error {
   display: flex;

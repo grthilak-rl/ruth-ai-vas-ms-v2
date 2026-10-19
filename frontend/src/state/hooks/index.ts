@@ -14,6 +14,9 @@ export {
 
 export {
   useViolationsQuery,
+  useViolationTypesQuery,
+  useIncidentsQuery,
+  useBulkViolationAction,
   useAlertsBadgeQuery,
   useViolationQuery,
   useUpdateViolationMutation,

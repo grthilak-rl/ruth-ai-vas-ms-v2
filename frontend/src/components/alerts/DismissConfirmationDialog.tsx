@@ -6,6 +6,12 @@ interface DismissConfirmationDialogProps {
   onConfirm: () => void;
   onCancel: () => void;
   isPending?: boolean;
+  /** Wording overrides, e.g. for an incident: "Dismiss 12 violations?" */
+  title?: string;
+  message?: string;
+  note?: string;
+  confirmLabel?: string;
+  pendingLabel?: string;
 }
 
 /**
@@ -34,6 +40,11 @@ export function DismissConfirmationDialog({
   onConfirm,
   onCancel,
   isPending = false,
+  title = 'Dismiss Violation',
+  message = 'Are you sure you want to dismiss this alert?',
+  note = 'This marks the violation as a false positive. Dismissed violations can be found using the "Dismissed" status filter and are counted for analytics.',
+  confirmLabel = 'Yes, Dismiss',
+  pendingLabel = 'Dismissing...',
 }: DismissConfirmationDialogProps) {
   const cancelButtonRef = useRef<HTMLButtonElement>(null);
   const dialogRef = useRef<HTMLDivElement>(null);
@@ -90,18 +101,15 @@ export function DismissConfirmationDialog({
       >
         <div className="dismiss-dialog__header">
           <h2 id="dismiss-dialog-title" className="dismiss-dialog__title">
-            Dismiss Violation
+            {title}
           </h2>
         </div>
 
         <div className="dismiss-dialog__content">
           <p id="dismiss-dialog-description" className="dismiss-dialog__message">
-            Are you sure you want to dismiss this alert?
+            {message}
           </p>
-          <p className="dismiss-dialog__note">
-            This marks the violation as a false positive. Dismissed violations
-            can be found using the "Dismissed" status filter and are counted for analytics.
-          </p>
+          {note && <p className="dismiss-dialog__note">{note}</p>}
         </div>
 
         <div className="dismiss-dialog__footer">
@@ -121,7 +129,7 @@ export function DismissConfirmationDialog({
             disabled={isPending}
             aria-busy={isPending}
           >
-            {isPending ? 'Dismissing...' : 'Yes, Dismiss'}
+            {isPending ? pendingLabel : confirmLabel}
           </button>
         </div>
       </div>

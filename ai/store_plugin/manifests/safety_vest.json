@@ -8,7 +8,8 @@
   "classes": {"0": "no-vest", "1": "vest"},
   "rules": [
     {"id": "missing_vest", "classes": ["no-vest"], "min_confidence": 0.7,
-     "violation_type": "missing_vest", "severity": "critical"}
+     "violation_type": "missing_vest", "severity": "critical",
+     "display_name": "Missing safety vest"}
   ],
   "performance": {"inference_time_hint_ms": 40, "recommended_fps": 2},
   "limits": {"max_memory_mb": 1536, "inference_timeout_ms": 5000}

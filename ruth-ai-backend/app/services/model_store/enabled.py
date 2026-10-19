@@ -4,7 +4,8 @@ The store runtime loads ``<store root>/enabled/<model_id>/<version>/``; each
 version dir carries the ``store_manifest.json`` its plugin runs from. The
 backend reads the same files for what the camera picker and the add-model
 API need to know about a store model (display name, zone-required rules,
-whether it reports PPE). Reading only; nothing here writes the store.
+whether it reports PPE), and for the labels violations are shown under.
+Reading only; nothing here writes the store.
 """
 
 import json
@@ -43,6 +44,26 @@ class StoreModelInfo:
     #: manifest has no usable rule — nothing can clear it, which is the
     #: safe direction for a model we cannot characterise.
     min_confidence: float = 1.0
+    #: (violation_type, display_name) for rules whose manifest names them,
+    #: e.g. ("missing_gloves", "Missing gloves"). Pairs rather than a dict so
+    #: the dataclass stays hashable; see ``rule_label``.
+    rule_labels: Tuple[Tuple[str, str], ...] = field(default_factory=tuple)
+    #: (violation_type, severity) per rule, e.g. ("missing_vest", "critical").
+    rule_severities: Tuple[Tuple[str, str], ...] = field(default_factory=tuple)
+
+    def rule_label(self, violation_type: str) -> Optional[str]:
+        """The manifest's display name for a violation type, if it gives one."""
+        for vtype, label in self.rule_labels:
+            if vtype == violation_type:
+                return label
+        return None
+
+    def rule_severity(self, violation_type: str) -> Optional[str]:
+        """The manifest rule's severity for a violation type, if it gives one."""
+        for vtype, severity in self.rule_severities:
+            if vtype == violation_type:
+                return severity
+        return None
 
 
 def _version_key(name: str) -> Tuple[int, ...]:
@@ -60,6 +81,18 @@ def _info_from_manifest(model_id: str, version: str, manifest: dict) -> StoreMod
         == ViolationType.PPE_VIOLATION
         for r in rules
     )
+    rule_labels = tuple(
+        (str(r["violation_type"]).strip().lower(), str(r["display_name"]).strip())
+        for r in rules
+        if r.get("violation_type")
+        and isinstance(r.get("display_name"), str)
+        and r["display_name"].strip()
+    )
+    rule_severities = tuple(
+        (str(r["violation_type"]).strip().lower(), str(r["severity"]).strip().lower())
+        for r in rules
+        if r.get("violation_type") and isinstance(r.get("severity"), str) and r["severity"].strip()
+    )
     floors = [
         float(r["min_confidence"])
         for r in rules
@@ -73,6 +106,8 @@ def _info_from_manifest(model_id: str, version: str, manifest: dict) -> StoreMod
         all_rules_need_zone=bool(rules) and len(zone_rules) == len(rules),
         reports_ppe=reports_ppe,
         min_confidence=min(floors) if floors else 1.0,
+        rule_labels=rule_labels,
+        rule_severities=rule_severities,
     )
 
 

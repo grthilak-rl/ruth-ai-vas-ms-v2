@@ -151,9 +151,14 @@ export function AnalyticsPage() {
       value: cam.violations_total,
     })) ?? [];
 
+  // Specific types lead ("Missing gloves") with the family underneath: the
+  // combined "PPE Violation · Missing gloves" is cut short by the label
+  // column, which left every PPE row reading "PPE Violation · Missi…".
   const typeChartData: BarChartData[] =
     data?.by_type.map((type) => ({
-      label: type.type_display,
+      label: type.detail_label || type.type_display,
+      sublabel: type.detail_label ? type.type_label : undefined,
+      title: type.type_display,
       value: type.count,
       percentage: type.percentage,
     })) ?? [];

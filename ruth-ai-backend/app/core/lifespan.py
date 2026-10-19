@@ -315,6 +315,13 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     except Exception as e:
         logger.error("Failed to schedule VAS event consumer", error=str(e))
 
+    # Background clip-status sync (non-fatal: the detail page still syncs).
+    try:
+        from app.services.clip_status_sync import clip_status_sync
+        clip_status_sync.start()
+    except Exception as e:
+        logger.error("Failed to start clip status sync", error=str(e))
+
     logger.info("Ruth AI Backend startup complete")
 
     yield  # Application runs here
@@ -329,6 +336,13 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
             logger.info("Inference loop stopped")
         except Exception as e:
             logger.error("Error stopping inference loop", error=str(e))
+
+    # Stop clip status sync
+    try:
+        from app.services.clip_status_sync import clip_status_sync
+        await clip_status_sync.stop()
+    except Exception as e:
+        logger.error("Error stopping clip status sync", error=str(e))
 
     # Stop VAS event consumer
     try:

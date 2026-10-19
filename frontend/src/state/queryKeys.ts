@@ -5,14 +5,23 @@
  * All query keys are typed for type safety.
  */
 
-import type { ViolationStatus } from './api/types';
+import type { Severity, ViolationStatus } from './api/types';
 
 /**
  * Violation query filters (F6-aligned with ViolationsQueryParams)
  */
 export interface ViolationFilters {
-  /** Filter by status */
-  status?: ViolationStatus;
+  /** Filter by status (one, or several) */
+  status?: ViolationStatus | ViolationStatus[];
+
+  /** Filter by severity */
+  severity?: Severity[];
+
+  /** Filter by camera area (manway) */
+  area?: string;
+
+  /** Pagination offset */
+  offset?: number;
 
   /** Filter by camera ID */
   camera_id?: string;
@@ -22,6 +31,12 @@ export interface ViolationFilters {
 
   /** Filter violations before this timestamp (ISO 8601) */
   until?: string;
+
+  /** Filter by family (e.g. ppe_violation) */
+  type?: string;
+
+  /** Filter by specific type; 'none' = violations with no specific type */
+  type_detail?: string;
 
   /** Sort field - REQUIRED to avoid ordering assumptions (F6 §7.1) */
   sort_by?: 'timestamp' | 'created_at' | 'updated_at';
@@ -48,6 +63,11 @@ export const queryKeys = {
         ? (['violations', 'list', filters] as const)
         : (['violations', 'list'] as const),
     detail: (id: string) => ['violations', 'detail', id] as const,
+    types: ['violations', 'types'] as const,
+    incidents: (filters?: ViolationFilters) =>
+      filters
+        ? (['violations', 'incidents', filters] as const)
+        : (['violations', 'incidents'] as const),
   },
 
   // Devices domain

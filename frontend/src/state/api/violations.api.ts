@@ -5,6 +5,9 @@
  *
  * Source Endpoints:
  * - GET /api/v1/violations
+ * - GET /api/v1/violations/types
+ * - GET /api/v1/violations/incidents
+ * - POST /api/v1/violations/bulk
  * - GET /api/v1/violations/{id}
  * - PATCH /api/v1/violations/{id}
  *
@@ -20,11 +23,17 @@ import type {
   Violation,
   ViolationsListResponse,
   ViolationsQueryParams,
+  ViolationTypesResponse,
+  IncidentListResponse,
+  ViolationBulkRequest,
+  ViolationBulkResponse,
   EvidenceStatus,
 } from './types';
 import {
   isViolation,
   isViolationsListResponse,
+  isViolationTypesResponse,
+  isIncidentListResponse,
   assertResponse,
 } from './validators';
 
@@ -36,13 +45,23 @@ const VIOLATIONS_PATH = '/api/v1/violations';
  *
  * F6 §7.1: Always specify sort_by to avoid ordering assumptions.
  */
-function buildQueryString(params?: ViolationsQueryParams): string {
+export function buildQueryString(params?: ViolationsQueryParams): string {
   if (!params) return '';
 
   const searchParams = new URLSearchParams();
 
-  if (params.status) {
-    searchParams.set('status', params.status);
+  // Repeatable params are sent once per value (?status=open&status=reviewed).
+  for (const status of ([] as string[]).concat(params.status ?? [])) {
+    searchParams.append('status', status);
+  }
+  for (const level of params.severity ?? []) {
+    searchParams.append('severity', level);
+  }
+  if (params.area) {
+    searchParams.set('area', params.area);
+  }
+  if (params.offset !== undefined) {
+    searchParams.set('offset', String(params.offset));
   }
   if (params.camera_id) {
     searchParams.set('camera_id', params.camera_id);
@@ -52,6 +71,12 @@ function buildQueryString(params?: ViolationsQueryParams): string {
   }
   if (params.until) {
     searchParams.set('until', params.until);
+  }
+  if (params.type) {
+    searchParams.set('type', params.type);
+  }
+  if (params.type_detail) {
+    searchParams.set('type_detail', params.type_detail);
   }
   if (params.sort_by) {
     searchParams.set('sort_by', params.sort_by);
@@ -86,6 +111,38 @@ export async function fetchViolations(
   const queryString = buildQueryString(params);
   const response = await apiGet<unknown>(`${VIOLATIONS_PATH}${queryString}`);
   return assertResponse(response, isViolationsListResponse, 'ViolationsListResponse');
+}
+
+/**
+ * Violations grouped into incidents (same camera + specific type, repeats
+ * within the backend's window). Paged by incident, with `offset`.
+ */
+export async function fetchIncidents(
+  params?: ViolationsQueryParams
+): Promise<IncidentListResponse> {
+  const response = await apiGet<unknown>(`${VIOLATIONS_PATH}/incidents${buildQueryString(params)}`);
+  return assertResponse(response, isIncidentListResponse, 'IncidentListResponse');
+}
+
+/**
+ * Mark reviewed, or dismiss with a reason, many violations in one request.
+ * Violations that cannot make the change are skipped and listed, not failed.
+ */
+export async function bulkUpdateViolations(
+  request: ViolationBulkRequest
+): Promise<ViolationBulkResponse> {
+  return (await apiPost<ViolationBulkResponse>(`${VIOLATIONS_PATH}/bulk`, request)) as ViolationBulkResponse;
+}
+
+/**
+ * Families and the specific types seen under each, for the type filter.
+ *
+ * Only types that actually occur are listed, so the filter never offers an
+ * option that can only return nothing.
+ */
+export async function fetchViolationTypes(): Promise<ViolationTypesResponse> {
+  const response = await apiGet<unknown>(`${VIOLATIONS_PATH}/types`);
+  return assertResponse(response, isViolationTypesResponse, 'ViolationTypesResponse');
 }
 
 /**

@@ -8,7 +8,8 @@
   "classes": {"0": "hardhat", "1": "no-hardhat"},
   "rules": [
     {"id": "missing_hardhat", "classes": ["no-hardhat"], "min_confidence": 0.7,
-     "violation_type": "missing_hardhat", "severity": "critical"}
+     "violation_type": "missing_hardhat", "severity": "critical",
+     "display_name": "Missing hard hat"}
   ],
   "performance": {"inference_time_hint_ms": 25, "recommended_fps": 2},
   "limits": {"max_memory_mb": 1024, "inference_timeout_ms": 5000}

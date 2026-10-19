@@ -4,6 +4,7 @@ import {
   type CoverageSummary,
 } from '../../state/api/coverage';
 import type { Device } from '../../state';
+import { describeFeedProblem } from '../../state/api/cameraFeeds';
 import './MonitoringCoverage.css';
 
 /**
@@ -93,11 +94,26 @@ export function MonitoringCoverage({
         </p>
       )}
 
+      {/* Named, not just counted: "1 camera not streaming" hid which one
+          and for how long. Not counted in the ratio — no video is a feed
+          problem (Camera feeds, above), not a coverage gap. */}
       {summary.noVideo > 0 && (
-        <p className="coverage__muted">
-          {summary.noVideo} camera{summary.noVideo === 1 ? '' : 's'} not
-          streaming — not counted above.
-        </p>
+        <div className="coverage__muted">
+          <p>
+            {summary.noVideo} camera{summary.noVideo === 1 ? ' has' : 's have'} no
+            video — not counted above:
+          </p>
+          <ul className="coverage__list">
+            {summary.noVideoDevices.map((device) => (
+              <li key={device.id}>
+                <span className="coverage__camera">{device.display_name || device.name}</span>
+                {device.streaming.video_state && (
+                  <span className="coverage__since"> — {describeFeedProblem(device)}</span>
+                )}
+              </li>
+            ))}
+          </ul>
+        </div>
       )}
     </section>
   );

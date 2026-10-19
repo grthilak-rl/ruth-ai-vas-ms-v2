@@ -60,7 +60,9 @@ export function cameraCoverage(device: Device, now: number = Date.now()): Camera
 
   // No video means inference is not expected to be running, so its absence
   // is not a coverage gap. A camera that is genuinely offline is a
-  // different problem, already visible as "Offline".
+  // different problem, shown as "Offline" / NO VIDEO. video_live is derived
+  // server-side from VAS's measured video_state, so a camera that vanished
+  // while its stream still read "live" lands here, not in "uncovered".
   if (!video_live) {
     return { device, state: 'no_video', absentForMs: null };
   }
@@ -105,6 +107,8 @@ export interface CoverageSummary {
   settling: CameraCoverage[];
   /** No live video; excluded from the ratio entirely. */
   noVideo: number;
+  /** The cameras behind `noVideo`, so they can be named rather than counted. */
+  noVideoDevices: Device[];
 }
 
 /**
@@ -122,14 +126,15 @@ export function coverageSummary(
   const uncovered = all.filter((c) => c.state === 'uncovered');
   const settling = all.filter((c) => c.state === 'settling');
   const covered = all.filter((c) => c.state === 'covered').length;
-  const noVideo = all.filter((c) => c.state === 'no_video').length;
+  const noVideoDevices = all.filter((c) => c.state === 'no_video').map((c) => c.device);
 
   return {
     covered,
     expected: covered + settling.length + uncovered.length,
     uncovered,
     settling,
-    noVideo,
+    noVideo: noVideoDevices.length,
+    noVideoDevices,
   };
 }
 

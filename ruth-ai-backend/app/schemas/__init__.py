@@ -82,12 +82,19 @@ from app.schemas.evidence import (
     VideoEvidenceResponse,
 )
 from app.schemas.violation import (
+    ViolationBulkRequest,
+    ViolationBulkResponse,
+    IncidentListResponse,
+    IncidentResponse,
     ViolationDetailResponse,
     ViolationEvidenceSummary,
     ViolationListResponse,
     ViolationQueryParams,
     ViolationResponse,
     ViolationStatusUpdateRequest,
+    ViolationTypeDetailOption,
+    ViolationTypeOption,
+    ViolationTypesResponse,
 )
 from app.schemas.chat import (
     ChatErrorDetail,
@@ -119,10 +126,17 @@ __all__ = [
     # Violation schemas
     "ViolationResponse",
     "ViolationDetailResponse",
+    "IncidentResponse",
+    "IncidentListResponse",
+    "ViolationBulkRequest",
+    "ViolationBulkResponse",
     "ViolationEvidenceSummary",
     "ViolationListResponse",
     "ViolationQueryParams",
     "ViolationStatusUpdateRequest",
+    "ViolationTypeDetailOption",
+    "ViolationTypeOption",
+    "ViolationTypesResponse",
     # Evidence schemas
     "EvidenceResponse",
     "SnapshotCreateRequest",

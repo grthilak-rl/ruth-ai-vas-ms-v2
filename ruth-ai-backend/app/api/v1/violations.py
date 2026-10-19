@@ -15,6 +15,7 @@ from pathlib import Path
 from uuid import UUID
 
 from fastapi import APIRouter, HTTPException, Query, status
+from fastapi.concurrency import run_in_threadpool
 from fastapi.responses import FileResponse, StreamingResponse
 from sqlalchemy import func, select
 from sqlalchemy.orm import selectinload
@@ -22,9 +23,21 @@ from sqlalchemy.orm import selectinload
 from app.core.config import get_settings
 from app.core.logging import get_logger
 from app.deps import DBSession, EvidenceServiceDep, VASClientDep, ViolationServiceDep
-from app.models import Evidence, EvidenceStatus, EvidenceType, StreamSession, Violation
+from app.models import (
+    Device,
+    Evidence,
+    EvidenceStatus,
+    EvidenceType,
+    StreamSession,
+    Violation,
+    ViolationStatus,
+)
 from app.schemas import (
     ErrorResponse,
+    ViolationBulkRequest,
+    ViolationBulkResponse,
+    IncidentListResponse,
+    IncidentResponse,
     SnapshotCreateRequest,
     SnapshotResponse,
     VideoEvidenceResponse,
@@ -33,6 +46,26 @@ from app.schemas import (
     ViolationListResponse,
     ViolationResponse,
     ViolationStatusUpdateRequest,
+    ViolationTypeDetailOption,
+    ViolationTypeOption,
+    ViolationTypesResponse,
+)
+from app.models.enums import ViolationType
+from app.services.false_positive_export import (
+    ExportItem,
+    export_false_positives,
+    is_false_alarm,
+)
+from app.services.frame_thumbnails import render_thumbnail
+from app.services.incidents import group_incidents
+from app.services.violation_labels import ViolationLabeler
+from app.services.violation_severity import SEVERITY_LEVELS
+from app.models.dismiss_reasons import DismissReason
+from app.schemas.violation import (
+    BulkSkipped,
+    IncidentSummary,
+    LabellingExport,
+    SeverityCounts,
 )
 from app.services import (
     EvidenceVASError,
@@ -44,6 +77,139 @@ from app.services import (
 
 router = APIRouter(tags=["Violations"])
 logger = get_logger(__name__)
+
+#: ``type_detail`` filter value selecting violations with no specific type.
+NO_TYPE_DETAIL = "none"
+
+
+def camera_fields(device: Device | None) -> dict:
+    """Display name, area and side of the violation's camera, when known."""
+    if device is None:
+        return {"camera_display_name": None, "camera_area": None, "camera_in_out": None}
+    return {
+        "camera_display_name": (device.display_name or "").strip() or None,
+        "camera_area": (device.manway or "").strip() or None,
+        "camera_in_out": (device.in_out or "").strip() or None,
+    }
+
+
+async def export_dismissed_false_alarms(
+    db,
+    violations: list[Violation],
+    reason: DismissReason | str | None,
+    note: str | None,
+    dismissed_by: str | None,
+) -> LabellingExport | None:
+    """Copy dismissed false alarms' inferred frames to the labelling set.
+
+    Never raises: a failed copy is logged and counted, and the dismissal
+    stands. Returns None when the reason is not a false alarm.
+    """
+    if not violations or not is_false_alarm(reason):
+        return None
+    settings = get_settings()
+    ids = [v.id for v in violations]
+    frames = dict(
+        (
+            await db.execute(
+                select(Evidence.violation_id, Evidence.file_path).where(
+                    Evidence.violation_id.in_(ids),
+                    Evidence.evidence_type == EvidenceType.FRAME,
+                    Evidence.status == EvidenceStatus.READY,
+                )
+            )
+        ).all()
+    )
+    devices = {
+        d.id: d
+        for d in (
+            await db.execute(select(Device).where(Device.id.in_({v.device_id for v in violations})))
+        ).scalars()
+    }
+    labeler = ViolationLabeler.current()
+    items = []
+    for v in violations:
+        cam = camera_fields(devices.get(v.device_id))
+        items.append(
+            ExportItem(
+                violation_id=v.id,
+                model_id=v.model_id,
+                model_version=v.model_version,
+                type=getattr(v.type, "value", v.type),
+                type_detail=v.type_detail,
+                severity=labeler.severity(v),
+                confidence=v.confidence,
+                timestamp=v.timestamp,
+                camera_name=v.camera_name,
+                camera_display_name=cam["camera_display_name"],
+                camera_area=cam["camera_area"],
+                camera_in_out=cam["camera_in_out"],
+                bounding_boxes=v.bounding_boxes,
+                frame_file=frames.get(v.id),
+                group_key=f"{v.device_id}:{v.type_detail or getattr(v.type, 'value', v.type)}",
+            )
+        )
+    try:
+        result = await run_in_threadpool(
+            export_false_positives,
+            items,
+            reason,
+            note,
+            frame_root=Path(settings.evidence_frame_dir),
+            labelling_root=Path(settings.labelling_root),
+            dismissed_by=dismissed_by,
+        )
+    except Exception as e:  # noqa: BLE001 - the dismissal must stand regardless
+        logger.error("False-positive export crashed", error=str(e), count=len(items))
+        return LabellingExport(failed=len(items))
+    return LabellingExport(**result.as_dict())
+
+
+def apply_violation_filters(
+    stmt,
+    *,
+    statuses: list[ViolationStatus] | None = None,
+    camera_id: UUID | None = None,
+    since: datetime | None = None,
+    until: datetime | None = None,
+    violation_type: ViolationType | None = None,
+    type_detail: str | None = None,
+    severities: list[str] | None = None,
+    area: str | None = None,
+):
+    """The Violations page filters, shared by the list and incidents.
+
+    Enums are parsed by FastAPI, so an unknown status or family is a 422
+    rather than a database error from casting it.
+    """
+    if statuses:
+        stmt = stmt.where(Violation.status.in_(statuses))
+    if camera_id is not None:
+        stmt = stmt.where(Violation.device_id == camera_id)
+    if since is not None:
+        stmt = stmt.where(Violation.timestamp >= since)
+    if until is not None:
+        stmt = stmt.where(Violation.timestamp <= until)
+    if violation_type is not None:
+        stmt = stmt.where(Violation.type == violation_type)
+    if type_detail is not None:
+        if type_detail.strip().lower() == NO_TYPE_DETAIL:
+            stmt = stmt.where(Violation.type_detail.is_(None))
+        else:
+            stmt = stmt.where(Violation.type_detail == type_detail.strip().lower())
+    if severities:
+        levels = [s.strip().lower() for s in severities if s.strip().lower() in SEVERITY_LEVELS]
+        if not levels:
+            raise HTTPException(
+                status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                detail={"error": "invalid_severity", "message": f"severity must be one of {SEVERITY_LEVELS}"},
+            )
+        stmt = stmt.where(Violation.severity.in_(levels))
+    if area:
+        stmt = stmt.where(
+            Violation.device_id.in_(select(Device.id).where(Device.manway == area.strip()))
+        )
+    return stmt
 
 
 def build_evidence_summary(evidence_list: list[Evidence]) -> ViolationEvidenceSummary | None:
@@ -74,10 +240,20 @@ def build_evidence_summary(evidence_list: list[Evidence]) -> ViolationEvidenceSu
     if snapshot_evidence is None and bookmark_evidence is None and frame_evidence is None:
         return None
 
+    frame_ready = bool(
+        frame_evidence
+        and frame_evidence.file_path
+        and frame_evidence.status == EvidenceStatus.READY
+    )
     return ViolationEvidenceSummary(
         frame_url=(
             f"/api/v1/violations/{frame_evidence.violation_id}/frame/image"
             if frame_evidence and frame_evidence.file_path
+            else None
+        ),
+        frame_thumb_url=(
+            f"/api/v1/violations/{frame_evidence.violation_id}/frame/thumb"
+            if frame_ready
             else None
         ),
         # null, not "pending": nothing is coming if no frame was saved.
@@ -108,7 +284,9 @@ def build_evidence_summary(evidence_list: list[Evidence]) -> ViolationEvidenceSu
 )
 async def list_violations(
     db: DBSession,
-    violation_status: str | None = Query(None, alias="status", description="Filter by status"),
+    violation_status: list[ViolationStatus] | None = Query(
+        None, alias="status", description="Filter by status (repeatable)"
+    ),
     camera_id: UUID | None = Query(None, description="Filter by camera ID"),
     device_id: UUID | None = Query(
         None,
@@ -117,6 +295,21 @@ async def list_violations(
     ),
     since: datetime | None = Query(None, description="Violations after this timestamp"),
     until: datetime | None = Query(None, description="Violations before this timestamp"),
+    violation_type: ViolationType | None = Query(
+        None, alias="type", description="Filter by family (e.g. ppe_violation)"
+    ),
+    type_detail: str | None = Query(
+        None,
+        max_length=64,
+        description=(
+            "Filter by specific type (e.g. missing_gloves); "
+            f"'{NO_TYPE_DETAIL}' selects violations with no specific type"
+        ),
+    ),
+    severity: list[str] | None = Query(
+        None, description="Filter by severity (repeatable): critical, high, medium, low"
+    ),
+    area: str | None = Query(None, max_length=64, description="Filter by camera area (manway)"),
     limit: int = Query(100, ge=1, le=1000, description="Maximum results"),
     offset: int = Query(0, ge=0, description="Pagination offset"),
 ) -> ViolationListResponse:
@@ -145,22 +338,20 @@ async def list_violations(
     # Build query with eager loading of evidence
     stmt = (
         select(Violation)
-        .options(selectinload(Violation.evidence))
+        .options(selectinload(Violation.evidence), selectinload(Violation.device))
         .order_by(Violation.timestamp.desc())
     )
-
-    # Apply filters
-    if violation_status is not None:
-        stmt = stmt.where(Violation.status == violation_status)
-
-    if camera_filter is not None:
-        stmt = stmt.where(Violation.device_id == camera_filter)
-
-    if since is not None:
-        stmt = stmt.where(Violation.timestamp >= since)
-
-    if until is not None:
-        stmt = stmt.where(Violation.timestamp <= until)
+    stmt = apply_violation_filters(
+        stmt,
+        statuses=violation_status,
+        camera_id=camera_filter,
+        since=since,
+        until=until,
+        violation_type=violation_type,
+        type_detail=type_detail,
+        severities=severity,
+        area=area,
+    )
 
     # Count total
     count_stmt = select(func.count()).select_from(stmt.subquery())
@@ -177,15 +368,19 @@ async def list_violations(
         "Listing violations",
         total=total,
         returned=len(violations),
-        status=violation_status,
+        status=[s.value for s in violation_status] if violation_status else None,
         camera_id=str(camera_filter) if camera_filter else None,
+        type=violation_type.value if violation_type else None,
+        type_detail=type_detail,
     )
 
+    labeler = ViolationLabeler.current()
     return ViolationListResponse(
         items=[
             ViolationResponse(
                 id=v.id,
-                type=v.type.value,
+                **labeler.type_fields(v),
+                **camera_fields(v.device),
                 status=v.status.value,
                 camera_id=v.device_id,
                 camera_name=v.camera_name,
@@ -197,6 +392,7 @@ async def list_violations(
                 reviewed_by=v.reviewed_by,
                 reviewed_at=v.reviewed_at,
                 resolution_notes=v.resolution_notes,
+                dismiss_reason=v.dismiss_reason,
                 evidence=build_evidence_summary(list(v.evidence)),
                 created_at=v.created_at,
                 updated_at=v.updated_at,
@@ -204,6 +400,317 @@ async def list_violations(
             for v in violations
         ],
         total=total,
+    )
+
+
+@router.get(
+    "/violations/types",
+    response_model=ViolationTypesResponse,
+    status_code=status.HTTP_200_OK,
+    summary="List violation types",
+    description="Families and the specific types seen under each, with labels and counts.",
+    responses={
+        500: {"model": ErrorResponse, "description": "Internal server error"},
+    },
+)
+async def list_violation_types(db: DBSession) -> ViolationTypesResponse:
+    """Options for the type filter: only types that actually occur.
+
+    Registered before /violations/{violation_id}, which would otherwise try
+    to parse "types" as a UUID and answer 422.
+    """
+    stmt = (
+        select(Violation.type, Violation.type_detail, func.count(Violation.id).label("count"))
+        .group_by(Violation.type, Violation.type_detail)
+    )
+    rows = (await db.execute(stmt)).all()
+    return ViolationTypesResponse(items=build_type_options(rows, ViolationLabeler.current()))
+
+
+def build_type_options(rows, labeler: ViolationLabeler) -> list[ViolationTypeOption]:
+    """Group (type, type_detail, count) rows into families, largest first.
+
+    A family whose violations all lack a specific type gets no details: its
+    single option is the family itself. A family mixing both lists the rows
+    with none as their own option, labelled with the family alone, so every
+    violation is reachable from the filter.
+    """
+    families: dict[str, ViolationTypeOption] = {}
+    for row in rows:
+        family = row.type.value if isinstance(row.type, ViolationType) else str(row.type)
+        option = families.setdefault(
+            family,
+            ViolationTypeOption(type=family, label=labeler.family_label(family), count=0),
+        )
+        option.count += row.count
+        option.details.append(
+            ViolationTypeDetailOption(
+                type_detail=row.type_detail,
+                label=labeler.detail_label(row.type_detail) or labeler.family_label(family),
+                count=row.count,
+            )
+        )
+
+    for option in families.values():
+        if all(d.type_detail is None for d in option.details):
+            option.details = []
+        else:
+            option.details.sort(key=lambda d: (-d.count, d.label))
+    return sorted(families.values(), key=lambda o: (-o.count, o.label))
+
+
+async def summarize_incidents(db, rows, incidents, labeler: ViolationLabeler) -> IncidentSummary:
+    """Totals across every incident matching the filters, not just the page."""
+    by_severity = {level: 0 for level in SEVERITY_LEVELS}
+    open_violations = 0
+    per_device: dict = {}
+    for row in rows:
+        by_severity[labeler.severity(row)] += 1
+        if getattr(row.status, "value", row.status) == ViolationStatus.OPEN.value:
+            open_violations += 1
+        per_device[row.device_id] = per_device.get(row.device_id, 0) + 1
+
+    incident_severity = {level: 0 for level in SEVERITY_LEVELS}
+    for incident in incidents:
+        incident_severity[incident.severity(labeler.severity)] += 1
+
+    per_area: dict[str, int] = {}
+    if per_device:
+        manways = await db.execute(
+            select(Device.id, Device.manway).where(Device.id.in_(list(per_device)))
+        )
+        for device_id, manway in manways.all():
+            area = (manway or "").strip()
+            if area:
+                per_area[area] = per_area.get(area, 0) + per_device[device_id]
+    top_area = max(per_area, key=lambda a: (per_area[a], a)) if per_area else None
+
+    return IncidentSummary(
+        open_violations=open_violations,
+        violations_by_severity=SeverityCounts(**by_severity),
+        incidents_by_severity=SeverityCounts(**incident_severity),
+        cameras=len(per_device),
+        top_area=top_area,
+        top_area_violations=per_area.get(top_area, 0) if top_area else 0,
+    )
+
+
+@router.post(
+    "/violations/bulk",
+    response_model=ViolationBulkResponse,
+    status_code=status.HTTP_200_OK,
+    summary="Change many violations at once",
+    description=(
+        "Mark reviewed, or dismiss with a reason, up to 1000 violations in one "
+        "transaction. Each is validated like PATCH /violations/{id}; ones that "
+        "cannot make the transition are skipped and listed, not failed. "
+        "False-alarm dismissals export their inferred frames for labelling."
+    ),
+    responses={422: {"model": ErrorResponse, "description": "Invalid request"}},
+)
+async def bulk_update_violations(
+    request: ViolationBulkRequest,
+    violation_service: ViolationServiceDep,
+    db: DBSession,
+) -> ViolationBulkResponse:
+    new_status = ViolationStatus.REVIEWED if request.action == "review" else ViolationStatus.DISMISSED
+    reason = request.dismiss_reason.value if request.dismiss_reason and request.action == "dismiss" else None
+    ids = list(dict.fromkeys(request.ids))  # de-duplicate, keep order
+
+    rows = await db.execute(select(Violation).where(Violation.id.in_(ids)))
+    by_id = {v.id: v for v in rows.scalars().all()}
+
+    updated: list[Violation] = []
+    skipped: list[BulkSkipped] = []
+    for vid in ids:
+        violation = by_id.get(vid)
+        if violation is None:
+            skipped.append(BulkSkipped(id=vid, reason="not_found"))
+            continue
+        try:
+            violation_service.apply_transition(
+                violation,
+                new_status,
+                reviewed_by=request.reviewed_by,
+                resolution_notes=request.note,
+                dismiss_reason=reason,
+            )
+        except ViolationTerminalStateError:
+            skipped.append(BulkSkipped(id=vid, reason="terminal_state", status=violation.status.value))
+            continue
+        except ViolationStateError:
+            skipped.append(BulkSkipped(id=vid, reason="invalid_transition", status=violation.status.value))
+            continue
+        updated.append(violation)
+
+    # Commit before exporting: a labelling copy must never exist for a
+    # violation whose dismissal did not stick.
+    await db.commit()
+    logger.info(
+        "Bulk violation update",
+        action=request.action,
+        reason=reason,
+        requested=len(ids),
+        updated=len(updated),
+        skipped=len(skipped),
+    )
+
+    labelling = None
+    if new_status == ViolationStatus.DISMISSED:
+        labelling = await export_dismissed_false_alarms(
+            db, updated, request.dismiss_reason, request.note, request.reviewed_by
+        )
+
+    return ViolationBulkResponse(
+        updated=[v.id for v in updated],
+        skipped=skipped,
+        labelling=labelling,
+    )
+
+
+@router.get(
+    "/violations/incidents",
+    response_model=IncidentListResponse,
+    status_code=status.HTTP_200_OK,
+    summary="List violation incidents",
+    description=(
+        "Violations grouped into incidents: same camera and specific type, each "
+        "within INCIDENT_GAP_MINUTES of the previous, spanning at most "
+        "INCIDENT_MAX_SPAN_MINUTES. Same filters as GET /violations."
+    ),
+    responses={500: {"model": ErrorResponse, "description": "Internal server error"}},
+)
+async def list_incidents(
+    db: DBSession,
+    violation_status: list[ViolationStatus] | None = Query(
+        None, alias="status", description="Filter by status (repeatable)"
+    ),
+    camera_id: UUID | None = Query(None, description="Filter by camera ID"),
+    since: datetime | None = Query(None, description="Violations after this timestamp"),
+    until: datetime | None = Query(None, description="Violations before this timestamp"),
+    violation_type: ViolationType | None = Query(None, alias="type", description="Filter by family"),
+    type_detail: str | None = Query(None, max_length=64, description="Filter by specific type"),
+    severity: list[str] | None = Query(None, description="Filter by severity (repeatable)"),
+    area: str | None = Query(None, max_length=64, description="Filter by camera area (manway)"),
+    limit: int = Query(20, ge=1, le=200, description="Incidents per page"),
+    offset: int = Query(0, ge=0, description="Pagination offset (incidents)"),
+) -> IncidentListResponse:
+    """Group the filtered violations, then page the incidents.
+
+    Grouping needs every matching row, but only the light columns; full rows
+    (evidence, device) are loaded for the page's representatives alone.
+    Registered before /violations/{violation_id} for the same reason as
+    /violations/types.
+    """
+    settings = get_settings()
+    light = select(
+        Violation.id,
+        Violation.device_id,
+        Violation.type,
+        Violation.type_detail,
+        Violation.timestamp,
+        Violation.status,
+        Violation.severity,
+        Violation.model_id,
+    )
+    light = apply_violation_filters(
+        light,
+        statuses=violation_status,
+        camera_id=camera_id,
+        since=since,
+        until=until,
+        violation_type=violation_type,
+        type_detail=type_detail,
+        severities=severity,
+        area=area,
+    )
+    rows = (await db.execute(light)).all()
+    incidents = group_incidents(
+        rows,
+        gap=timedelta(minutes=settings.incident_gap_minutes),
+        max_span=timedelta(minutes=settings.incident_max_span_minutes),
+    )
+    page = incidents[offset : offset + limit]
+
+    labeler = ViolationLabeler.current()
+    reps: dict = {}
+    clipped: set = set()
+    if page:
+        rep_ids = [i.latest.id for i in page]
+        rep_rows = await db.execute(
+            select(Violation)
+            .where(Violation.id.in_(rep_ids))
+            .options(selectinload(Violation.evidence), selectinload(Violation.device))
+        )
+        reps = {v.id: v for v in rep_rows.scalars().all()}
+        member_ids = [m.id for i in page for m in i.members]
+        clip_rows = await db.execute(
+            select(Evidence.violation_id).where(
+                Evidence.violation_id.in_(member_ids),
+                Evidence.evidence_type == EvidenceType.BOOKMARK,
+                Evidence.status == EvidenceStatus.READY,
+            )
+        )
+        clipped = set(clip_rows.scalars().all())
+
+    items: list[IncidentResponse] = []
+    for incident in page:
+        rep_v = reps.get(incident.latest.id)
+        if rep_v is None:  # deleted between the two queries
+            continue
+        newest_first = list(reversed(incident.members))
+        cam = camera_fields(rep_v.device)
+        items.append(
+            IncidentResponse(
+                incident_id=incident.key,
+                camera_id=incident.device_id,
+                camera_name=rep_v.camera_name,
+                **cam,
+                type=incident.type,
+                type_detail=incident.type_detail,
+                type_label=labeler.family_label(incident.type),
+                detail_label=labeler.detail_label(incident.type_detail, rep_v.model_id),
+                severity=incident.severity(labeler.severity),
+                count=incident.count,
+                open_count=incident.count_with_status(ViolationStatus.OPEN.value),
+                first_at=incident.first_at,
+                last_at=incident.last_at,
+                has_clip=any(m.id in clipped for m in incident.members),
+                violation_ids=[m.id for m in newest_first],
+                open_violation_ids=[
+                    m.id for m in newest_first
+                    if getattr(m.status, "value", m.status) == ViolationStatus.OPEN.value
+                ],
+                representative=ViolationResponse(
+                    id=rep_v.id,
+                    **labeler.type_fields(rep_v),
+                    **cam,
+                    status=rep_v.status.value,
+                    camera_id=rep_v.device_id,
+                    camera_name=rep_v.camera_name,
+                    confidence=rep_v.confidence,
+                    timestamp=rep_v.timestamp,
+                    model_id=rep_v.model_id,
+                    model_version=rep_v.model_version,
+                    bounding_boxes=rep_v.bounding_boxes,
+                    reviewed_by=rep_v.reviewed_by,
+                    reviewed_at=rep_v.reviewed_at,
+                    resolution_notes=rep_v.resolution_notes,
+                    dismiss_reason=rep_v.dismiss_reason,
+                    evidence=build_evidence_summary(list(rep_v.evidence)),
+                    created_at=rep_v.created_at,
+                    updated_at=rep_v.updated_at,
+                ),
+            )
+        )
+
+    return IncidentListResponse(
+        items=items,
+        total=len(incidents),
+        violations_total=len(rows),
+        gap_minutes=settings.incident_gap_minutes,
+        max_span_minutes=settings.incident_max_span_minutes,
+        summary=await summarize_incidents(db, rows, incidents, labeler),
     )
 
 
@@ -277,7 +784,8 @@ async def get_violation(
 
     return ViolationDetailResponse(
         id=violation.id,
-        type=violation.type.value,
+        **ViolationLabeler.current().type_fields(violation),
+        **camera_fields(await db.get(Device, violation.device_id)),
         status=violation.status.value,
         camera_id=violation.device_id,
         camera_name=violation.camera_name,
@@ -289,6 +797,7 @@ async def get_violation(
         reviewed_by=violation.reviewed_by,
         reviewed_at=violation.reviewed_at,
         resolution_notes=violation.resolution_notes,
+        dismiss_reason=violation.dismiss_reason,
         evidence=build_evidence_summary(evidence_list),
         event_count=event_count,
         created_at=violation.created_at,
@@ -313,6 +822,7 @@ async def update_violation_status(
     violation_id: UUID,
     request: ViolationStatusUpdateRequest,
     violation_service: ViolationServiceDep,
+    db: DBSession,
 ) -> ViolationResponse:
     """Update violation status.
 
@@ -354,6 +864,11 @@ async def update_violation_status(
             new_status,
             reviewed_by=request.reviewed_by,
             resolution_notes=request.resolution_notes,
+            dismiss_reason=(
+                request.dismiss_reason.value
+                if request.dismiss_reason and new_status == ViolationStatus.DISMISSED
+                else None
+            ),
         )
     except ViolationNotFoundError as e:
         raise HTTPException(
@@ -389,9 +904,18 @@ async def update_violation_status(
         new_status=new_status.value,
     )
 
+    # Export only after the dismissal is committed: a labelling copy must
+    # never exist for a violation that is not actually dismissed.
+    if new_status == ViolationStatus.DISMISSED and is_false_alarm(request.dismiss_reason):
+        await db.commit()
+        await export_dismissed_false_alarms(
+            db, [violation], request.dismiss_reason, request.resolution_notes, request.reviewed_by
+        )
+
     return ViolationResponse(
         id=violation.id,
-        type=violation.type.value,
+        **ViolationLabeler.current().type_fields(violation),
+        **camera_fields(await db.get(Device, violation.device_id)),
         status=violation.status.value,
         camera_id=violation.device_id,
         camera_name=violation.camera_name,
@@ -403,6 +927,7 @@ async def update_violation_status(
         reviewed_by=violation.reviewed_by,
         reviewed_at=violation.reviewed_at,
         resolution_notes=violation.resolution_notes,
+        dismiss_reason=violation.dismiss_reason,
         evidence=None,  # Not needed for status update response
         created_at=violation.created_at,
         updated_at=violation.updated_at,
@@ -672,6 +1197,63 @@ async def get_inferred_frame(
             detail="Inferred frame is recorded but missing on disk",
         )
     return FileResponse(path, media_type="image/jpeg")
+
+
+@router.get(
+    "/violations/{violation_id}/frame/thumb",
+    summary="Card thumbnail of the inferred frame",
+    description=(
+        "The inferred frame cropped around the detection (4:3, 320x240) with "
+        "the boxes drawn. Generated on first request and cached on disk."
+    ),
+    responses={
+        200: {"description": "JPEG thumbnail", "content": {"image/jpeg": {}}},
+        404: {"model": ErrorResponse, "description": "No frame saved for this violation"},
+    },
+)
+async def get_frame_thumbnail(
+    violation_id: UUID,
+    db: DBSession,
+) -> FileResponse:
+    settings = get_settings()
+    cached = Path(settings.evidence_thumb_dir) / f"{violation_id}.jpg"
+    headers = {"Cache-Control": "private, max-age=86400"}
+    if cached.is_file():
+        return FileResponse(cached, media_type="image/jpeg", headers=headers)
+
+    row = (
+        await db.execute(
+            select(Evidence.file_path, Violation.bounding_boxes)
+            .join(Violation, Violation.id == Evidence.violation_id)
+            .where(
+                Evidence.violation_id == violation_id,
+                Evidence.evidence_type == EvidenceType.FRAME,
+                Evidence.status == EvidenceStatus.READY,
+            )
+        )
+    ).first()
+    if row is None or not row.file_path:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="No inferred frame saved for this violation",
+        )
+    root = Path(settings.evidence_frame_dir).resolve()
+    frame = (root / row.file_path).resolve()
+    if not frame.is_relative_to(root) or not frame.is_file():
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Inferred frame is recorded but missing on disk",
+        )
+    try:
+        # Pillow work off the event loop.
+        await run_in_threadpool(render_thumbnail, frame, row.bounding_boxes, cached)
+    except OSError as e:
+        logger.warning("Thumbnail render failed", violation_id=str(violation_id), error=str(e))
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Thumbnail could not be made from the inferred frame",
+        ) from e
+    return FileResponse(cached, media_type="image/jpeg", headers=headers)
 
 
 @router.get(

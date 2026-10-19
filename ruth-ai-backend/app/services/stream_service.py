@@ -51,6 +51,16 @@ from .exceptions import (
 
 logger = get_logger(__name__)
 
+# Camera-health fields VAS reports per device (VAS camera_health.py), passed
+# through unchanged on the device streaming status.
+HEALTH_FIELDS = (
+    "video_state",
+    "last_frame_at",
+    "recording_state",
+    "last_segment_at",
+    "segments_today",
+)
+
 
 # Valid state transitions
 VALID_TRANSITIONS: dict[StreamState, set[StreamState]] = {
@@ -497,6 +507,25 @@ class StreamService:
             "model_config": session.model_config,
         }
 
+    @staticmethod
+    def _health_fields(vas_device: Any) -> dict:
+        """The VAS camera-health fields for one device (all None if absent)."""
+        return {key: getattr(vas_device, key, None) for key in HEALTH_FIELDS}
+
+    @staticmethod
+    def _video_live(vas_device: Any, vas_stream: Any) -> bool:
+        """Is video actually arriving?
+
+        VAS's stream state records intent — it stayed "live" for a camera that
+        had been unreachable for an hour. Its video_state is measured from
+        decoded frames, so it wins whenever VAS reports it; the stream state
+        is only the fallback for a VAS without health fields.
+        """
+        state = getattr(vas_device, "video_state", None)
+        if state is not None:
+            return state == "live"
+        return bool(vas_stream and vas_stream.state.value == "live")
+
     async def get_combined_status(self, device_id: UUID, vas_device_id: str) -> dict:
         """Get combined VAS video status and AI inference status for a device.
 
@@ -518,14 +547,13 @@ class StreamService:
         session = await self._get_active_session(device_id)
 
         # Get VAS video stream status
-        video_live = False
+        vas_stream = None
         vas_stream_id = None
 
         try:
             vas_streams = await self._vas.get_streams(camera_id=vas_device_id, limit=1)
             if vas_streams.streams:
                 vas_stream = vas_streams.streams[0]
-                video_live = vas_stream.state.value == "live"
                 vas_stream_id = str(vas_stream.id)
         except VASError as e:
             logger.warning(
@@ -536,7 +564,23 @@ class StreamService:
             )
             # On VAS error, we still return AI session status
 
-        return self._build_status_dict(session, video_live, vas_stream_id)
+        vas_device = None
+        try:
+            vas_device = await self._vas.get_device(vas_device_id)
+        except VASError as e:
+            logger.warning(
+                "Failed to get VAS camera health",
+                device_id=str(device_id),
+                vas_device_id=vas_device_id,
+                error=str(e),
+            )
+
+        return self._build_status_dict(
+            session,
+            self._video_live(vas_device, vas_stream),
+            vas_stream_id,
+            health=self._health_fields(vas_device),
+        )
 
     async def get_combined_status_bulk(
         self,
@@ -570,6 +614,20 @@ class StreamService:
         except VASError as e:
             logger.warning(
                 "Bulk VAS stream fetch failed; falling back to no-stream defaults",
+                error=str(e),
+                device_count=len(devices),
+            )
+
+        # 1b. Bulk camera health: one more VAS call. Health is measured by
+        #     VAS from frames and segments, and is what video_live is
+        #     derived from when present (see _video_live).
+        vas_device_by_id: dict[str, Any] = {}
+        try:
+            for vas_device in await self._vas.get_devices():
+                vas_device_by_id[str(vas_device.id)] = vas_device
+        except VASError as e:
+            logger.warning(
+                "Bulk VAS device health fetch failed; using stream state only",
                 error=str(e),
                 device_count=len(devices),
             )
@@ -630,11 +688,15 @@ class StreamService:
         out: dict[UUID, dict] = {}
         for d in devices:
             vas_stream = vas_stream_by_camera.get(d.vas_device_id)
-            video_live = bool(vas_stream and vas_stream.state.value == "live")
+            vas_device = vas_device_by_id.get(d.vas_device_id)
             vas_stream_id = str(vas_stream.id) if vas_stream else None
             session = session_by_device.get(d.id)
             out[d.id] = self._build_status_dict(
-                session, video_live, vas_stream_id, absent_since.get(d.id)
+                session,
+                self._video_live(vas_device, vas_stream),
+                vas_stream_id,
+                absent_since.get(d.id),
+                health=self._health_fields(vas_device),
             )
 
         return out
@@ -645,6 +707,7 @@ class StreamService:
         video_live: bool,
         vas_stream_id: str | None,
         inference_absent_since: datetime | None = None,
+        health: dict | None = None,
     ) -> dict:
         """Shared shape for both get_combined_status and bulk variant.
 
@@ -653,6 +716,7 @@ class StreamService:
         which is "uncovered" too — and for longer — so callers must not
         read NULL as "fine".
         """
+        health = health or {key: None for key in HEALTH_FIELDS}
         if session is None:
             return {
                 "video_live": video_live,
@@ -663,8 +727,10 @@ class StreamService:
                 "model_id": None,
                 "model_config": None,
                 "inference_absent_since": inference_absent_since,
+                **health,
             }
         return {
+            **health,
             "video_live": video_live,
             "stream_id": vas_stream_id or session.vas_stream_id,
             "active": True,

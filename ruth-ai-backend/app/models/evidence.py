@@ -163,7 +163,13 @@ class Evidence(Base, TimestampMixin):
 
     @property
     def bookmark_url(self) -> str | None:
-        """Generate the Ruth AI proxy URL for bookmark retrieval."""
+        """URL of the playable clip: Ruth's Range-enabled MP4 proxy.
+
+        The browser's <video> loads this directly. It used to point at
+        /violations/{id}/video, which returns the clip's JSON *status*, so
+        every "Play Evidence" failed silently. VAS itself needs a Bearer
+        token a <video> tag can't send, hence the proxy (bookmark_analyses).
+        """
         if self.evidence_type != EvidenceType.BOOKMARK or not self.vas_bookmark_id:
             return None
-        return f"/api/v1/violations/{self.violation_id}/video"
+        return f"/api/v1/bookmarks/{self.vas_bookmark_id}/video"

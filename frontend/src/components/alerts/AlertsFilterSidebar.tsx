@@ -1,35 +1,10 @@
-import { useState, useCallback, useMemo } from 'react';
-import type { ViolationStatus, Device } from '../../state/api';
+import { useCallback, useMemo } from 'react';
+import type { ViolationStatus, Device, ViolationTypeOption, Severity } from '../../state/api';
+import { deviceDisplayName } from '../../state/api';
+import { buildTypeFilterEntries } from '../../utils/violationLabels';
+import { SEVERITY_LEVELS, severityLabel } from '../../utils/violationDisplay';
+import { DEFAULT_FILTERS, cameraAreas, type AlertFilters, type DateRange } from './alertFilters';
 import './AlertsFilterSidebar.css';
-
-/**
- * Filter state interface
- */
-export interface AlertFilters {
-  /** Selected statuses (empty = all) */
-  statuses: ViolationStatus[];
-  /** Start date for date range filter */
-  dateFrom: string | null;
-  /** End date for date range filter */
-  dateTo: string | null;
-  /** Selected camera ID (null = all) */
-  cameraId: string | null;
-}
-
-/**
- * Default filter state
- */
-export const DEFAULT_FILTERS: AlertFilters = {
-  statuses: ['open'], // Default to open violations
-  dateFrom: null,
-  dateTo: null,
-  cameraId: null,
-};
-
-/**
- * Date preset options
- */
-type DatePreset = 'today' | 'last7days' | 'last30days' | 'custom';
 
 interface AlertsFilterSidebarProps {
   /** Current filter state */
@@ -40,6 +15,10 @@ interface AlertsFilterSidebarProps {
   cameras: Device[];
   /** Whether cameras are loading */
   camerasLoading?: boolean;
+  /** Families and specific types that occur, for the type dropdown */
+  typeOptions: ViolationTypeOption[];
+  /** Whether type options are loading */
+  typeOptionsLoading?: boolean;
 }
 
 /**
@@ -52,82 +31,13 @@ const STATUS_OPTIONS: { value: ViolationStatus; label: string }[] = [
   { value: 'resolved', label: 'Resolved' },
 ];
 
-/**
- * Date preset options
- */
-const DATE_PRESETS: { value: DatePreset; label: string }[] = [
+const DATE_RANGES: { value: DateRange; label: string }[] = [
   { value: 'today', label: 'Today' },
-  { value: 'last7days', label: 'Last 7 Days' },
-  { value: 'last30days', label: 'Last 30 Days' },
+  { value: '7d', label: 'Last 7 Days' },
+  { value: '30d', label: 'Last 30 Days' },
+  { value: 'all', label: 'All Time' },
   { value: 'custom', label: 'Custom Range' },
 ];
-
-/**
- * Get date range for preset
- */
-function getDateRangeForPreset(preset: DatePreset): { from: string | null; to: string | null } {
-  const now = new Date();
-  const today = new Date(now.getFullYear(), now.getMonth(), now.getDate());
-
-  switch (preset) {
-    case 'today':
-      return {
-        from: today.toISOString().split('T')[0],
-        to: today.toISOString().split('T')[0],
-      };
-    case 'last7days': {
-      const weekAgo = new Date(today);
-      weekAgo.setDate(weekAgo.getDate() - 7);
-      return {
-        from: weekAgo.toISOString().split('T')[0],
-        to: today.toISOString().split('T')[0],
-      };
-    }
-    case 'last30days': {
-      const monthAgo = new Date(today);
-      monthAgo.setDate(monthAgo.getDate() - 30);
-      return {
-        from: monthAgo.toISOString().split('T')[0],
-        to: today.toISOString().split('T')[0],
-      };
-    }
-    case 'custom':
-      return { from: null, to: null };
-  }
-}
-
-/**
- * Determine active preset from date range
- */
-function getActivePreset(dateFrom: string | null, dateTo: string | null): DatePreset | null {
-  if (!dateFrom && !dateTo) return null;
-
-  const now = new Date();
-  const today = new Date(now.getFullYear(), now.getMonth(), now.getDate());
-  const todayStr = today.toISOString().split('T')[0];
-
-  // Check if today
-  if (dateFrom === todayStr && dateTo === todayStr) {
-    return 'today';
-  }
-
-  // Check if last 7 days
-  const weekAgo = new Date(today);
-  weekAgo.setDate(weekAgo.getDate() - 7);
-  if (dateFrom === weekAgo.toISOString().split('T')[0] && dateTo === todayStr) {
-    return 'last7days';
-  }
-
-  // Check if last 30 days
-  const monthAgo = new Date(today);
-  monthAgo.setDate(monthAgo.getDate() - 30);
-  if (dateFrom === monthAgo.toISOString().split('T')[0] && dateTo === todayStr) {
-    return 'last30days';
-  }
-
-  // Custom range
-  return 'custom';
-}
 
 /**
  * Alerts Filter Sidebar Component
@@ -142,18 +52,9 @@ export function AlertsFilterSidebar({
   onFiltersChange,
   cameras,
   camerasLoading = false,
+  typeOptions,
+  typeOptionsLoading = false,
 }: AlertsFilterSidebarProps) {
-  // Track whether custom date inputs are shown
-  const [showCustomDates, setShowCustomDates] = useState(
-    getActivePreset(filters.dateFrom, filters.dateTo) === 'custom'
-  );
-
-  // Determine active preset
-  const activePreset = useMemo(
-    () => getActivePreset(filters.dateFrom, filters.dateTo),
-    [filters.dateFrom, filters.dateTo]
-  );
-
   // Handle status toggle
   const handleStatusToggle = useCallback((status: ViolationStatus) => {
     const newStatuses = filters.statuses.includes(status)
@@ -166,19 +67,13 @@ export function AlertsFilterSidebar({
     });
   }, [filters, onFiltersChange]);
 
-  // Handle date preset selection
-  const handlePresetSelect = useCallback((preset: DatePreset) => {
-    if (preset === 'custom') {
-      setShowCustomDates(true);
-      return;
-    }
-
-    setShowCustomDates(false);
-    const { from, to } = getDateRangeForPreset(preset);
+  // Handle date range selection. Custom keeps any dates already entered.
+  const handleRangeSelect = useCallback((range: DateRange) => {
     onFiltersChange({
       ...filters,
-      dateFrom: from,
-      dateTo: to,
+      range,
+      dateFrom: range === 'custom' ? filters.dateFrom : null,
+      dateTo: range === 'custom' ? filters.dateTo : null,
     });
   }, [filters, onFiltersChange]);
 
@@ -205,9 +100,36 @@ export function AlertsFilterSidebar({
     });
   }, [filters, onFiltersChange]);
 
+  const handleSeverityToggle = useCallback((level: Severity) => {
+    onFiltersChange({
+      ...filters,
+      severities: filters.severities.includes(level)
+        ? filters.severities.filter((s) => s !== level)
+        : [...filters.severities, level],
+    });
+  }, [filters, onFiltersChange]);
+
+  const handleAreaChange = useCallback((value: string) => {
+    onFiltersChange({ ...filters, area: value || null });
+  }, [filters, onFiltersChange]);
+
+  const areas = useMemo(() => cameraAreas(cameras), [cameras]);
+
+  // Handle violation type selection
+  const handleTypeChange = useCallback((value: string) => {
+    onFiltersChange({
+      ...filters,
+      violationType: value,
+    });
+  }, [filters, onFiltersChange]);
+
+  const typeEntries = useMemo(
+    () => buildTypeFilterEntries(typeOptions, filters.violationType),
+    [typeOptions, filters.violationType]
+  );
+
   // Handle clear all filters
   const handleClearAll = useCallback(() => {
-    setShowCustomDates(false);
     onFiltersChange(DEFAULT_FILTERS);
   }, [onFiltersChange]);
 
@@ -216,9 +138,11 @@ export function AlertsFilterSidebar({
     return (
       filters.statuses.length !== 1 ||
       filters.statuses[0] !== 'open' ||
-      filters.dateFrom !== null ||
-      filters.dateTo !== null ||
-      filters.cameraId !== null
+      filters.range !== DEFAULT_FILTERS.range ||
+      filters.cameraId !== null ||
+      filters.violationType !== '' ||
+      filters.severities.length > 0 ||
+      filters.area !== null
     );
   }, [filters]);
 
@@ -259,24 +183,22 @@ export function AlertsFilterSidebar({
       <section className="alerts-filter-sidebar__section">
         <h3 className="alerts-filter-sidebar__section-title">Date Range</h3>
         <div className="alerts-filter-sidebar__presets">
-          {DATE_PRESETS.map(({ value, label }) => (
+          {DATE_RANGES.map(({ value, label }) => (
             <button
               key={value}
               type="button"
               className={`alerts-filter-sidebar__preset ${
-                (value === 'custom' && showCustomDates) ||
-                (value !== 'custom' && activePreset === value)
-                  ? 'alerts-filter-sidebar__preset--active'
-                  : ''
+                filters.range === value ? 'alerts-filter-sidebar__preset--active' : ''
               }`}
-              onClick={() => handlePresetSelect(value)}
+              onClick={() => handleRangeSelect(value)}
+              aria-pressed={filters.range === value}
             >
               {label}
             </button>
           ))}
         </div>
 
-        {showCustomDates && (
+        {filters.range === 'custom' && (
           <div className="alerts-filter-sidebar__date-inputs">
             <div className="alerts-filter-sidebar__date-field">
               <label htmlFor="date-from" className="alerts-filter-sidebar__date-label">
@@ -318,12 +240,80 @@ export function AlertsFilterSidebar({
           <option value="">All Cameras</option>
           {cameras.map((camera) => (
             <option key={camera.id} value={camera.id}>
-              {camera.name}
+              {deviceDisplayName(camera)}
             </option>
           ))}
         </select>
         {camerasLoading && (
           <span className="alerts-filter-sidebar__loading">Loading cameras...</span>
+        )}
+      </section>
+
+      {/* Severity Filter — the rule's severity, not confidence */}
+      <section className="alerts-filter-sidebar__section">
+        <h3 className="alerts-filter-sidebar__section-title">Severity</h3>
+        <div className="alerts-filter-sidebar__checkboxes">
+          {SEVERITY_LEVELS.map((level) => (
+            <label key={level} className="alerts-filter-sidebar__checkbox-label">
+              <input
+                type="checkbox"
+                checked={filters.severities.includes(level)}
+                onChange={() => handleSeverityToggle(level)}
+                className="alerts-filter-sidebar__checkbox"
+              />
+              <span className="alerts-filter-sidebar__checkbox-text">{severityLabel(level)}</span>
+            </label>
+          ))}
+        </div>
+      </section>
+
+      {/* Area Filter — the camera's manway */}
+      <section className="alerts-filter-sidebar__section">
+        <h3 className="alerts-filter-sidebar__section-title">Area</h3>
+        <select
+          value={filters.area ?? ''}
+          onChange={(e) => handleAreaChange(e.target.value)}
+          className="alerts-filter-sidebar__select"
+          aria-label="Camera area"
+          disabled={camerasLoading}
+        >
+          <option value="">All Areas</option>
+          {areas.map((area) => (
+            <option key={area} value={area}>
+              {area}
+            </option>
+          ))}
+        </select>
+      </section>
+
+      {/* Violation Type Filter — specific types grouped under their family */}
+      <section className="alerts-filter-sidebar__section">
+        <h3 className="alerts-filter-sidebar__section-title">Type</h3>
+        <select
+          value={filters.violationType}
+          onChange={(e) => handleTypeChange(e.target.value)}
+          className="alerts-filter-sidebar__select"
+          aria-label="Violation type"
+        >
+          <option value="">All Types</option>
+          {typeEntries.map((entry) =>
+            entry.kind === 'option' ? (
+              <option key={entry.option.value} value={entry.option.value}>
+                {entry.option.label}
+              </option>
+            ) : (
+              <optgroup key={entry.label} label={entry.label}>
+                {entry.options.map((option) => (
+                  <option key={option.value} value={option.value}>
+                    {option.label}
+                  </option>
+                ))}
+              </optgroup>
+            )
+          )}
+        </select>
+        {typeOptionsLoading && (
+          <span className="alerts-filter-sidebar__loading">Loading types...</span>
         )}
       </section>
     </aside>
