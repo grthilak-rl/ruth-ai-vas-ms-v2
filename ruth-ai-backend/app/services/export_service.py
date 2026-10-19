@@ -29,6 +29,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.logging import get_logger
 from app.models import Device, Violation
+from app.services.violation_labels import ViolationLabeler
 
 logger = get_logger(__name__)
 
@@ -168,8 +169,11 @@ class ExportService:
         output = StringIO()
         writer = csv.writer(output)
 
-        # Define columns
-        columns = ["id", "type", "camera_name", "status"]
+        labeler = ViolationLabeler.current()
+
+        # Define columns. type is the family (stable, filterable); type_detail
+        # the model's specific value; type_label the combined human label.
+        columns = ["id", "type", "type_detail", "type_label", "camera_name", "status"]
 
         if include_raw_confidence:
             columns.append("confidence_raw")
@@ -198,6 +202,8 @@ class ExportService:
             row = [
                 str(v.id),
                 v.type.value,
+                v.type_detail or "",
+                labeler.combined_label(v.type, v.type_detail, v.model_id),
                 v.camera_name,
                 v.status.value,
             ]
@@ -288,6 +294,8 @@ class ExportService:
             ws_summary[f"A{row}"] = status.title()
             ws_summary[f"B{row}"] = count
 
+        labeler = ViolationLabeler.current()
+
         # Violations List Sheet
         ws_violations = wb.create_sheet("Violations")
 
@@ -319,7 +327,7 @@ class ExportService:
 
             ws_violations.append([
                 str(v.id)[:8] + "...",  # Truncated UUID
-                v.type.value.replace("_", " ").title(),
+                labeler.combined_label(v.type, v.type_detail, v.model_id),
                 v.camera_name,
                 v.status.value.title(),
                 confidence_display,
@@ -400,7 +408,11 @@ class ExportService:
         # Summary section
         from collections import Counter
         status_counts = Counter(v.status.value for v in violations)
-        type_counts = Counter(v.type.value for v in violations)
+        labeler = ViolationLabeler.current()
+        # Broken down by specific type, like the analytics chart.
+        type_counts = Counter(
+            labeler.combined_label(v.type, v.type_detail, v.model_id) for v in violations
+        )
 
         elements.append(Paragraph("<b>Executive Summary</b>", styles['Heading2']))
         elements.append(Spacer(1, 12))
@@ -416,7 +428,7 @@ class ExportService:
         elements.append(Paragraph("<b>By Type:</b>", styles['Heading3']))
         for vtype, count in type_counts.most_common():
             pct = (count / len(violations) * 100) if violations else 0
-            elements.append(Paragraph(f"• {vtype.replace('_', ' ').title()}: {count} ({pct:.1f}%)", meta_style))
+            elements.append(Paragraph(f"• {vtype}: {count} ({pct:.1f}%)", meta_style))
 
         elements.append(PageBreak())
 
@@ -438,7 +450,9 @@ class ExportService:
                 confidence_display = "Low"
 
             table_data.append([
-                v.type.value.replace("_", " ").title(),
+                # The specific label alone: the 1.5" column can't hold
+                # "Zone Intrusion · Tank level critically high".
+                labeler.short_label(v.type, v.type_detail, v.model_id)[:28],
                 v.camera_name[:20],  # Truncate long names
                 v.status.value.title(),
                 confidence_display,

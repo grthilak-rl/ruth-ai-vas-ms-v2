@@ -8,7 +8,8 @@
   "classes": {"0": "no-gloves"},
   "rules": [
     {"id": "missing_gloves", "classes": ["no-gloves"], "min_confidence": 0.7,
-     "violation_type": "missing_gloves", "severity": "high"}
+     "violation_type": "missing_gloves", "severity": "high",
+     "display_name": "Missing gloves"}
   ],
   "performance": {"inference_time_hint_ms": 65, "recommended_fps": 2},
   "limits": {"max_memory_mb": 2048, "inference_timeout_ms": 5000},

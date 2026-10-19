@@ -11,6 +11,7 @@ import { DismissConfirmationDialog } from './DismissConfirmationDialog';
 import { Toast, type ToastType } from './Toast';
 import { AlertsListSkeleton } from './AlertsListSkeleton';
 import { Pagination } from '../ui';
+import { typeFilterToParams } from '../../utils/violationLabels';
 import './AlertsList.css';
 
 /** Default page size for violations list */
@@ -61,6 +62,9 @@ function filtersToQueryParams(filters: AlertFilters, page: number, pageSize: num
     camera_id: filters.cameraId || undefined,
     since,
     until,
+    // Family and/or specific type, filtered server-side so pagination and
+    // totals stay right.
+    ...typeFilterToParams(filters.violationType),
     sort_by: 'timestamp' as const,
     sort_order: 'desc' as const,
     page,
@@ -127,14 +131,14 @@ export function AlertsList({ filters }: AlertsListProps) {
 
   // Reset to page 1 when filters change
   useEffect(() => {
-    const filterKey = `${filters.statuses.join(',')}-${filters.dateFrom}-${filters.dateTo}-${filters.cameraId}`;
+    const filterKey = `${filters.statuses.join(',')}-${filters.dateFrom}-${filters.dateTo}-${filters.cameraId}-${filters.violationType}`;
 
     // Only reset page if filters actually changed (not on first render)
     if (prevFiltersRef.current !== null && prevFiltersRef.current !== filterKey) {
       setCurrentPage(1);
     }
     prevFiltersRef.current = filterKey;
-  }, [filters.statuses, filters.dateFrom, filters.dateTo, filters.cameraId]);
+  }, [filters.statuses, filters.dateFrom, filters.dateTo, filters.cameraId, filters.violationType]);
 
   // Handle page change
   const handlePageChange = useCallback((page: number) => {

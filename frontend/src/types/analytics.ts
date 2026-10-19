@@ -36,8 +36,16 @@ export interface CameraBreakdown {
 }
 
 export interface TypeBreakdown {
+  /** Family (fall_detected, ppe_violation, ...) */
   type: string;
+  /** Specific type within the family; null/absent for a family-only row */
+  type_detail?: string | null;
+  /** "PPE Violation · Missing gloves", or just "Fall Detected" */
   type_display: string;
+  /** Family label ("PPE Violation"); absent from older backends */
+  type_label?: string;
+  /** Specific label ("Missing gloves"); null for a family-only row */
+  detail_label?: string | null;
   count: number;
   percentage: number;
 }

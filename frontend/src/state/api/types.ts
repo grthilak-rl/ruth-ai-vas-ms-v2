@@ -323,8 +323,20 @@ export interface Violation {
   /** Unique identifier - treat as opaque UUID */
   id: UUID;
 
-  /** Detection type */
+  /** Detection type: the family (fall_detected, ppe_violation, ...) */
   type: ViolationType;
+
+  /**
+   * The specific type the model reported (e.g. missing_gloves), or null when
+   * it reported nothing more specific than `type`. Absent from older backends.
+   */
+  type_detail?: string | null;
+
+  /** Human label for the family ("PPE Violation"), from the backend. */
+  type_label?: string;
+
+  /** Human label for the specific type ("Missing gloves"), or null. */
+  detail_label?: string | null;
 
   /** Reference to device - camera MAY be deleted */
   camera_id: UUID;
@@ -701,6 +713,15 @@ export interface ViolationsQueryParams {
   /** Filter violations before this timestamp (ISO 8601) */
   until?: ISOTimestamp;
 
+  /** Filter by family (e.g. ppe_violation) */
+  type?: ViolationType;
+
+  /**
+   * Filter by specific type (e.g. missing_gloves); 'none' selects violations
+   * with no specific type.
+   */
+  type_detail?: string;
+
   /** Sort field - REQUIRED to avoid ordering assumptions */
   sort_by?: 'timestamp' | 'created_at' | 'updated_at';
 
@@ -820,4 +841,29 @@ export interface ChatMessage {
 
   /** Execution time in ms (assistant messages only) */
   executionTimeMs?: number | null;
+}
+
+/**
+ * One specific type within a family, for the type filter.
+ *
+ * Source: GET /api/v1/violations/types
+ */
+export interface ViolationTypeDetailOption {
+  /** Specific type, or null for the family's violations with none */
+  type_detail: string | null;
+  label: string;
+  count: number;
+}
+
+/** A violation family and the specific types seen under it. */
+export interface ViolationTypeOption {
+  type: ViolationType;
+  label: string;
+  count: number;
+  /** Empty when the family has no specific types */
+  details: ViolationTypeDetailOption[];
+}
+
+export interface ViolationTypesResponse {
+  items: ViolationTypeOption[];
 }

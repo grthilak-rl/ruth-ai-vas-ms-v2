@@ -5,6 +5,7 @@
  *
  * Source Endpoints:
  * - GET /api/v1/violations
+ * - GET /api/v1/violations/types
  * - GET /api/v1/violations/{id}
  * - PATCH /api/v1/violations/{id}
  *
@@ -20,11 +21,13 @@ import type {
   Violation,
   ViolationsListResponse,
   ViolationsQueryParams,
+  ViolationTypesResponse,
   EvidenceStatus,
 } from './types';
 import {
   isViolation,
   isViolationsListResponse,
+  isViolationTypesResponse,
   assertResponse,
 } from './validators';
 
@@ -52,6 +55,12 @@ function buildQueryString(params?: ViolationsQueryParams): string {
   }
   if (params.until) {
     searchParams.set('until', params.until);
+  }
+  if (params.type) {
+    searchParams.set('type', params.type);
+  }
+  if (params.type_detail) {
+    searchParams.set('type_detail', params.type_detail);
   }
   if (params.sort_by) {
     searchParams.set('sort_by', params.sort_by);
@@ -86,6 +95,17 @@ export async function fetchViolations(
   const queryString = buildQueryString(params);
   const response = await apiGet<unknown>(`${VIOLATIONS_PATH}${queryString}`);
   return assertResponse(response, isViolationsListResponse, 'ViolationsListResponse');
+}
+
+/**
+ * Families and the specific types seen under each, for the type filter.
+ *
+ * Only types that actually occur are listed, so the filter never offers an
+ * option that can only return nothing.
+ */
+export async function fetchViolationTypes(): Promise<ViolationTypesResponse> {
+  const response = await apiGet<unknown>(`${VIOLATIONS_PATH}/types`);
+  return assertResponse(response, isViolationTypesResponse, 'ViolationTypesResponse');
 }
 
 /**

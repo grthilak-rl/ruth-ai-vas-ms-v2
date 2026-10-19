@@ -1,5 +1,10 @@
 import type { Violation } from '../../state/api';
 import type { ConfidenceCategory } from '../../state';
+import {
+  LABEL_SEPARATOR,
+  violationDetailLabel,
+  violationTypeLabel,
+} from '../../utils/violationLabels';
 import './ViolationMetadata.css';
 
 interface ViolationMetadataProps {
@@ -25,20 +30,6 @@ function formatRelativeTime(isoTimestamp: string): string {
 
   const diffDays = Math.floor(diffHours / 24);
   return `${diffDays}d ago`;
-}
-
-/**
- * Get violation type display label
- */
-function getTypeLabel(type: Violation['type']): string {
-  switch (type) {
-    case 'fall_detected':
-      return 'Fall Detected';
-    case 'ppe_violation':
-      return 'PPE Violation';
-    default:
-      return type;
-  }
 }
 
 /**
@@ -83,7 +74,9 @@ export function ViolationMetadata({
 }: ViolationMetadataProps) {
   const relativeTime = formatRelativeTime(violation.timestamp);
   const statusLabel = getStatusLabel(violation.status);
-  const typeLabel = getTypeLabel(violation.type);
+  // "PPE Violation · Missing gloves", or just "Fall Detected".
+  const typeLabel = violationTypeLabel(violation);
+  const detailLabel = violationDetailLabel(violation);
 
   return (
     <div className="violation-metadata">
@@ -92,7 +85,17 @@ export function ViolationMetadata({
       <dl className="violation-metadata__list">
         <div className="violation-metadata__item">
           <dt className="violation-metadata__label">Type</dt>
-          <dd className="violation-metadata__value">{typeLabel}</dd>
+          <dd className="violation-metadata__value">
+            {/* Each half wraps as a unit, so a narrow column breaks at the
+                separator rather than mid-label ("Missing / gloves"). */}
+            <span className="violation-metadata__nowrap">{typeLabel}</span>
+            {detailLabel && (
+              <>
+                {LABEL_SEPARATOR}
+                <span className="violation-metadata__nowrap">{detailLabel}</span>
+              </>
+            )}
+          </dd>
         </div>
 
         <div className="violation-metadata__item">

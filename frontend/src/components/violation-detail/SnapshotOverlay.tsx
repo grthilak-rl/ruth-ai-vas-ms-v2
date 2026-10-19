@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useRef, useState, type ReactNode } from 'react';
 import type { DetectionBoundingBox } from '../../state/api';
 import './SnapshotOverlay.css';
 
@@ -11,6 +11,12 @@ interface SnapshotOverlayProps {
   alt: string;
   /** Used to name the exported file */
   violationId: string;
+  /**
+   * Drawn over the image itself (bottom-left), e.g. the "inferred frame"
+   * source tag. Rendered inside the stage so it is positioned against the
+   * picture, never against the controls bar underneath it.
+   */
+  stageBadge?: ReactNode;
 }
 
 /** Box + label colors, matching the live-view PPE overlay (PPE_COLORS). */
@@ -150,6 +156,7 @@ export function SnapshotOverlay({
   boundingBoxes,
   alt,
   violationId,
+  stageBadge,
 }: SnapshotOverlayProps) {
   const imgRef = useRef<HTMLImageElement>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
@@ -303,6 +310,7 @@ export function SnapshotOverlay({
           className="snapshot-overlay__canvas"
           aria-hidden="true"
         />
+        {stageBadge}
       </div>
 
       {hasBoxes ? (

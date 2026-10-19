@@ -180,17 +180,22 @@ export function EvidenceViewer({
                   : `Scene snapshot from ${cameraName}`
               }
               violationId={violationId}
-            />
-            <span
-              className="evidence-viewer__source"
-              title={
-                primaryIsFrame
-                  ? 'The exact frame the model analysed, so the boxes line up.'
-                  : 'A snapshot taken shortly after the detection, so the boxes may not line up.'
+              // On the image, not on the snapshot box: that box also holds
+              // the overlay controls, so bottom-anchoring against it put
+              // this tag on top of "Show detection overlay".
+              stageBadge={
+                <span
+                  className="evidence-viewer__source"
+                  title={
+                    primaryIsFrame
+                      ? 'The exact frame the model analysed, so the boxes line up.'
+                      : 'A snapshot taken shortly after the detection, so the boxes may not line up.'
+                  }
+                >
+                  {primaryIsFrame ? 'inferred frame' : 'scene snapshot'}
+                </span>
               }
-            >
-              {primaryIsFrame ? 'inferred frame' : 'scene snapshot'}
-            </span>
+            />
           </>
         ) : isSnapshotPreparing ? (
           <div className="evidence-viewer__placeholder evidence-viewer__placeholder--preparing">

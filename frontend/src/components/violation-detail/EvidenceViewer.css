@@ -191,9 +191,13 @@
  * the boxes will not line up with it. Saying which is showing is the
  * difference between evidence and a confusing picture. */
 .evidence-viewer__source {
+  /* Positioned against .snapshot-overlay__stage (the image), above the
+     detection canvas — see SnapshotOverlay's stageBadge. */
   position: absolute;
+  z-index: 1;
   left: 8px;
   bottom: 8px;
+  line-height: 1.4;
   padding: 2px 8px;
   font-size: 0.6875rem;
   letter-spacing: 0.02em;

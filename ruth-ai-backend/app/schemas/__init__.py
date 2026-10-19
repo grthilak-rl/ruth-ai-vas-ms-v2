@@ -88,6 +88,9 @@ from app.schemas.violation import (
     ViolationQueryParams,
     ViolationResponse,
     ViolationStatusUpdateRequest,
+    ViolationTypeDetailOption,
+    ViolationTypeOption,
+    ViolationTypesResponse,
 )
 from app.schemas.chat import (
     ChatErrorDetail,
@@ -123,6 +126,9 @@ __all__ = [
     "ViolationListResponse",
     "ViolationQueryParams",
     "ViolationStatusUpdateRequest",
+    "ViolationTypeDetailOption",
+    "ViolationTypeOption",
+    "ViolationTypesResponse",
     # Evidence schemas
     "EvidenceResponse",
     "SnapshotCreateRequest",

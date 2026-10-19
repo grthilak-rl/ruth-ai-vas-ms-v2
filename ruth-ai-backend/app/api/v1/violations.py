@@ -33,7 +33,12 @@ from app.schemas import (
     ViolationListResponse,
     ViolationResponse,
     ViolationStatusUpdateRequest,
+    ViolationTypeDetailOption,
+    ViolationTypeOption,
+    ViolationTypesResponse,
 )
+from app.models.enums import ViolationType
+from app.services.violation_labels import ViolationLabeler
 from app.services import (
     EvidenceVASError,
     NoActiveStreamError,
@@ -44,6 +49,9 @@ from app.services import (
 
 router = APIRouter(tags=["Violations"])
 logger = get_logger(__name__)
+
+#: ``type_detail`` filter value selecting violations with no specific type.
+NO_TYPE_DETAIL = "none"
 
 
 def build_evidence_summary(evidence_list: list[Evidence]) -> ViolationEvidenceSummary | None:
@@ -117,6 +125,17 @@ async def list_violations(
     ),
     since: datetime | None = Query(None, description="Violations after this timestamp"),
     until: datetime | None = Query(None, description="Violations before this timestamp"),
+    violation_type: ViolationType | None = Query(
+        None, alias="type", description="Filter by family (e.g. ppe_violation)"
+    ),
+    type_detail: str | None = Query(
+        None,
+        max_length=64,
+        description=(
+            "Filter by specific type (e.g. missing_gloves); "
+            f"'{NO_TYPE_DETAIL}' selects violations with no specific type"
+        ),
+    ),
     limit: int = Query(100, ge=1, le=1000, description="Maximum results"),
     offset: int = Query(0, ge=0, description="Pagination offset"),
 ) -> ViolationListResponse:
@@ -162,6 +181,17 @@ async def list_violations(
     if until is not None:
         stmt = stmt.where(Violation.timestamp <= until)
 
+    # Parsed as the enum, so an unknown family is a 422 rather than a
+    # database error from casting it to violation_type.
+    if violation_type is not None:
+        stmt = stmt.where(Violation.type == violation_type)
+
+    if type_detail is not None:
+        if type_detail.strip().lower() == NO_TYPE_DETAIL:
+            stmt = stmt.where(Violation.type_detail.is_(None))
+        else:
+            stmt = stmt.where(Violation.type_detail == type_detail.strip().lower())
+
     # Count total
     count_stmt = select(func.count()).select_from(stmt.subquery())
     count_result = await db.execute(count_stmt)
@@ -179,13 +209,16 @@ async def list_violations(
         returned=len(violations),
         status=violation_status,
         camera_id=str(camera_filter) if camera_filter else None,
+        type=violation_type.value if violation_type else None,
+        type_detail=type_detail,
     )
 
+    labeler = ViolationLabeler.current()
     return ViolationListResponse(
         items=[
             ViolationResponse(
                 id=v.id,
-                type=v.type.value,
+                **labeler.type_fields(v),
                 status=v.status.value,
                 camera_id=v.device_id,
                 camera_name=v.camera_name,
@@ -205,6 +238,62 @@ async def list_violations(
         ],
         total=total,
     )
+
+
+@router.get(
+    "/violations/types",
+    response_model=ViolationTypesResponse,
+    status_code=status.HTTP_200_OK,
+    summary="List violation types",
+    description="Families and the specific types seen under each, with labels and counts.",
+    responses={
+        500: {"model": ErrorResponse, "description": "Internal server error"},
+    },
+)
+async def list_violation_types(db: DBSession) -> ViolationTypesResponse:
+    """Options for the type filter: only types that actually occur.
+
+    Registered before /violations/{violation_id}, which would otherwise try
+    to parse "types" as a UUID and answer 422.
+    """
+    stmt = (
+        select(Violation.type, Violation.type_detail, func.count(Violation.id).label("count"))
+        .group_by(Violation.type, Violation.type_detail)
+    )
+    rows = (await db.execute(stmt)).all()
+    return ViolationTypesResponse(items=build_type_options(rows, ViolationLabeler.current()))
+
+
+def build_type_options(rows, labeler: ViolationLabeler) -> list[ViolationTypeOption]:
+    """Group (type, type_detail, count) rows into families, largest first.
+
+    A family whose violations all lack a specific type gets no details: its
+    single option is the family itself. A family mixing both lists the rows
+    with none as their own option, labelled with the family alone, so every
+    violation is reachable from the filter.
+    """
+    families: dict[str, ViolationTypeOption] = {}
+    for row in rows:
+        family = row.type.value if isinstance(row.type, ViolationType) else str(row.type)
+        option = families.setdefault(
+            family,
+            ViolationTypeOption(type=family, label=labeler.family_label(family), count=0),
+        )
+        option.count += row.count
+        option.details.append(
+            ViolationTypeDetailOption(
+                type_detail=row.type_detail,
+                label=labeler.detail_label(row.type_detail) or labeler.family_label(family),
+                count=row.count,
+            )
+        )
+
+    for option in families.values():
+        if all(d.type_detail is None for d in option.details):
+            option.details = []
+        else:
+            option.details.sort(key=lambda d: (-d.count, d.label))
+    return sorted(families.values(), key=lambda o: (-o.count, o.label))
 
 
 @router.get(
@@ -277,7 +366,7 @@ async def get_violation(
 
     return ViolationDetailResponse(
         id=violation.id,
-        type=violation.type.value,
+        **ViolationLabeler.current().type_fields(violation),
         status=violation.status.value,
         camera_id=violation.device_id,
         camera_name=violation.camera_name,
@@ -391,7 +480,7 @@ async def update_violation_status(
 
     return ViolationResponse(
         id=violation.id,
-        type=violation.type.value,
+        **ViolationLabeler.current().type_fields(violation),
         status=violation.status.value,
         camera_id=violation.device_id,
         camera_name=violation.camera_name,

@@ -100,3 +100,7 @@
 .violation-metadata__status--resolved .violation-metadata__status-dot {
   color: #34a853;
 }
+
+.violation-metadata__nowrap {
+  white-space: nowrap;
+}

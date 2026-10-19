@@ -92,6 +92,19 @@
 }
 
 .violation-card__type {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 0.375rem;
+  min-width: 0;
+}
+
+.violation-card__type-detail {
+  font-weight: 500;
+  color: #3c4043;
+}
+
+.violation-card__type-family {
+  font-size: 0.75rem;
   color: #999;
 }
 

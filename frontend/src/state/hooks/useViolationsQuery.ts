@@ -4,6 +4,7 @@ import { POLLING_INTERVALS } from '../pollingIntervals';
 import {
   fetchViolations,
   fetchViolation,
+  fetchViolationTypes,
   updateViolationStatus,
   getConfidenceCategory as apiGetConfidenceCategory,
   getConfidenceLabel,
@@ -31,6 +32,23 @@ export function useViolationsQuery(filters?: ViolationFilters) {
     queryFn: () => fetchViolations(filters),
     refetchInterval: POLLING_INTERVALS.VIOLATIONS,
     staleTime: POLLING_INTERVALS.VIOLATIONS / 2,
+    refetchIntervalInBackground: false,
+  });
+}
+
+/**
+ * Violation Types Query Hook
+ *
+ * Families and specific types that occur, for the Alerts type filter. Types
+ * change only when a model starts reporting something new, so this polls
+ * far less often than the list.
+ */
+export function useViolationTypesQuery() {
+  return useQuery({
+    queryKey: queryKeys.violations.types,
+    queryFn: fetchViolationTypes,
+    staleTime: 60_000,
+    refetchInterval: 5 * 60_000,
     refetchIntervalInBackground: false,
   });
 }

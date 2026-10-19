@@ -43,6 +43,14 @@ class ViolationResponse(BaseModel):
 
     id: uuid.UUID = Field(..., description="Violation UUID")
     type: str = Field(..., description="Violation type (e.g., fall_detected)")
+    type_detail: str | None = Field(
+        None,
+        description="Specific type the model reported (e.g. missing_gloves); null when it reported nothing more specific",
+    )
+    type_label: str = Field(..., description="Human label for the family (e.g. PPE Violation)")
+    detail_label: str | None = Field(
+        None, description="Human label for the specific type (e.g. Missing gloves), or null"
+    )
     status: str = Field(..., description="Violation status")
     camera_id: uuid.UUID = Field(..., description="Device/camera UUID")
     camera_name: str = Field(..., description="Camera display name")
@@ -73,6 +81,14 @@ class ViolationDetailResponse(BaseModel):
 
     id: uuid.UUID = Field(..., description="Violation UUID")
     type: str = Field(..., description="Violation type")
+    type_detail: str | None = Field(
+        None,
+        description="Specific type the model reported (e.g. missing_gloves); null when it reported nothing more specific",
+    )
+    type_label: str = Field(..., description="Human label for the family (e.g. PPE Violation)")
+    detail_label: str | None = Field(
+        None, description="Human label for the specific type (e.g. Missing gloves), or null"
+    )
     status: str = Field(..., description="Violation status")
     camera_id: uuid.UUID = Field(..., description="Device/camera UUID")
     camera_name: str = Field(..., description="Camera display name")
@@ -100,6 +116,34 @@ class ViolationListResponse(BaseModel):
 
     items: list[ViolationResponse] = Field(..., description="List of violations")
     total: int = Field(..., description="Total count of violations")
+
+
+class ViolationTypeDetailOption(BaseModel):
+    """One specific type within a family, for the type filter."""
+
+    type_detail: str | None = Field(
+        ..., description="Specific type, or null for violations with none"
+    )
+    label: str = Field(..., description="Label for the option")
+    count: int = Field(..., description="Violations with this type")
+
+
+class ViolationTypeOption(BaseModel):
+    """A violation family and the specific types seen under it."""
+
+    type: str = Field(..., description="Family (violation type enum value)")
+    label: str = Field(..., description="Family label")
+    count: int = Field(..., description="Violations in the family")
+    details: list[ViolationTypeDetailOption] = Field(
+        default_factory=list,
+        description="Specific types seen in this family; empty when it has none",
+    )
+
+
+class ViolationTypesResponse(BaseModel):
+    """Response schema for GET /api/v1/violations/types."""
+
+    items: list[ViolationTypeOption] = Field(..., description="Families, largest first")
 
 
 class ViolationQueryParams(BaseModel):

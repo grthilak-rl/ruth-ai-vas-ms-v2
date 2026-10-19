@@ -13,6 +13,7 @@ import type {
   HealthStatus,
   Violation,
   ViolationsListResponse,
+  ViolationTypesResponse,
   ViolationEvidence,
   EvidenceStatus,
   ViolationStatus,
@@ -233,6 +234,28 @@ export function isViolationsListResponse(value: unknown): value is ViolationsLis
 
   // Validate each item
   return items.every(isViolation);
+}
+
+/**
+ * Validate ViolationTypesResponse (GET /api/v1/violations/types)
+ */
+export function isViolationTypesResponse(value: unknown): value is ViolationTypesResponse {
+  if (!isObject(value) || !isArray(value.items)) return false;
+  return value.items.every(
+    (option) =>
+      isObject(option) &&
+      isString(option.type) &&
+      isString(option.label) &&
+      isNumber(option.count) &&
+      isArray(option.details) &&
+      option.details.every(
+        (detail) =>
+          isObject(detail) &&
+          isStringOrNull(detail.type_detail) &&
+          isString(detail.label) &&
+          isNumber(detail.count)
+      )
+  );
 }
 
 /**

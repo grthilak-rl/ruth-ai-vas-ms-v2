@@ -1,5 +1,6 @@
 import { useState, useCallback, useMemo } from 'react';
-import type { ViolationStatus, Device } from '../../state/api';
+import type { ViolationStatus, Device, ViolationTypeOption } from '../../state/api';
+import { buildTypeFilterEntries } from '../../utils/violationLabels';
 import './AlertsFilterSidebar.css';
 
 /**
@@ -14,6 +15,11 @@ export interface AlertFilters {
   dateTo: string | null;
   /** Selected camera ID (null = all) */
   cameraId: string | null;
+  /**
+   * Selected violation type ('' = all): a family ('ppe_violation') or one
+   * specific type ('ppe_violation:missing_gloves'). See violationLabels.
+   */
+  violationType: string;
 }
 
 /**
@@ -24,6 +30,7 @@ export const DEFAULT_FILTERS: AlertFilters = {
   dateFrom: null,
   dateTo: null,
   cameraId: null,
+  violationType: '',
 };
 
 /**
@@ -40,6 +47,10 @@ interface AlertsFilterSidebarProps {
   cameras: Device[];
   /** Whether cameras are loading */
   camerasLoading?: boolean;
+  /** Families and specific types that occur, for the type dropdown */
+  typeOptions: ViolationTypeOption[];
+  /** Whether type options are loading */
+  typeOptionsLoading?: boolean;
 }
 
 /**
@@ -142,6 +153,8 @@ export function AlertsFilterSidebar({
   onFiltersChange,
   cameras,
   camerasLoading = false,
+  typeOptions,
+  typeOptionsLoading = false,
 }: AlertsFilterSidebarProps) {
   // Track whether custom date inputs are shown
   const [showCustomDates, setShowCustomDates] = useState(
@@ -205,6 +218,19 @@ export function AlertsFilterSidebar({
     });
   }, [filters, onFiltersChange]);
 
+  // Handle violation type selection
+  const handleTypeChange = useCallback((value: string) => {
+    onFiltersChange({
+      ...filters,
+      violationType: value,
+    });
+  }, [filters, onFiltersChange]);
+
+  const typeEntries = useMemo(
+    () => buildTypeFilterEntries(typeOptions, filters.violationType),
+    [typeOptions, filters.violationType]
+  );
+
   // Handle clear all filters
   const handleClearAll = useCallback(() => {
     setShowCustomDates(false);
@@ -218,7 +244,8 @@ export function AlertsFilterSidebar({
       filters.statuses[0] !== 'open' ||
       filters.dateFrom !== null ||
       filters.dateTo !== null ||
-      filters.cameraId !== null
+      filters.cameraId !== null ||
+      filters.violationType !== ''
     );
   }, [filters]);
 
@@ -324,6 +351,37 @@ export function AlertsFilterSidebar({
         </select>
         {camerasLoading && (
           <span className="alerts-filter-sidebar__loading">Loading cameras...</span>
+        )}
+      </section>
+
+      {/* Violation Type Filter — specific types grouped under their family */}
+      <section className="alerts-filter-sidebar__section">
+        <h3 className="alerts-filter-sidebar__section-title">Type</h3>
+        <select
+          value={filters.violationType}
+          onChange={(e) => handleTypeChange(e.target.value)}
+          className="alerts-filter-sidebar__select"
+          aria-label="Violation type"
+        >
+          <option value="">All Types</option>
+          {typeEntries.map((entry) =>
+            entry.kind === 'option' ? (
+              <option key={entry.option.value} value={entry.option.value}>
+                {entry.option.label}
+              </option>
+            ) : (
+              <optgroup key={entry.label} label={entry.label}>
+                {entry.options.map((option) => (
+                  <option key={option.value} value={option.value}>
+                    {option.label}
+                  </option>
+                ))}
+              </optgroup>
+            )
+          )}
+        </select>
+        {typeOptionsLoading && (
+          <span className="alerts-filter-sidebar__loading">Loading types...</span>
         )}
       </section>
     </aside>
