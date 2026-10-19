@@ -233,6 +233,14 @@ export interface ViolationEvidence {
   /** VAS snapshot reference - MAY be null */
   snapshot_id: string | null;
 
+  /**
+   * The exact frame the model inferred, saved by Ruth when the violation
+   * fired. Prefer this wherever bounding boxes are drawn: the snapshot is a
+   * later VAS capture, so the boxes do not line up with it.
+   * null when no frame was saved (legacy violations, or saving failed).
+   */
+  frame_url?: string | null;
+  frame_status?: EvidenceStatus | null;
   /** Proxied URL - only valid if snapshot_status = "ready" */
   snapshot_url: string | null;
 
@@ -246,7 +254,8 @@ export interface ViolationEvidence {
   bookmark_url: string | null;
 
   /** Bookmark processing status */
-  bookmark_status: EvidenceStatus;
+  /** null means no clip was ever requested - distinct from "pending". */
+  bookmark_status: EvidenceStatus | null;
 
   /** Duration of video clip - MAY be absent */
   bookmark_duration_seconds?: number;

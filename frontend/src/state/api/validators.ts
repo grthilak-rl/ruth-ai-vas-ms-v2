@@ -54,6 +54,10 @@ function isStringOrNull(value: unknown): value is string | null {
   return value === null || isString(value);
 }
 
+function isStringOrNullOrUndefined(value: unknown): value is string | null | undefined {
+  return value === undefined || value === null || isString(value);
+}
+
 function isNumberOrNullOrUndefined(value: unknown): value is number | null | undefined {
   return value === undefined || value === null || isNumber(value);
 }
@@ -70,6 +74,17 @@ function isHealthStatus(value: unknown): value is HealthStatus {
 const EVIDENCE_STATUSES: EvidenceStatus[] = ['pending', 'processing', 'ready', 'failed'];
 function isEvidenceStatus(value: unknown): value is EvidenceStatus {
   return isString(value) && EVIDENCE_STATUSES.includes(value as EvidenceStatus);
+}
+/**
+ * A status that may be absent.
+ *
+ * null means "this kind of evidence was never requested", which is a
+ * different thing from 'pending' ("one is on its way"). The backend sends
+ * null for bookmark_status when no clip was asked for, and for frame_status
+ * on violations recorded before frames were saved.
+ */
+function isEvidenceStatusOrNullish(value: unknown): value is EvidenceStatus | null | undefined {
+  return value === null || value === undefined || isEvidenceStatus(value);
 }
 
 const VIOLATION_STATUSES: ViolationStatus[] = ['open', 'reviewed', 'dismissed', 'resolved'];
@@ -113,6 +128,8 @@ export function isViolationEvidence(value: unknown): value is ViolationEvidence 
   if (!isObject(value)) return false;
 
   const {
+    frame_url,
+    frame_status,
     snapshot_id,
     snapshot_url,
     snapshot_status,
@@ -122,13 +139,21 @@ export function isViolationEvidence(value: unknown): value is ViolationEvidence 
     bookmark_duration_seconds,
   } = value;
 
+  // Every status here is nullish-tolerant on purpose. Rejecting an
+  // unexpected null is how the whole Violations page went blank when the
+  // backend started sending bookmark_status: null — isViolationEvidence
+  // returned false, which failed isViolation, which failed
+  // items.every(...) for the entire response. A validator guarding a
+  // display surface should degrade, not black out.
   return (
+    isStringOrNullOrUndefined(frame_url) &&
+    isEvidenceStatusOrNullish(frame_status) &&
     isStringOrNull(snapshot_id) &&
     isStringOrNull(snapshot_url) &&
-    isEvidenceStatus(snapshot_status) &&
+    isEvidenceStatusOrNullish(snapshot_status) &&
     isStringOrNull(bookmark_id) &&
     isStringOrNull(bookmark_url) &&
-    isEvidenceStatus(bookmark_status) &&
+    isEvidenceStatusOrNullish(bookmark_status) &&
     isNumberOrNullOrUndefined(bookmark_duration_seconds)
   );
 }
