@@ -64,7 +64,7 @@ async def init_database() -> None:
         pool_size=settings.database_pool_size,
         max_overflow=settings.database_pool_overflow,
         pool_pre_ping=True,  # Verify connections before use
-        echo=settings.is_development,  # SQL logging in development
+        echo=settings.database_echo,  # off by default; see Settings.database_echo
     )
 
     # Create session factory

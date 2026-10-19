@@ -202,6 +202,44 @@ class Settings(BaseSettings):
         description="NLP Chat Service request timeout (LLM calls can be slow)",
     )
 
+    database_echo: bool = Field(
+        default=False,
+        description=(
+            "Log every SQL statement. Was tied to ruth_ai_env == "
+            "'development', which this deployment runs as — so the plant has "
+            "been logging every statement at INFO, tens of lines per second, "
+            "drowning the application log. Separated out because the other "
+            "things that flag controls (/docs, /redoc, /openapi.json) are "
+            "wanted here and SQL echo is not."
+        ),
+    )
+
+    # Violation evidence: the inferred frame, saved by Ruth
+    evidence_frame_dir: str = Field(
+        default="/evidence/frames",
+        description=(
+            "Where the JPEG the model actually inferred is written when a "
+            "violation fires. Must be a mounted volume. If it is missing or "
+            "unwritable, frame evidence is skipped with a warning and the "
+            "violation is still written — losing a picture must never lose "
+            "the violation."
+        ),
+    )
+    evidence_frame_enabled: bool = Field(
+        default=True,
+        description="Save the inferred frame with each violation.",
+    )
+    evidence_bookmark_cooldown_seconds: int = Field(
+        default=60,
+        ge=0,
+        description=(
+            "Per camera, the minimum gap between requesting video clips. A "
+            "busy camera can fire violations every few seconds and each clip "
+            "costs VAS real work; within the cooldown the violation is still "
+            "written and linked to the most recent clip for that camera."
+        ),
+    )
+
     # Project archiving ("Start new project")
     project_backup_dir: str = Field(
         default="/var/backups/ruth-ai",

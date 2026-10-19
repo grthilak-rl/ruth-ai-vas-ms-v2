@@ -125,6 +125,13 @@ def configure_logging() -> None:
     for handler in root_logger.handlers:
         handler.setFormatter(formatter)
 
+    # Third-party loggers that narrate at INFO. Measured on the HPCL
+    # deployment: httpx alone wrote ~1,400 lines a minute, one per outbound
+    # call, every one of which we already log ourselves with context the
+    # httpx line does not have. Warnings and errors still come through.
+    for noisy in ("httpx", "httpcore", "hpack", "h11"):
+        logging.getLogger(noisy).setLevel(logging.WARNING)
+
 
 def get_logger(name: str | None = None) -> structlog.stdlib.BoundLogger:
     """Get a configured logger instance.
