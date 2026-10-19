@@ -1960,7 +1960,17 @@ class InferenceLoopService:
                     bookmark = await self._vas_client.create_bookmark(
                         vas_stream_id,
                         BookmarkCreateRequest(
-                            source="live",
+                            # historical, not live. For source="live" VAS
+                            # overwrites center_timestamp with utcnow() and
+                            # then picks the most recent segments by mtime —
+                            # it never reads the timestamps at all. The clip
+                            # landed near the violation only because the
+                            # request follows it by a second or so, and the
+                            # stored 5s-either-side window described a cut
+                            # that had not happened. historical honours the
+                            # timestamps, so the clip is actually centred on
+                            # the violation.
+                            source="historical",
                             label=f"Violation: {violation_type}",
                             event_type=violation.type.value,
                             confidence=violation.confidence,

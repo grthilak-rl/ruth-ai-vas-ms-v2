@@ -1,6 +1,7 @@
 import { useState, useCallback } from 'react';
 import type { DetectionBoundingBox, ViolationEvidence } from '../../state/api';
 import { SnapshotOverlay } from './SnapshotOverlay';
+import { RequestClipButton } from './RequestClipButton';
 import './EvidenceViewer.css';
 
 // Default evidence when backend doesn't provide one
@@ -27,6 +28,8 @@ interface EvidenceViewerProps {
    * The stored snapshot is never annotated (it is training data).
    */
   boundingBoxes?: DetectionBoundingBox[] | null;
+  /** Refetch the violation after a clip is requested or finishes. */
+  onEvidenceChanged?: () => void;
 }
 
 /**
@@ -71,6 +74,7 @@ export function EvidenceViewer({
   timestamp,
   violationId,
   boundingBoxes,
+  onEvidenceChanged,
 }: EvidenceViewerProps) {
   const [isVideoPlaying, setIsVideoPlaying] = useState(false);
   const [videoError, setVideoError] = useState(false);
@@ -215,7 +219,7 @@ export function EvidenceViewer({
         )}
 
         {/* Play video button (overlay on snapshot) */}
-        {!isVideoPlaying && (isVideoReady || isVideoPreparing) && (
+        {!isVideoPlaying && isVideoReady && (
           <div className="evidence-viewer__play-overlay">
             {isVideoReady ? (
               <button
@@ -225,14 +229,17 @@ export function EvidenceViewer({
               >
                 ▶ Play Evidence
               </button>
-            ) : isVideoPreparing ? (
-              <span className="evidence-viewer__play-preparing">
-                Preparing video...
-              </span>
             ) : null}
           </div>
         )}
       </div>
+
+      {/* Clip: request it when there is none, show progress while it is cut */}
+      <RequestClipButton
+        violationId={violationId}
+        bookmarkStatus={evidence.bookmark_status}
+        onChanged={onEvidenceChanged}
+      />
 
       {/* Timestamp footer */}
       <div className="evidence-viewer__footer">

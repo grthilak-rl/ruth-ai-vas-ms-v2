@@ -202,3 +202,52 @@
   border-radius: 3px;
   pointer-events: none;
 }
+
+/* Request clip. Shown only when there is no playable clip: a violation
+ * usually has none because the 60 s auto-clip cooldown skipped it, not
+ * because the footage is gone. */
+.request-clip {
+  display: flex;
+  align-items: center;
+  gap: 0.625rem;
+  padding: 0.625rem 0.875rem;
+  border-top: 1px solid #ececec;
+  font-size: 0.8125rem;
+}
+
+.request-clip__button {
+  padding: 0.375rem 0.875rem;
+  font-size: 0.8125rem;
+  font-weight: 500;
+  color: #fff;
+  background: #1a73e8;
+  border: none;
+  border-radius: 4px;
+  cursor: pointer;
+}
+
+.request-clip__button:disabled {
+  color: #767676;
+  background: #ededed;
+  cursor: not-allowed;
+}
+
+.request-clip--working {
+  color: #555;
+}
+
+.request-clip__spinner {
+  width: 13px;
+  height: 13px;
+  border: 2px solid #d4d4d4;
+  border-top-color: #1a73e8;
+  border-radius: 50%;
+  animation: request-clip-spin 0.9s linear infinite;
+}
+
+@keyframes request-clip-spin {
+  to { transform: rotate(360deg); }
+}
+
+.request-clip__note { color: #8a6d00; }
+.request-clip__error { color: #b3261e; }

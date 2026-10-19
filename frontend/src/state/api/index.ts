@@ -117,8 +117,12 @@ export {
   isSnapshotReady,
   isVideoReady,
   getEvidenceDisplayState,
+  fetchClipAvailability,
+  requestViolationClip,
 } from './violations.api';
 export type {
+  ClipAvailability,
+  ClipRequestResult,
   ConfidenceCategory,
   EvidenceDisplayState,
   UpdateViolationRequest,

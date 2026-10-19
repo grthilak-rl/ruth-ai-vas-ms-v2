@@ -12,6 +12,7 @@ import json
 import time
 from collections.abc import Sequence
 from contextlib import asynccontextmanager
+from datetime import datetime
 from typing import Any, AsyncIterator
 
 import httpx
@@ -852,6 +853,32 @@ class VASClient:
     # -------------------------------------------------------------------------
     # Bookmark APIs
     # -------------------------------------------------------------------------
+
+    async def get_stream_coverage(
+        self,
+        stream_id: str,
+        at: datetime,
+        before_seconds: int = 5,
+        after_seconds: int = 5,
+    ) -> dict:
+        """Can a clip be cut around `at` for this stream?
+
+        VAS answers from the same segment scan its extractor performs, so a
+        True here means the cut will find footage — not that it probably
+        will. Also returns the camera's oldest and newest recorded moment,
+        which is what lets the UI say *why* a clip is unavailable instead of
+        just greying out a button.
+        """
+        response = await self._request(
+            "GET",
+            f"/v2/streams/{stream_id}/coverage",
+            params={
+                "at": at.isoformat(),
+                "before_seconds": before_seconds,
+                "after_seconds": after_seconds,
+            },
+        )
+        return response.json()
 
     async def create_bookmark(
         self,

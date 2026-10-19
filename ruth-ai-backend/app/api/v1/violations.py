@@ -10,7 +10,7 @@ These endpoints delegate to ViolationService and EvidenceService.
 No business logic is implemented here.
 """
 
-from datetime import datetime
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from uuid import UUID
 
@@ -22,7 +22,7 @@ from sqlalchemy.orm import selectinload
 from app.core.config import get_settings
 from app.core.logging import get_logger
 from app.deps import DBSession, EvidenceServiceDep, VASClientDep, ViolationServiceDep
-from app.models import Evidence, EvidenceType, Violation
+from app.models import Evidence, EvidenceStatus, EvidenceType, StreamSession, Violation
 from app.schemas import (
     ErrorResponse,
     SnapshotCreateRequest,
@@ -407,6 +407,227 @@ async def update_violation_status(
         created_at=violation.created_at,
         updated_at=violation.updated_at,
     )
+
+
+#: A clip covers [violation - CLIP_BEFORE, violation + CLIP_AFTER].
+CLIP_BEFORE_SECONDS = 5
+CLIP_AFTER_SECONDS = 5
+#: Margin required before another violation's clip is treated as covering
+#: this one. Without it a violation 4.99 s away would "reuse" a clip in
+#: which it sits on the very last frame.
+CLIP_REUSE_MARGIN_SECONDS = 1
+
+
+async def _stream_id_for(db: DBSession, violation: Violation) -> str | None:
+    """The VAS stream a violation's camera is currently streaming on."""
+    result = await db.execute(
+        select(StreamSession.vas_stream_id)
+        .where(
+            StreamSession.device_id == violation.device_id,
+            StreamSession.vas_stream_id.isnot(None),
+        )
+        .order_by(StreamSession.created_at.desc())
+        .limit(1)
+    )
+    return result.scalars().first()
+
+
+@router.get(
+    "/violations/{violation_id}/clip/availability",
+    summary="Can a clip still be cut for this violation?",
+    description=(
+        "Proxies the VAS coverage check, which scans the same segments the "
+        "extractor would use. Not a fixed retention window: recordings are "
+        "pruned by disk and by when each camera started, which differ per "
+        "camera."
+    ),
+    responses={404: {"model": ErrorResponse, "description": "Violation not found"}},
+)
+async def get_clip_availability(
+    violation_id: UUID,
+    db: DBSession,
+    vas_client: VASClientDep,
+) -> dict:
+    violation = await db.get(Violation, violation_id)
+    if violation is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND, detail="Violation not found"
+        )
+    stream_id = await _stream_id_for(db, violation)
+    if not stream_id:
+        return {
+            "available": False,
+            "reason": "this camera has no VAS stream on record",
+            "oldest_recording": None,
+        }
+    try:
+        coverage = await vas_client.get_stream_coverage(
+            stream_id,
+            violation.timestamp,
+            CLIP_BEFORE_SECONDS,
+            CLIP_AFTER_SECONDS,
+        )
+    except Exception as e:
+        # Unknown is not the same as unavailable: a VAS blip must not make
+        # the button permanently claim the footage is gone.
+        logger.warning("Clip availability check failed", violation_id=str(violation_id), error=str(e))
+        return {"available": False, "reason": "could not reach the recording service", "oldest_recording": None}
+    return {
+        "available": bool(coverage.get("available")),
+        "reason": coverage.get("reason"),
+        "oldest_recording": coverage.get("oldest_recording"),
+        "newest_recording": coverage.get("newest_recording"),
+    }
+
+
+@router.post(
+    "/violations/{violation_id}/clip",
+    summary="Request a video clip for this violation",
+    status_code=status.HTTP_202_ACCEPTED,
+    description=(
+        "Idempotent. Returns the existing clip if this violation already has "
+        "one, reuses a clip from a nearby violation on the same camera if it "
+        "covers this moment, and only then asks VAS to cut a new one."
+    ),
+    responses={
+        404: {"model": ErrorResponse, "description": "Violation not found"},
+        409: {"model": ErrorResponse, "description": "Recording no longer available"},
+    },
+)
+async def request_violation_clip(
+    violation_id: UUID,
+    db: DBSession,
+    vas_client: VASClientDep,
+) -> dict:
+    from app.integrations.vas.models import BookmarkCreateRequest
+
+    violation = await db.get(Violation, violation_id)
+    if violation is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND, detail="Violation not found"
+        )
+
+    # 1. This violation already has a clip, in any state. Returning the
+    #    pending one is what makes a double-click harmless.
+    existing = (
+        await db.execute(
+            select(Evidence).where(
+                Evidence.violation_id == violation_id,
+                Evidence.evidence_type == EvidenceType.BOOKMARK,
+            )
+        )
+    ).scalars().first()
+    if existing is not None and existing.status != EvidenceStatus.FAILED:
+        return {"status": existing.status.value, "reused": "own", "bookmark_id": existing.vas_bookmark_id}
+
+    # 2. A clip cut for another violation on the same camera, close enough in
+    #    time that this moment is inside it. This is the auto-clip cooldown
+    #    case: the violation was skipped precisely because a clip had just
+    #    been cut, and that clip very likely contains it.
+    window = CLIP_BEFORE_SECONDS - CLIP_REUSE_MARGIN_SECONDS
+    neighbour = (
+        await db.execute(
+            select(Evidence)
+            .join(Violation, Violation.id == Evidence.violation_id)
+            .where(
+                Evidence.evidence_type == EvidenceType.BOOKMARK,
+                Evidence.status.in_([EvidenceStatus.READY, EvidenceStatus.PROCESSING]),
+                Evidence.vas_bookmark_id.isnot(None),
+                Violation.device_id == violation.device_id,
+                Violation.timestamp
+                >= violation.timestamp - timedelta(seconds=window),
+                Violation.timestamp
+                <= violation.timestamp + timedelta(seconds=window),
+            )
+            .order_by(Evidence.created_at.desc())
+            .limit(1)
+        )
+    ).scalars().first()
+    if neighbour is not None:
+        now = datetime.now(timezone.utc)
+        db.add(
+            Evidence(
+                violation_id=violation_id,
+                evidence_type=EvidenceType.BOOKMARK,
+                status=neighbour.status,
+                vas_bookmark_id=neighbour.vas_bookmark_id,
+                bookmark_duration_seconds=neighbour.bookmark_duration_seconds,
+                requested_at=now,
+                ready_at=neighbour.ready_at,
+            )
+        )
+        await db.commit()
+        logger.info(
+            "Linked an existing clip to a violation",
+            violation_id=str(violation_id), vas_bookmark_id=neighbour.vas_bookmark_id,
+        )
+        return {"status": neighbour.status.value, "reused": "neighbour", "bookmark_id": neighbour.vas_bookmark_id}
+
+    # 3. Cut a new one — but only if the footage is actually there.
+    stream_id = await _stream_id_for(db, violation)
+    if not stream_id:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="This camera has no VAS stream on record",
+        )
+    coverage = await vas_client.get_stream_coverage(
+        stream_id, violation.timestamp, CLIP_BEFORE_SECONDS, CLIP_AFTER_SECONDS
+    )
+    if not coverage.get("available"):
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail=coverage.get("reason") or "Recording no longer available",
+        )
+
+    now = datetime.now(timezone.utc)
+    evidence = existing or Evidence(
+        violation_id=violation_id,
+        evidence_type=EvidenceType.BOOKMARK,
+        requested_at=now,
+    )
+    evidence.status = EvidenceStatus.PENDING
+    evidence.error_message = None
+    evidence.requested_at = now
+    evidence.bookmark_duration_seconds = CLIP_BEFORE_SECONDS + CLIP_AFTER_SECONDS
+    db.add(evidence)
+    await db.commit()
+    await db.refresh(evidence)
+
+    try:
+        bookmark = await vas_client.create_bookmark(
+            stream_id,
+            BookmarkCreateRequest(
+                # historical, not live: live ignores the timestamps entirely
+                # and cuts the most recent segments, which for an old
+                # violation would be footage of right now.
+                source="historical",
+                label=f"Violation: {violation.type.value}",
+                event_type=violation.type.value,
+                confidence=violation.confidence,
+                before_seconds=CLIP_BEFORE_SECONDS,
+                after_seconds=CLIP_AFTER_SECONDS,
+                center_timestamp=violation.timestamp,
+                created_by="ruth-ai-operator-request",
+                metadata={"violation_id": str(violation_id), "requested": "manual"},
+            ),
+        )
+    except Exception as e:
+        evidence.status = EvidenceStatus.FAILED
+        evidence.error_message = str(e)[:1000]
+        await db.commit()
+        raise HTTPException(
+            status_code=status.HTTP_502_BAD_GATEWAY,
+            detail="Could not request the clip from the recording service",
+        ) from e
+
+    evidence.vas_bookmark_id = bookmark.id
+    evidence.status = EvidenceStatus.PROCESSING
+    await db.commit()
+    logger.info(
+        "Operator requested a violation clip",
+        violation_id=str(violation_id), vas_bookmark_id=bookmark.id,
+    )
+    return {"status": "processing", "reused": None, "bookmark_id": bookmark.id}
 
 
 @router.get(

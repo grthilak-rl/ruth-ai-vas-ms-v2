@@ -15,7 +15,7 @@
  * - F6 §10.1: Optimistic update with rollback on failure
  */
 
-import { apiGet, apiPatch } from './client';
+import { apiGet, apiPatch, apiPost } from './client';
 import type {
   Violation,
   ViolationsListResponse,
@@ -99,6 +99,46 @@ export async function fetchViolations(
 export async function fetchViolation(id: string): Promise<Violation> {
   const response = await apiGet<unknown>(`${VIOLATIONS_PATH}/${id}`);
   return assertResponse(response, isViolation, 'Violation');
+}
+
+// ============================================================================
+// Clips
+// ============================================================================
+
+export interface ClipAvailability {
+  available: boolean;
+  reason?: string | null;
+  /** Oldest moment this camera still has footage for, ISO 8601. */
+  oldest_recording?: string | null;
+  newest_recording?: string | null;
+}
+
+export interface ClipRequestResult {
+  status: string;
+  /** 'own' | 'neighbour' | null - whether an existing clip was linked. */
+  reused: string | null;
+  bookmark_id: string | null;
+}
+
+/**
+ * Whether a clip can still be cut for this violation.
+ *
+ * A real check against the recordings, not a fixed retention window:
+ * reach differs per camera (when each started recording) and shifts as
+ * disk is pruned.
+ */
+export async function fetchClipAvailability(id: string): Promise<ClipAvailability> {
+  return (await apiGet<ClipAvailability>(
+    `${VIOLATIONS_PATH}/${id}/clip/availability`
+  )) as ClipAvailability;
+}
+
+/** Ask for a clip. Idempotent: safe to call twice. */
+export async function requestViolationClip(id: string): Promise<ClipRequestResult> {
+  return (await apiPost<ClipRequestResult>(
+    `${VIOLATIONS_PATH}/${id}/clip`,
+    {}
+  )) as ClipRequestResult;
 }
 
 // ============================================================================

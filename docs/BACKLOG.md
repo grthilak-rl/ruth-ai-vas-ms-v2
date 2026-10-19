@@ -5,6 +5,60 @@ investigation. Newest first.
 
 ---
 
+## BL-13 · The clip extractor cannot read cold storage
+
+**Status:** open · **Found:** 2026-10-19 (building Request clip) ·
+**Area:** VAS `extract_bookmark_video`, storage tiering
+
+**The trap.** `extract_bookmark_video` resolves segments under
+`get_hot_base()` only. It never looks at `cold_storage_path`. So the
+moment anyone enables the backup scheduler with `delete_after_backup`,
+clips silently stop being cuttable beyond `hot_retention_days` — the
+footage still exists, in cold, and the extractor cannot see it.
+
+Nothing fails loudly. A clip request for an older violation returns
+"recording not available", which is indistinguishable from footage that
+was genuinely deleted.
+
+**Current settings keep this dormant, by accident rather than design:**
+
+| setting | value | effect |
+|---|---|---|
+| `backup_enabled` | `false` | nothing is copied to cold |
+| `delete_after_backup` | `false` | nothing is deleted from hot |
+| `scheduler_status` | `disabled` | the job does not run |
+| `hot_retention_days` | `7` | **inert while the above hold** |
+
+Measured 2026-10-19: segments reach back to 10-15/10-16 per camera —
+further than 7 days of retention would allow — because nothing prunes
+them. ffmpeg's own `delete_segments` does not reach old date
+directories either: the playlist is capped at its 14,400 entries (~40 h)
+while 55,122 segments sit on disk for 75088.
+
+**Consequence for the product.** Clip reach today is "since this camera
+started recording", which covers the whole HPCL project. Turning on
+backup would cut that to 7 days with no warning and no error anyone
+would recognise.
+
+**What a fix looks like**, in increasing order of cost:
+
+1. **Refuse the combination.** Reject `delete_after_backup: true` while
+   the extractor is hot-only, or at minimum warn loudly in the storage
+   config API. Cheapest, and it prevents the silent failure.
+2. **Teach the extractor the cold tier.** Scan cold when the hot scan
+   finds nothing, and report in the coverage endpoint which tier
+   answered. `GET /v2/streams/{id}/coverage` already exists and would
+   carry the extra field.
+3. **Restore-on-demand.** Cold may be slower or remote; a clip request
+   that needs cold becomes a longer job with its own status. Only worth
+   it if cold ever moves off local disk.
+
+Disk is not forcing the issue: ~57 GB/day across 12 cameras against
+15 TB free is roughly 260 days. The risk is a well-meaning change to the
+storage settings, not capacity.
+
+---
+
 ## BL-12 · Frame-tap stalls: 6.3% of fetches take over a second
 
 **Status:** open, not investigated · **Found:** 2026-10-18 (measuring
