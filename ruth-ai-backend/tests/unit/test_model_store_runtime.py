@@ -261,16 +261,21 @@ def test_read_enabled_models(tmp_path):
         {"id": "a", "violation_type": "missing_harness", "requires_zone": "work_at_height"},
     ])
     write_manifest(tmp_path, "harness", [{"id": "b", "violation_type": "x"}], version="0.9.0")
+    # A genuinely non-PPE model, for the reports_ppe=False branch. This used
+    # to be `harness`, which worked only because `missing_harness` was
+    # unmapped; it is now a real PPE type, so the branch needed its own case.
+    write_manifest(tmp_path, "fencing", [{"id": "z", "violation_type": "zone_intrusion"}])
     (tmp_path / "broken" / "1.0.0").mkdir(parents=True)
     (tmp_path / "broken" / "1.0.0" / "store_manifest.json").write_text("{not json")
 
     models = read_enabled_models(tmp_path)
-    assert set(models) == {"hard_hat", "harness"}
+    assert set(models) == {"hard_hat", "harness", "fencing"}
     assert models["hard_hat"].reports_ppe is True
     assert models["harness"].version == "1.0.0"
     assert models["harness"].all_rules_need_zone is True
     assert models["harness"].zone_required_rules == ("a",)
-    assert models["harness"].reports_ppe is False
+    assert models["harness"].reports_ppe is True  # missing_harness is PPE
+    assert models["fencing"].reports_ppe is False
     assert read_enabled_models(tmp_path / "missing") == {}
 
 

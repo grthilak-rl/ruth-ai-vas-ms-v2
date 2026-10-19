@@ -185,3 +185,20 @@
   font-size: 0.8125rem;
   color: #f9a825;
 }
+
+/* Which image is on screen. The inferred frame is what the boxes were
+ * computed on; the scene snapshot is a later capture of the same camera and
+ * the boxes will not line up with it. Saying which is showing is the
+ * difference between evidence and a confusing picture. */
+.evidence-viewer__source {
+  position: absolute;
+  left: 8px;
+  bottom: 8px;
+  padding: 2px 8px;
+  font-size: 0.6875rem;
+  letter-spacing: 0.02em;
+  color: #fff;
+  background: rgba(0, 0, 0, 0.62);
+  border-radius: 3px;
+  pointer-events: none;
+}

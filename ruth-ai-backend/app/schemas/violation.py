@@ -18,12 +18,23 @@ class ViolationEvidenceSummary(BaseModel):
     Per F6 §3.4, evidence URLs are only valid when status = 'ready'.
     """
 
+    #: The frame the model actually inferred, saved by Ruth. Prefer this over
+    #: the snapshot wherever the bounding boxes are drawn: the snapshot is a
+    #: later capture, so the boxes do not line up with it.
+    frame_url: str | None = Field(None, description="Inferred-frame URL (if ready)")
+    frame_status: str | None = Field(
+        None,
+        description="Inferred-frame status, or null when no frame was saved",
+    )
     snapshot_id: str | None = Field(None, description="VAS snapshot ID")
     snapshot_url: str | None = Field(None, description="Snapshot URL (if ready)")
     snapshot_status: str = Field(default="pending", description="Snapshot status")
     bookmark_id: str | None = Field(None, description="VAS bookmark ID")
     bookmark_url: str | None = Field(None, description="Bookmark URL (if ready)")
-    bookmark_status: str = Field(default="pending", description="Bookmark status")
+    #: null when no clip was ever requested — distinct from "pending", which
+    #: means one is genuinely being prepared. The UI must not show a spinner
+    #: for null, which it did for every violation before clips existed.
+    bookmark_status: str | None = Field(None, description="Bookmark status, or null if none requested")
     bookmark_duration_seconds: int | None = Field(None, description="Bookmark duration")
 
 

@@ -171,6 +171,11 @@ class EvidenceType(str, enum.Enum):
 
     SNAPSHOT = "snapshot"
     BOOKMARK = "bookmark"
+    #: The exact JPEG the model was given, saved by Ruth itself. Unlike a
+    #: SNAPSHOT — which VAS captures *after* the violation is written, by
+    #: which time the subject has usually moved — this is the frame the
+    #: bounding boxes were computed on, so an overlay lands correctly.
+    FRAME = "frame"
 
 
 class EvidenceStatus(str, enum.Enum):

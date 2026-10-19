@@ -151,6 +151,10 @@ class EvidenceArchive(_ArchiveMixin, Base):
     violation_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), nullable=False)
     evidence_type: Mapped[str] = mapped_column(String(32), nullable=False)
     status: Mapped[str] = mapped_column(String(32), nullable=False)
+    #: FRAME evidence: the saved inferred frame's path. Unlike the vas_*
+    #: columns this is a file Ruth owns, so archiving records where it is and
+    #: the archive run is what decides whether it survives.
+    file_path: Mapped[str | None] = mapped_column(String(512), nullable=True)
     vas_snapshot_id: Mapped[str | None] = mapped_column(String(255), nullable=True)
     vas_bookmark_id: Mapped[str | None] = mapped_column(String(255), nullable=True)
     bookmark_duration_seconds: Mapped[int | None] = mapped_column(

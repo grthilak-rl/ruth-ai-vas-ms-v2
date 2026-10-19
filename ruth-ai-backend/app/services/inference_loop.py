@@ -41,7 +41,19 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.logging import get_logger
 from app.services.model_store.enabled import enabled_store_models
-from app.models import Device, StreamSession, StreamState, Violation, ViolationStatus
+from pathlib import Path
+
+from app.core.config import get_settings
+from app.models import (
+    Device,
+    Evidence,
+    EvidenceStatus,
+    EvidenceType,
+    StreamSession,
+    StreamState,
+    Violation,
+    ViolationStatus,
+)
 from app.models.enums import is_known_violation_type, resolve_violation_type
 from app.integrations.unified_runtime.router import RuntimeRouter
 from app.integrations.vas import VASClient
@@ -355,6 +367,7 @@ class InferenceLoopService:
         self._vas_client = vas_client
         self._db_session_factory = db_session_factory
         self._loop_interval = loop_interval
+        self._settings = get_settings()
 
         self._running = False
         self._task: Optional[asyncio.Task] = None
@@ -396,6 +409,11 @@ class InferenceLoopService:
         # task only when this is 0, i.e. never between a violation's commit and
         # the duplicate-suppression state update that follows it.
         self._violation_writes: Dict[UUID, int] = {}
+        # Last clip request per camera, for the cooldown in _clip_allowed.
+        self._last_clip_at: Dict[str, datetime] = {}
+        # Camera name per device, refreshed by _main_loop. Only used to
+        # label store-model inference requests; see _request_config.
+        self._device_names: Dict[UUID, str] = {}
         # Duplicate-suppression state per (session_id, model_id).
         self._model_violation_state: Dict[tuple, Dict[str, Any]] = {}
         # Newest result per (device_id, model_id). The session's first model is
@@ -488,6 +506,17 @@ class InferenceLoopService:
                     )
                     result = await db.execute(stmt)
                     active_sessions = list(result.scalars().all())
+
+                    # Camera names for the store plugin's trial summaries.
+                    # Refreshed every pass rather than cached once, so a
+                    # rename follows without a restart. One small query over
+                    # the live devices; negligible beside the session read.
+                    device_ids = {s.device_id for s in active_sessions}
+                    if device_ids:
+                        names = await db.execute(
+                            select(Device.id, Device.name).where(Device.id.in_(device_ids))
+                        )
+                        self._device_names = {did: name for did, name in names.all()}
 
                     # Start tasks for new sessions
                     active_session_ids = {s.id for s in active_sessions}
@@ -647,7 +676,7 @@ class InferenceLoopService:
                         timestamp=datetime.now(timezone.utc),
                         priority=5,
                         metadata={"session_id": str(session_id)},
-                        config=model_config,
+                        config=self._request_config(model_id, device_id, model_config),
                     )
                     self._budget.record_latency(
                         model_id,
@@ -1122,7 +1151,9 @@ class InferenceLoopService:
                 timestamp=datetime.now(timezone.utc),
                 priority=5,
                 metadata={"session_id": str(session_id)},
-                config=entry.get("config"),
+                config=self._request_config(
+                    entry["model_id"], device_id, entry.get("config")
+                ),
             )
             # Same accounting as single-model sessions: the budget's latency
             # includes the frame fetch (see MAX_GPU_UTILIZATION).
@@ -1170,6 +1201,34 @@ class InferenceLoopService:
             self._latest_detections[device_id] = entry
         return True
 
+    def _request_config(
+        self, model_id: str, device_id: UUID, entry_config: Optional[Dict[str, Any]]
+    ) -> Optional[Dict[str, Any]]:
+        """The config sent to the runtime, with the camera name merged in.
+
+        The store plugin is handed only ``(frame, config)`` — no request id,
+        no stream id — so ``config`` is the only channel that can tell it
+        which camera a frame came from, which its trial summaries need.
+
+        Derived here rather than stored on the model entry. The picker
+        writes ``config: null`` on every add, so a persisted label has to
+        be re-applied by hand each time and goes stale when a camera is
+        renamed; and ``models[0].config`` is mirrored into
+        ``session.model_config``, which ``GET /devices`` returns, so
+        persisting would change an API payload too.
+
+        Store models only. Built-in models also receive ``config`` and
+        ignore it, and there is no reason to change what they are sent.
+        """
+        if model_id not in enabled_store_models():
+            return entry_config
+        name = self._device_names.get(device_id)
+        if not name:
+            return entry_config  # unknown device: exactly today's behaviour
+        merged = dict(entry_config or {})
+        merged.setdefault("camera_name", name)  # an explicit value wins
+        return merged
+
     def _violation_threshold(self, model_id: str, session_threshold: float) -> float:
         """The confidence a violation must reach before it is written.
 
@@ -1196,9 +1255,16 @@ class InferenceLoopService:
         model_id: str,
         result: Dict[str, Any],
         confidence_threshold: float,
+        frame: Optional[Any] = None,
     ) -> None:
         """The single-model loop's violation rules, verbatim, with the state
-        keyed by (session, model) instead of session."""
+        keyed by (session, model) instead of session.
+
+        `frame` is the FrameData the models were just run on. It travels this
+        far so the violation can be stored with the picture it was actually
+        computed from, rather than a VAS snapshot taken afterwards — by which
+        time the subject has usually moved and the box lands on empty scenery.
+        """
         inference_result = result["result"]
         key = (session_id, model_id)
         state = self._model_violation_state.setdefault(
@@ -1223,6 +1289,7 @@ class InferenceLoopService:
                     vas_stream_id=vas_stream_id,
                     frame_width=result.get("frame_width"),
                     frame_height=result.get("frame_height"),
+                    frame=frame,
                 )
                 state["last_violation_time"] = datetime.now(timezone.utc)
             state["was_in_violation"] = True
@@ -1276,7 +1343,8 @@ class InferenceLoopService:
                     model_id,
                     asyncio.create_task(
                         self._apply_violation_rules(
-                            session_id, device_id, vas_stream_id, model_id, result, confidence_threshold
+                            session_id, device_id, vas_stream_id, model_id, result,
+                            confidence_threshold, frame
                         )
                     ),
                 ))
@@ -1542,6 +1610,7 @@ class InferenceLoopService:
         vas_stream_id: Optional[str] = None,
         frame_width: Optional[int] = None,
         frame_height: Optional[int] = None,
+        frame: Optional[Any] = None,
     ) -> None:
         """
         Create a violation record from inference result with evidence capture.
@@ -1568,6 +1637,7 @@ class InferenceLoopService:
                 model_version=model_version,
                 inference_result=inference_result,
                 vas_stream_id=vas_stream_id,
+                frame=frame,
                 frame_width=frame_width,
                 frame_height=frame_height,
             )
@@ -1588,6 +1658,7 @@ class InferenceLoopService:
         vas_stream_id: Optional[str] = None,
         frame_width: Optional[int] = None,
         frame_height: Optional[int] = None,
+        frame: Optional[Any] = None,
     ) -> None:
         """Body of _create_violation (unchanged); call _create_violation instead."""
         try:
@@ -1680,6 +1751,12 @@ class InferenceLoopService:
                 # see _increment_session_counter for failure semantics.
                 await self._increment_session_counter(session_id, "violations_count")
 
+                # The frame the model actually saw. Written after the
+                # commit and off the event loop: a failure here must cost a
+                # picture, never the violation.
+                if frame is not None:
+                    await self._save_inferred_frame(db, violation.id, frame)
+
                 # Capture snapshot evidence asynchronously
                 if vas_stream_id:
                     asyncio.create_task(
@@ -1687,6 +1764,7 @@ class InferenceLoopService:
                             violation_id=violation.id,
                             vas_stream_id=vas_stream_id,
                             violation_type=violation_type,
+                            camera_name=camera_name,
                         )
                     )
 
@@ -1697,11 +1775,82 @@ class InferenceLoopService:
                 exc_info=True,
             )
 
+    async def _save_inferred_frame(self, db, violation_id: UUID, frame: Any) -> None:
+        """Store the exact JPEG the model was given, as FRAME evidence.
+
+        A SNAPSHOT is a second capture taken after the violation is written,
+        so the subject has usually moved and the stored boxes land on empty
+        scenery. These are the bytes the boxes were computed from, and
+        `bounding_boxes` already carries their geometry, so an overlay is
+        exact rather than approximate.
+
+        `base64_data` decodes to byte-identical JPEG — no re-encode, no
+        second fetch. The write goes to a worker thread so a slow disk cannot
+        stall the inference loop, and every failure is swallowed: the
+        violation is already committed and must not be undone by a picture.
+        """
+        if not self._settings.evidence_frame_enabled:
+            return
+        try:
+            payload = await asyncio.to_thread(base64.b64decode, frame.base64_data)
+            now = datetime.now(timezone.utc)
+            rel = f"{now:%Y/%m/%d}/{violation_id}.jpg"
+            target = Path(self._settings.evidence_frame_dir) / rel
+
+            def _write() -> int:
+                target.parent.mkdir(parents=True, exist_ok=True)
+                # Write-then-rename: a reader never sees a half-written file.
+                tmp = target.with_suffix(".jpg.part")
+                tmp.write_bytes(payload)
+                tmp.replace(target)
+                return len(payload)
+
+            size = await asyncio.to_thread(_write)
+            db.add(
+                Evidence(
+                    violation_id=violation_id,
+                    evidence_type=EvidenceType.FRAME,
+                    status=EvidenceStatus.READY,
+                    file_path=rel,
+                    requested_at=now,
+                    ready_at=now,
+                )
+            )
+            await db.commit()
+            logger.info(
+                "Saved inferred frame",
+                violation_id=str(violation_id), path=rel, bytes=size,
+            )
+        except Exception as e:
+            logger.warning(
+                f"Could not save inferred frame: {e}",
+                violation_id=str(violation_id),
+            )
+
+    def _clip_allowed(self, camera_name: str) -> bool:
+        """Per-camera cooldown on clip requests.
+
+        A busy camera can fire violations seconds apart and every clip costs
+        VAS real encoding work. Within the cooldown the violation is still
+        written and still links to that camera's most recent clip; only the
+        duplicate request is skipped.
+        """
+        cooldown = self._settings.evidence_bookmark_cooldown_seconds
+        if cooldown <= 0:
+            return True
+        now = datetime.now(timezone.utc)
+        last = self._last_clip_at.get(camera_name)
+        if last and (now - last).total_seconds() < cooldown:
+            return False
+        self._last_clip_at[camera_name] = now
+        return True
+
     async def _capture_violation_evidence(
         self,
         violation_id: UUID,
         vas_stream_id: str,
         violation_type: str,
+        camera_name: str = "",
     ) -> None:
         """
         Capture snapshot evidence for a violation asynchronously.
@@ -1710,8 +1859,8 @@ class InferenceLoopService:
             violation_id: Violation UUID to attach evidence to
             vas_stream_id: VAS stream ID to capture from
             violation_type: Type of violation for labeling
+            camera_name: Camera, for the per-camera clip cooldown
         """
-        from app.models import Evidence, EvidenceType, EvidenceStatus
         from app.integrations.vas.models import SnapshotCreateRequest
 
         try:
@@ -1751,11 +1900,106 @@ class InferenceLoopService:
                     snapshot_id=snapshot.id,
                 )
 
+            await self._capture_violation_clip(
+                violation_id=violation_id,
+                vas_stream_id=vas_stream_id,
+                violation_type=violation_type,
+                camera_name=camera_name,
+            )
+
         except Exception as e:
             logger.error(
                 f"Failed to capture violation evidence: {e}",
                 violation_id=str(violation_id),
                 exc_info=True,
+            )
+
+    async def _capture_violation_clip(
+        self,
+        violation_id: UUID,
+        vas_stream_id: str,
+        violation_type: str,
+        camera_name: str,
+    ) -> None:
+        """Ask VAS for a short clip centred on the violation.
+
+        5 s either side: the clip has to start *before* the detection or the
+        subject has already left frame, which is the whole point of having
+        video rather than a still. VAS builds the window itself from
+        `center_timestamp` and `before_seconds`.
+
+        Rate-limited per camera. Never raises: a missing clip is a missing
+        clip, not a lost violation.
+        """
+        from app.integrations.vas.models import BookmarkCreateRequest
+
+        if not self._clip_allowed(camera_name or vas_stream_id):
+            logger.debug(
+                "Clip skipped, camera within cooldown",
+                violation_id=str(violation_id), camera_name=camera_name,
+            )
+            return
+        try:
+            async with self._db() as db:
+                violation = await db.get(Violation, violation_id)
+                if violation is None:
+                    return
+                now = datetime.now(timezone.utc)
+                evidence = Evidence(
+                    violation_id=violation_id,
+                    evidence_type=EvidenceType.BOOKMARK,
+                    status=EvidenceStatus.PENDING,
+                    bookmark_duration_seconds=10,
+                    requested_at=now,
+                )
+                db.add(evidence)
+                await db.commit()
+                await db.refresh(evidence)
+
+                try:
+                    bookmark = await self._vas_client.create_bookmark(
+                        vas_stream_id,
+                        BookmarkCreateRequest(
+                            source="live",
+                            label=f"Violation: {violation_type}",
+                            event_type=violation.type.value,
+                            confidence=violation.confidence,
+                            before_seconds=5,
+                            after_seconds=5,
+                            center_timestamp=violation.timestamp,
+                            created_by=f"ruth-ai-{violation_type}",
+                            metadata={
+                                "violation_id": str(violation_id),
+                                "device_id": str(violation.device_id),
+                            },
+                        ),
+                    )
+                except Exception as e:
+                    # The row is already committed as PENDING, and PENDING is
+                    # what the UI renders as "Preparing video..." — so a
+                    # failure here must be recorded, or the spinner runs for
+                    # ever on a clip that is never coming.
+                    evidence.status = EvidenceStatus.FAILED
+                    evidence.error_message = str(e)[:1000]
+                    await db.commit()
+                    raise
+
+                if bookmark is None:
+                    evidence.status = EvidenceStatus.FAILED
+                    evidence.error_message = "VAS returned no bookmark"
+                else:
+                    evidence.vas_bookmark_id = bookmark.id
+                    evidence.status = EvidenceStatus.PROCESSING
+                await db.commit()
+                logger.info(
+                    "Requested violation clip",
+                    violation_id=str(violation_id),
+                    vas_bookmark_id=getattr(bookmark, "id", None),
+                )
+        except Exception as e:
+            logger.warning(
+                f"Could not request violation clip: {e}",
+                violation_id=str(violation_id),
             )
 
 

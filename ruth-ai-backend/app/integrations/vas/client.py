@@ -867,10 +867,15 @@ class VASClient:
         Returns:
             Created bookmark (status=processing)
         """
+        # mode="json" because `center_timestamp` is a datetime and the plain
+        # model_dump leaves it as one, which httpx cannot serialise —
+        # "Object of type datetime is not JSON serializable". This path had
+        # never been exercised: nothing called create_bookmark until
+        # violations started requesting clips.
         response = await self._request(
             "POST",
             f"/v2/streams/{stream_id}/bookmarks",
-            json=request.model_dump(exclude_none=True),
+            json=request.model_dump(mode="json", exclude_none=True),
         )
         return Bookmark.model_validate(response.json())
 

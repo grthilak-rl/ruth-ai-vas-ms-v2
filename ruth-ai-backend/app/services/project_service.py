@@ -150,7 +150,7 @@ _RESTORE_ORDER: tuple[tuple[str, tuple[str, ...], tuple[str, ...]], ...] = (
     (
         "evidence",
         (
-            "id", "violation_id", "evidence_type", "status",
+            "id", "violation_id", "evidence_type", "status", "file_path",
             "vas_snapshot_id", "vas_bookmark_id",
             "bookmark_duration_seconds", "requested_at", "ready_at",
             "error_message", "retry_count", "last_retry_at", "created_at",
@@ -158,7 +158,8 @@ _RESTORE_ORDER: tuple[tuple[str, tuple[str, ...], tuple[str, ...]], ...] = (
         ),
         (
             "id", "violation_id", "evidence_type::evidence_type",
-            "status::evidence_status", "vas_snapshot_id", "vas_bookmark_id",
+            "status::evidence_status", "file_path",
+            "vas_snapshot_id", "vas_bookmark_id",
             "bookmark_duration_seconds", "requested_at", "ready_at",
             "error_message", "retry_count", "last_retry_at", "created_at",
             "updated_at",
@@ -869,7 +870,8 @@ class ProjectService:
             text(
                 """
                 INSERT INTO evidence_archive (
-                    id, violation_id, evidence_type, status, vas_snapshot_id,
+                    id, violation_id, evidence_type, status, file_path,
+                    vas_snapshot_id,
                     vas_bookmark_id, bookmark_duration_seconds, requested_at,
                     ready_at, error_message, retry_count, last_retry_at,
                     created_at, updated_at,
@@ -879,6 +881,7 @@ class ProjectService:
                 )
                 SELECT
                     e.id, e.violation_id, e.evidence_type::text, e.status::text,
+                    e.file_path,
                     e.vas_snapshot_id, e.vas_bookmark_id,
                     e.bookmark_duration_seconds, e.requested_at, e.ready_at,
                     e.error_message, e.retry_count, e.last_retry_at,

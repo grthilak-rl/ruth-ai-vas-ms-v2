@@ -101,6 +101,14 @@ class Evidence(Base, TimestampMixin):
         nullable=True,
     )
 
+    # For FRAME evidence: path on disk, relative to the evidence root. Ruth
+    # owns this file (everything else here is a VAS id), so it is also Ruth's
+    # to delete — see the violation lifecycle.
+    file_path: Mapped[str | None] = mapped_column(
+        String(512),
+        nullable=True,
+    )
+
     # For bookmarks: duration in seconds (default: 15 = 5 before + 10 after)
     bookmark_duration_seconds: Mapped[int | None] = mapped_column(
         Integer,

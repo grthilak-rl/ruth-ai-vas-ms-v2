@@ -5,12 +5,15 @@ import './EvidenceViewer.css';
 
 // Default evidence when backend doesn't provide one
 const DEFAULT_EVIDENCE: ViolationEvidence = {
+  frame_url: null,
+  frame_status: null,
   snapshot_id: null,
   snapshot_url: null,
   snapshot_status: 'pending',
   bookmark_id: null,
   bookmark_url: null,
-  bookmark_status: 'pending',
+  // null, not 'pending': with no evidence record nothing is being prepared.
+  bookmark_status: null,
 };
 
 interface EvidenceViewerProps {
@@ -76,11 +79,20 @@ export function EvidenceViewer({
   const evidence = evidenceProp ?? DEFAULT_EVIDENCE;
 
   // Determine snapshot availability
-  const isSnapshotReady = evidence.snapshot_status === 'ready' && evidence.snapshot_url;
+  const isSnapshotReady = (evidence.snapshot_status === 'ready' && evidence.snapshot_url) || (evidence.frame_status === 'ready' && evidence.frame_url);
   const isSnapshotPreparing = evidence.snapshot_status === 'pending' || evidence.snapshot_status === 'processing';
   const isSnapshotFailed = evidence.snapshot_status === 'failed' || (!evidence.snapshot_url && evidence.snapshot_status === 'ready');
 
-  // Determine video availability
+  // The inferred frame is the primary image: it is what the boxes were
+  // computed on. The snapshot is a later capture of the same camera, kept
+  // as secondary context.
+  const isFrameReady = evidence.frame_status === 'ready' && !!evidence.frame_url;
+  const primaryUrl = isFrameReady ? evidence.frame_url! : evidence.snapshot_url;
+  const primaryIsFrame = isFrameReady;
+
+  // Determine video availability. A null bookmark_status means no clip was
+  // ever requested, which must not render as "preparing" - that spinner ran
+  // forever on every violation before clips were wired up.
   const isVideoReady = evidence.bookmark_status === 'ready' && evidence.bookmark_url;
   const isVideoPreparing = evidence.bookmark_status === 'pending' || evidence.bookmark_status === 'processing';
   const isVideoFailed = evidence.bookmark_status === 'failed';
@@ -153,13 +165,29 @@ export function EvidenceViewer({
 
       {/* Snapshot display */}
       <div className="evidence-viewer__snapshot">
-        {isSnapshotReady && evidence.snapshot_url ? (
-          <SnapshotOverlay
-            snapshotUrl={evidence.snapshot_url}
-            boundingBoxes={boundingBoxes}
-            alt={`Detection snapshot from ${cameraName}`}
-            violationId={violationId}
-          />
+        {isSnapshotReady && primaryUrl ? (
+          <>
+            <SnapshotOverlay
+              snapshotUrl={primaryUrl}
+              boundingBoxes={boundingBoxes}
+              alt={
+                primaryIsFrame
+                  ? `Inferred frame from ${cameraName}`
+                  : `Scene snapshot from ${cameraName}`
+              }
+              violationId={violationId}
+            />
+            <span
+              className="evidence-viewer__source"
+              title={
+                primaryIsFrame
+                  ? 'The exact frame the model analysed, so the boxes line up.'
+                  : 'A snapshot taken shortly after the detection, so the boxes may not line up.'
+              }
+            >
+              {primaryIsFrame ? 'inferred frame' : 'scene snapshot'}
+            </span>
+          </>
         ) : isSnapshotPreparing ? (
           <div className="evidence-viewer__placeholder evidence-viewer__placeholder--preparing">
             <div className="evidence-viewer__placeholder-content">

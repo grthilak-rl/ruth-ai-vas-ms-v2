@@ -11,13 +11,15 @@ No business logic is implemented here.
 """
 
 from datetime import datetime
+from pathlib import Path
 from uuid import UUID
 
 from fastapi import APIRouter, HTTPException, Query, status
-from fastapi.responses import StreamingResponse
+from fastapi.responses import FileResponse, StreamingResponse
 from sqlalchemy import func, select
 from sqlalchemy.orm import selectinload
 
+from app.core.config import get_settings
 from app.core.logging import get_logger
 from app.deps import DBSession, EvidenceServiceDep, VASClientDep, ViolationServiceDep
 from app.models import Evidence, EvidenceType, Violation
@@ -58,24 +60,36 @@ def build_evidence_summary(evidence_list: list[Evidence]) -> ViolationEvidenceSu
 
     snapshot_evidence = None
     bookmark_evidence = None
+    frame_evidence = None
 
     for e in evidence_list:
         if e.evidence_type == EvidenceType.SNAPSHOT and snapshot_evidence is None:
             snapshot_evidence = e
         elif e.evidence_type == EvidenceType.BOOKMARK and bookmark_evidence is None:
             bookmark_evidence = e
+        elif e.evidence_type == EvidenceType.FRAME and frame_evidence is None:
+            frame_evidence = e
 
     # If no evidence at all, return None
-    if snapshot_evidence is None and bookmark_evidence is None:
+    if snapshot_evidence is None and bookmark_evidence is None and frame_evidence is None:
         return None
 
     return ViolationEvidenceSummary(
+        frame_url=(
+            f"/api/v1/violations/{frame_evidence.violation_id}/frame/image"
+            if frame_evidence and frame_evidence.file_path
+            else None
+        ),
+        # null, not "pending": nothing is coming if no frame was saved.
+        frame_status=frame_evidence.status.value if frame_evidence else None,
         snapshot_id=snapshot_evidence.vas_snapshot_id if snapshot_evidence else None,
         snapshot_url=snapshot_evidence.snapshot_url if snapshot_evidence else None,
         snapshot_status=snapshot_evidence.status.value if snapshot_evidence else "pending",
         bookmark_id=bookmark_evidence.vas_bookmark_id if bookmark_evidence else None,
         bookmark_url=bookmark_evidence.bookmark_url if bookmark_evidence else None,
-        bookmark_status=bookmark_evidence.status.value if bookmark_evidence else "pending",
+        # null when no clip was requested, so the UI can tell "none" from
+        # "being prepared" instead of spinning forever.
+        bookmark_status=bookmark_evidence.status.value if bookmark_evidence else None,
         bookmark_duration_seconds=(
             bookmark_evidence.bookmark_duration_seconds if bookmark_evidence else None
         ),
@@ -393,6 +407,50 @@ async def update_violation_status(
         created_at=violation.created_at,
         updated_at=violation.updated_at,
     )
+
+
+@router.get(
+    "/violations/{violation_id}/frame/image",
+    summary="Get the inferred frame",
+    description=(
+        "The exact JPEG the model was given when the violation fired. Unlike "
+        "the snapshot, which VAS captures afterwards, this is the image the "
+        "bounding boxes were computed on, so an overlay lines up."
+    ),
+    responses={
+        200: {"description": "Image binary data", "content": {"image/jpeg": {}}},
+        404: {"model": ErrorResponse, "description": "No frame saved for this violation"},
+    },
+)
+async def get_inferred_frame(
+    violation_id: UUID,
+    db: DBSession,
+) -> FileResponse:
+    """Serve the saved inferred frame from disk."""
+    settings = get_settings()
+    result = await db.execute(
+        select(Evidence).where(
+            Evidence.violation_id == violation_id,
+            Evidence.evidence_type == EvidenceType.FRAME,
+        )
+    )
+    evidence = result.scalars().first()
+    if evidence is None or not evidence.file_path:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="No inferred frame saved for this violation",
+        )
+
+    root = Path(settings.evidence_frame_dir).resolve()
+    path = (root / evidence.file_path).resolve()
+    # The stored path is ours, but resolve and re-check anyway: a path that
+    # escapes the evidence root must never be served.
+    if not path.is_relative_to(root) or not path.is_file():
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Inferred frame is recorded but missing on disk",
+        )
+    return FileResponse(path, media_type="image/jpeg")
 
 
 @router.get(
