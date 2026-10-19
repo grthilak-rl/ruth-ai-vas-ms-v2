@@ -248,7 +248,7 @@ def load_installer():
     return module
 
 
-@pytest.mark.parametrize("name", ["hard_hat", "safety_vest", "gloves", "goggles", "harness", "no_goggles"])
+@pytest.mark.parametrize("name", ["hard_hat", "safety_vest", "gloves", "goggles", "harness", "no_goggles", "gloves_2"])
 def test_shipped_manifests_are_valid(name):
     """Unknown top-level keys (`diagnostics`, `_trial`) must not be rejected."""
     assert load_installer().manifest_problems(manifest(name)) == []
@@ -329,7 +329,7 @@ def drop_diagnostics(m):
     m.pop("diagnostics", None)
 
 
-TRIAL = {"goggles", "gloves", "harness", "no_goggles"}
+TRIAL = {"goggles", "gloves", "harness", "no_goggles", "gloves_2"}
 NOT_IN_TRIAL = ["hard_hat", "safety_vest"]
 
 
@@ -348,7 +348,7 @@ def test_which_models_are_in_trial_mode():
         assert "_trial" not in manifest(name)
 
 
-@pytest.mark.parametrize("name", ["hard_hat", "safety_vest", "gloves", "goggles", "harness", "no_goggles"])
+@pytest.mark.parametrize("name", ["hard_hat", "safety_vest", "gloves", "goggles", "harness", "no_goggles", "gloves_2"])
 def test_every_shipped_model_gates_violations_at_0_7(name):
     """The manifest floor is now the violation gate (backend side too).
 
@@ -722,3 +722,35 @@ def test_goggles_models_coexist_without_clashing():
     # Same violation_type on purpose - it is the same violation - which is
     # exactly why running both on one camera would double-report.
     assert old["rules"][0]["violation_type"] == new["rules"][0]["violation_type"]
+
+
+def test_models_sharing_a_violation_type_are_known():
+    """Two pairs now emit the same violation_type as each other.
+
+    Running either pair on one camera reports the same violation twice.
+    Nothing in the code prevents it, so the pairs are listed here and in
+    each manifest's _trial note; this test fails if a third model joins a
+    pair without the risk being considered.
+    """
+    import collections
+    names = ["hard_hat", "safety_vest", "gloves", "goggles", "harness",
+             "no_goggles", "gloves_2"]
+    by_type = collections.defaultdict(set)
+    for n in names:
+        for r in manifest(n)["rules"]:
+            by_type[r["violation_type"]].add(n)
+    shared = {t: v for t, v in by_type.items() if len(v) > 1}
+    assert shared == {
+        "missing_goggles": {"goggles", "no_goggles"},
+        "missing_gloves": {"gloves", "gloves_2"},
+    }
+
+
+def test_gloves_2_is_rtdetr_shaped():
+    """RT-DETR at 640, single class. The plugin loads it with YOLO(),
+    which was verified to give byte-identical output to RTDETR()."""
+    m = manifest("gloves_2")
+    assert m["imgsz"] == 640
+    assert m["classes"] == {"0": "no-gloves"}
+    assert m["weights"] == "gloves.pt"  # distinct from gloves' bestgloves.pt
+    assert m["weights"] != manifest("gloves")["weights"]

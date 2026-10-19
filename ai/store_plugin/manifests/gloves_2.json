@@ -1,0 +1,17 @@
+{
+  "manifest_version": 1,
+  "model_id": "gloves_2",
+  "display_name": "Gloves 2",
+  "weights": "gloves.pt",
+  "task": "detect",
+  "imgsz": 640,
+  "classes": {"0": "no-gloves"},
+  "rules": [
+    {"id": "missing_gloves", "classes": ["no-gloves"], "min_confidence": 0.7,
+     "violation_type": "missing_gloves", "severity": "high"}
+  ],
+  "performance": {"inference_time_hint_ms": 65, "recommended_fps": 2},
+  "limits": {"max_memory_mb": 2048, "inference_timeout_ms": 5000},
+  "_trial": "TEMPORARY observation block, 2026-10-19. RT-DETR (rtdetr-l), not YOLO - the plugin's YOLO() loader runs it and gives byte-identical output to RTDETR(), verified. Being NMS-free it returns ~214 boxes per frame at the 0.01 trial floor, so scored_count is not comparable with the YOLO models. MUST NOT run on the same camera as `gloves`: same violation_type, so both would report the same violation twice. Nothing enforces that yet. Remove once judged.",
+  "diagnostics": {"summary_log_sample": 1.0, "predict_floor": 0.01}
+}
