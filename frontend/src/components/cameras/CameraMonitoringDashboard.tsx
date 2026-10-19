@@ -35,7 +35,7 @@ import {
 import { GridLayoutPicker } from '../viewing-pane/GridLayoutPicker';
 import { usePaneLayout } from '../viewing-pane/usePaneLayout';
 import { fetchModelsStatus, type ModelStatusInfo } from '../../state/api/models.api';
-import { type CameraModelsResponse } from '../../state/api/devices.api';
+import { type CameraModelsResponse, getCameraStatus as getSharedCameraStatus } from '../../state/api/devices.api';
 import { ApiError } from '../../state/api/errors';
 import { queryKeys } from '../../state/queryKeys';
 import {
@@ -364,9 +364,11 @@ export function CameraMonitoringDashboard({
     [getAIModelsForCamera]
   );
 
-  // Get camera status
+  // Get camera status. From video_live (VAS's measured video state), via the
+  // shared helper — is_active alone said LIVE for a camera that had been
+  // unreachable for an hour, and the player sat on a connection error.
   const getCameraStatus = (camera: Device): 'live' | 'offline' | 'connecting' | 'error' => {
-    return camera.is_active ? 'live' : 'offline';
+    return getSharedCameraStatus(camera) === 'live' ? 'live' : 'offline';
   };
 
   // One tile per visible position: the camera there, or an empty slot (no

@@ -486,6 +486,20 @@ export interface DeviceStreaming {
   inference_absent_since?: ISOTimestamp | null;
 
   /**
+   * Camera feed health measured by VAS from evidence (last decoded frame,
+   * newest recording segment). video_live is derived from video_state when
+   * present. Optional/null: absent on older backends, and null until VAS's
+   * first health pass. See state/api/cameraFeeds.ts.
+   */
+  video_state?: 'live' | 'stalled' | 'offline' | 'idle' | 'disabled' | null;
+  last_frame_at?: ISOTimestamp | null;
+  recording_state?: 'recording' | 'stopped' | 'idle' | 'disabled' | null;
+  /** Newest recording segment — "stopped since" when recording_state is stopped. */
+  last_segment_at?: ISOTimestamp | null;
+  /** Segments recorded since UTC midnight. */
+  segments_today?: number | null;
+
+  /**
    * Every model running on this camera (model_id is the first). Optional:
    * absent on backends older than multi-model sessions; use
    * activeModelIds(streaming), which falls back to [model_id].

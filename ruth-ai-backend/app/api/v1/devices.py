@@ -52,6 +52,7 @@ from app.services import (
     StreamStartError,
     StreamSessionNotFoundError,
 )
+from app.services.stream_service import HEALTH_FIELDS
 
 router = APIRouter(tags=["Devices"])
 logger = get_logger(__name__)
@@ -166,6 +167,7 @@ async def list_devices(
                     inference_absent_since=stream_status.get(
                         "inference_absent_since"
                     ),
+                    **{k: stream_status.get(k) for k in HEALTH_FIELDS},
                 ),
             )
         )
@@ -404,6 +406,7 @@ async def get_device(
             model_id=stream_status_dict.get("model_id"),
             models=stream_status_dict.get("models") or [],
             ai_model_config=stream_status_dict.get("model_config"),
+            **{k: stream_status_dict.get(k) for k in HEALTH_FIELDS},
         ),
         last_synced_at=device.last_synced_at,
         created_at=device.created_at,
