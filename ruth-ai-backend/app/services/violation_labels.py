@@ -24,6 +24,7 @@ from typing import Mapping, Optional
 
 from app.models.enums import VIOLATION_TYPE_MAP, ViolationType
 from app.services.model_store.enabled import StoreModelInfo, enabled_store_models
+from app.services.violation_severity import normalize_severity, resolve_severity
 
 #: Separator between family and specific label in a combined label.
 LABEL_SEPARATOR = " · "
@@ -121,6 +122,15 @@ class ViolationLabeler:
         """The most specific label alone, for narrow columns."""
         return self.detail_label(type_detail, model_id) or self.family_label(type_)
 
+    def severity(self, violation) -> str:
+        """Stored severity, or resolved now for rows written without one."""
+        return normalize_severity(getattr(violation, "severity", None)) or resolve_severity(
+            type_=violation.type,
+            type_detail=violation.type_detail,
+            model_id=getattr(violation, "model_id", None),
+            store_models=self._store_models,
+        )
+
     def type_fields(self, violation) -> dict:
         """The type fields every violation response carries."""
         return {
@@ -128,4 +138,5 @@ class ViolationLabeler:
             "type_detail": violation.type_detail,
             "type_label": self.family_label(violation.type),
             "detail_label": self.detail_label(violation.type_detail, violation.model_id),
+            "severity": self.severity(violation),
         }

@@ -1,3 +1,4 @@
+import { useCallback } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { queryKeys, type ViolationFilters } from '../queryKeys';
 import { POLLING_INTERVALS } from '../pollingIntervals';
@@ -5,6 +6,7 @@ import {
   fetchViolations,
   fetchViolation,
   fetchViolationTypes,
+  fetchIncidents,
   updateViolationStatus,
   getConfidenceCategory as apiGetConfidenceCategory,
   getConfidenceLabel,
@@ -34,6 +36,58 @@ export function useViolationsQuery(filters?: ViolationFilters) {
     staleTime: POLLING_INTERVALS.VIOLATIONS / 2,
     refetchIntervalInBackground: false,
   });
+}
+
+/**
+ * Incidents Query Hook — the Violations page's list.
+ *
+ * Same polling as the violations list, so a repeat that arrives while the
+ * page is open extends its incident's count in place.
+ */
+export function useIncidentsQuery(filters?: ViolationFilters) {
+  return useQuery({
+    queryKey: queryKeys.violations.incidents(filters),
+    queryFn: () => fetchIncidents(filters),
+    refetchInterval: POLLING_INTERVALS.VIOLATIONS,
+    staleTime: POLLING_INTERVALS.VIOLATIONS / 2,
+    refetchIntervalInBackground: false,
+    placeholderData: (previous) => previous,
+  });
+}
+
+/**
+ * Apply one status change to many violations (an incident's group action,
+ * or a single row).
+ *
+ * A few requests at a time rather than a burst, and one cache refresh at
+ * the end rather than one per violation. Never throws: the caller gets the
+ * ids that succeeded and failed, so a partial failure can be reported
+ * precisely instead of all-or-nothing.
+ */
+export function useApplyViolationStatus() {
+  const queryClient = useQueryClient();
+
+  return useCallback(
+    async (ids: string[], update: UpdateViolationRequest) => {
+      const succeeded: string[] = [];
+      const failed: string[] = [];
+      const queue = [...ids];
+      const worker = async () => {
+        for (let id = queue.shift(); id !== undefined; id = queue.shift()) {
+          try {
+            await updateViolationStatus(id, update);
+            succeeded.push(id);
+          } catch {
+            failed.push(id);
+          }
+        }
+      };
+      await Promise.all(Array.from({ length: Math.min(4, ids.length) }, worker));
+      await queryClient.invalidateQueries({ queryKey: queryKeys.violations.all });
+      return { succeeded, failed };
+    },
+    [queryClient]
+  );
 }
 
 /**

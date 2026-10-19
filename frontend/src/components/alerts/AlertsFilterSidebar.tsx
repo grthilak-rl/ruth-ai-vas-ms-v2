@@ -1,6 +1,9 @@
 import { useState, useCallback, useMemo } from 'react';
-import type { ViolationStatus, Device, ViolationTypeOption } from '../../state/api';
+import type { ViolationStatus, Device, ViolationTypeOption, Severity } from '../../state/api';
+import { deviceDisplayName } from '../../state/api';
 import { buildTypeFilterEntries } from '../../utils/violationLabels';
+import { SEVERITY_LEVELS, severityLabel } from '../../utils/violationDisplay';
+import { cameraAreas } from './alertFilters';
 import './AlertsFilterSidebar.css';
 
 /**
@@ -20,7 +23,12 @@ export interface AlertFilters {
    * specific type ('ppe_violation:missing_gloves'). See violationLabels.
    */
   violationType: string;
+  /** Selected severities (empty = all) */
+  severities: Severity[];
+  /** Selected camera area / manway (null = all) */
+  area: string | null;
 }
+
 
 /**
  * Default filter state
@@ -31,6 +39,8 @@ export const DEFAULT_FILTERS: AlertFilters = {
   dateTo: null,
   cameraId: null,
   violationType: '',
+  severities: [],
+  area: null,
 };
 
 /**
@@ -218,6 +228,21 @@ export function AlertsFilterSidebar({
     });
   }, [filters, onFiltersChange]);
 
+  const handleSeverityToggle = useCallback((level: Severity) => {
+    onFiltersChange({
+      ...filters,
+      severities: filters.severities.includes(level)
+        ? filters.severities.filter((s) => s !== level)
+        : [...filters.severities, level],
+    });
+  }, [filters, onFiltersChange]);
+
+  const handleAreaChange = useCallback((value: string) => {
+    onFiltersChange({ ...filters, area: value || null });
+  }, [filters, onFiltersChange]);
+
+  const areas = useMemo(() => cameraAreas(cameras), [cameras]);
+
   // Handle violation type selection
   const handleTypeChange = useCallback((value: string) => {
     onFiltersChange({
@@ -245,7 +270,9 @@ export function AlertsFilterSidebar({
       filters.dateFrom !== null ||
       filters.dateTo !== null ||
       filters.cameraId !== null ||
-      filters.violationType !== ''
+      filters.violationType !== '' ||
+      filters.severities.length > 0 ||
+      filters.area !== null
     );
   }, [filters]);
 
@@ -345,13 +372,50 @@ export function AlertsFilterSidebar({
           <option value="">All Cameras</option>
           {cameras.map((camera) => (
             <option key={camera.id} value={camera.id}>
-              {camera.name}
+              {deviceDisplayName(camera)}
             </option>
           ))}
         </select>
         {camerasLoading && (
           <span className="alerts-filter-sidebar__loading">Loading cameras...</span>
         )}
+      </section>
+
+      {/* Severity Filter — the rule's severity, not confidence */}
+      <section className="alerts-filter-sidebar__section">
+        <h3 className="alerts-filter-sidebar__section-title">Severity</h3>
+        <div className="alerts-filter-sidebar__checkboxes">
+          {SEVERITY_LEVELS.map((level) => (
+            <label key={level} className="alerts-filter-sidebar__checkbox-label">
+              <input
+                type="checkbox"
+                checked={filters.severities.includes(level)}
+                onChange={() => handleSeverityToggle(level)}
+                className="alerts-filter-sidebar__checkbox"
+              />
+              <span className="alerts-filter-sidebar__checkbox-text">{severityLabel(level)}</span>
+            </label>
+          ))}
+        </div>
+      </section>
+
+      {/* Area Filter — the camera's manway */}
+      <section className="alerts-filter-sidebar__section">
+        <h3 className="alerts-filter-sidebar__section-title">Area</h3>
+        <select
+          value={filters.area ?? ''}
+          onChange={(e) => handleAreaChange(e.target.value)}
+          className="alerts-filter-sidebar__select"
+          aria-label="Camera area"
+          disabled={camerasLoading}
+        >
+          <option value="">All Areas</option>
+          {areas.map((area) => (
+            <option key={area} value={area}>
+              {area}
+            </option>
+          ))}
+        </select>
       </section>
 
       {/* Violation Type Filter — specific types grouped under their family */}

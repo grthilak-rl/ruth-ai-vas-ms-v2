@@ -6,8 +6,8 @@
 
 export { AlertsList } from './AlertsList';
 export { AlertsFilterSidebar, DEFAULT_FILTERS, type AlertFilters } from './AlertsFilterSidebar';
-export { ViolationCard } from './ViolationCard';
-export { ConfidenceBadge } from './ConfidenceBadge';
+export { IncidentCard, type IncidentAction } from './IncidentCard';
+export { SeverityBadge } from './SeverityBadge';
 export { StatusBadge } from './StatusBadge';
 export { SnapshotThumbnail } from './SnapshotThumbnail';
 export { DismissConfirmationDialog } from './DismissConfirmationDialog';

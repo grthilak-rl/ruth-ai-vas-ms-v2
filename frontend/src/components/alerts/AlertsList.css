@@ -12,6 +12,12 @@
   gap: 0.75rem;
 }
 
+.alerts-list__grouping {
+  margin: 0 0 0.75rem;
+  font-size: 0.8125rem;
+  color: #666;
+}
+
 /* Error state (F4: friendly message + retry) */
 .alerts-list__error {
   display: flex;

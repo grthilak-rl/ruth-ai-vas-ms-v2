@@ -229,6 +229,34 @@ class Settings(BaseSettings):
         default=True,
         description="Save the inferred frame with each violation.",
     )
+    evidence_thumb_dir: str = Field(
+        default="/evidence/thumbs",
+        description=(
+            "Cache for the cropped card thumbnails made from inferred frames. "
+            "Safe to delete: thumbnails are regenerated on demand."
+        ),
+    )
+
+    # Violations page: repeated violations shown as one incident
+    incident_gap_minutes: int = Field(
+        default=5,
+        ge=1,
+        le=120,
+        description=(
+            "Same camera + same specific type within this many minutes of the "
+            "previous violation joins the same incident. Median repeat gap "
+            "measured at 53 s; 75% within 5 min."
+        ),
+    )
+    incident_max_span_minutes: int = Field(
+        default=60,
+        ge=1,
+        le=24 * 60,
+        description=(
+            "An incident never spans more than this from its first violation, "
+            "so a camera that fires all day is not one card."
+        ),
+    )
     evidence_bookmark_cooldown_seconds: int = Field(
         default=60,
         ge=0,

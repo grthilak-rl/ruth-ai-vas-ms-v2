@@ -6,6 +6,7 @@
  * Source Endpoints:
  * - GET /api/v1/violations
  * - GET /api/v1/violations/types
+ * - GET /api/v1/violations/incidents
  * - GET /api/v1/violations/{id}
  * - PATCH /api/v1/violations/{id}
  *
@@ -22,12 +23,14 @@ import type {
   ViolationsListResponse,
   ViolationsQueryParams,
   ViolationTypesResponse,
+  IncidentListResponse,
   EvidenceStatus,
 } from './types';
 import {
   isViolation,
   isViolationsListResponse,
   isViolationTypesResponse,
+  isIncidentListResponse,
   assertResponse,
 } from './validators';
 
@@ -39,13 +42,23 @@ const VIOLATIONS_PATH = '/api/v1/violations';
  *
  * F6 §7.1: Always specify sort_by to avoid ordering assumptions.
  */
-function buildQueryString(params?: ViolationsQueryParams): string {
+export function buildQueryString(params?: ViolationsQueryParams): string {
   if (!params) return '';
 
   const searchParams = new URLSearchParams();
 
-  if (params.status) {
-    searchParams.set('status', params.status);
+  // Repeatable params are sent once per value (?status=open&status=reviewed).
+  for (const status of ([] as string[]).concat(params.status ?? [])) {
+    searchParams.append('status', status);
+  }
+  for (const level of params.severity ?? []) {
+    searchParams.append('severity', level);
+  }
+  if (params.area) {
+    searchParams.set('area', params.area);
+  }
+  if (params.offset !== undefined) {
+    searchParams.set('offset', String(params.offset));
   }
   if (params.camera_id) {
     searchParams.set('camera_id', params.camera_id);
@@ -95,6 +108,17 @@ export async function fetchViolations(
   const queryString = buildQueryString(params);
   const response = await apiGet<unknown>(`${VIOLATIONS_PATH}${queryString}`);
   return assertResponse(response, isViolationsListResponse, 'ViolationsListResponse');
+}
+
+/**
+ * Violations grouped into incidents (same camera + specific type, repeats
+ * within the backend's window). Paged by incident, with `offset`.
+ */
+export async function fetchIncidents(
+  params?: ViolationsQueryParams
+): Promise<IncidentListResponse> {
+  const response = await apiGet<unknown>(`${VIOLATIONS_PATH}/incidents${buildQueryString(params)}`);
+  return assertResponse(response, isIncidentListResponse, 'IncidentListResponse');
 }
 
 /**

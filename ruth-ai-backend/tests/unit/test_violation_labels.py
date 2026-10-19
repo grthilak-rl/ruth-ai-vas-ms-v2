@@ -99,9 +99,13 @@ def test_type_fields_for_a_response():
         "type_detail": "missing_gloves",
         "type_label": "PPE Violation",
         "detail_label": "Missing gloves",
+        "severity": "high",  # no manifest severity given -> PPE family default
     }
     fall = SimpleNamespace(type=FALL, type_detail=None, model_id="fall_detection")
     assert labeler.type_fields(fall)["detail_label"] is None
+    assert labeler.type_fields(fall)["severity"] == "critical"
+    stored = SimpleNamespace(type=PPE, type_detail="missing_gloves", model_id="x", severity="LOW")
+    assert labeler.type_fields(stored)["severity"] == "low"  # stored value wins
 
 
 # --------------------------------------------------------------------------

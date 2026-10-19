@@ -26,6 +26,10 @@ class ViolationEvidenceSummary(BaseModel):
         None,
         description="Inferred-frame status, or null when no frame was saved",
     )
+    #: The inferred frame cropped around the detection, for cards.
+    frame_thumb_url: str | None = Field(
+        None, description="Cropped, annotated card thumbnail of the inferred frame (if ready)"
+    )
     snapshot_id: str | None = Field(None, description="VAS snapshot ID")
     snapshot_url: str | None = Field(None, description="Snapshot URL (if ready)")
     snapshot_status: str = Field(default="pending", description="Snapshot status")
@@ -51,6 +55,15 @@ class ViolationResponse(BaseModel):
     detail_label: str | None = Field(
         None, description="Human label for the specific type (e.g. Missing gloves), or null"
     )
+    severity: str = Field(
+        "medium",
+        description="Firing rule's severity from its manifest: critical, high, medium or low",
+    )
+    camera_display_name: str | None = Field(
+        None, description="Camera display name (e.g. REFORMER1_OUT_75081), when known"
+    )
+    camera_area: str | None = Field(None, description="Camera's area / manway (e.g. REFORMER1)")
+    camera_in_out: str | None = Field(None, description="IN or OUT side of the area")
     status: str = Field(..., description="Violation status")
     camera_id: uuid.UUID = Field(..., description="Device/camera UUID")
     camera_name: str = Field(..., description="Camera display name")
@@ -89,6 +102,15 @@ class ViolationDetailResponse(BaseModel):
     detail_label: str | None = Field(
         None, description="Human label for the specific type (e.g. Missing gloves), or null"
     )
+    severity: str = Field(
+        "medium",
+        description="Firing rule's severity from its manifest: critical, high, medium or low",
+    )
+    camera_display_name: str | None = Field(
+        None, description="Camera display name (e.g. REFORMER1_OUT_75081), when known"
+    )
+    camera_area: str | None = Field(None, description="Camera's area / manway (e.g. REFORMER1)")
+    camera_in_out: str | None = Field(None, description="IN or OUT side of the area")
     status: str = Field(..., description="Violation status")
     camera_id: uuid.UUID = Field(..., description="Device/camera UUID")
     camera_name: str = Field(..., description="Camera display name")
@@ -144,6 +166,42 @@ class ViolationTypesResponse(BaseModel):
     """Response schema for GET /api/v1/violations/types."""
 
     items: list[ViolationTypeOption] = Field(..., description="Families, largest first")
+
+
+class IncidentResponse(BaseModel):
+    """Repeated violations of one type on one camera, shown as one card."""
+
+    incident_id: str = Field(..., description="Stable while the incident grows")
+    camera_id: uuid.UUID = Field(..., description="Device/camera UUID")
+    camera_name: str = Field(..., description="Camera name (its number)")
+    camera_display_name: str | None = Field(None, description="Camera display name")
+    camera_area: str | None = Field(None, description="Camera's area / manway")
+    camera_in_out: str | None = Field(None, description="IN or OUT")
+    type: str = Field(..., description="Family")
+    type_detail: str | None = Field(None, description="Specific type, or null")
+    type_label: str = Field(..., description="Family label")
+    detail_label: str | None = Field(None, description="Specific label, or null")
+    severity: str = Field(..., description="Worst member severity")
+    count: int = Field(..., description="Violations in the incident (after filters)")
+    open_count: int = Field(..., description="Of those, still open")
+    first_at: datetime = Field(..., description="First violation")
+    last_at: datetime = Field(..., description="Latest violation")
+    has_clip: bool = Field(..., description="At least one member has a ready clip")
+    violation_ids: list[uuid.UUID] = Field(..., description="Members, newest first")
+    open_violation_ids: list[uuid.UUID] = Field(
+        ..., description="Members still open, newest first: what group actions apply to"
+    )
+    representative: ViolationResponse = Field(..., description="The latest member")
+
+
+class IncidentListResponse(BaseModel):
+    """Response schema for GET /api/v1/violations/incidents."""
+
+    items: list[IncidentResponse] = Field(..., description="Incidents, most recently active first")
+    total: int = Field(..., description="Total incidents matching the filters")
+    violations_total: int = Field(..., description="Violations those incidents contain")
+    gap_minutes: int = Field(..., description="Grouping window in force")
+    max_span_minutes: int = Field(..., description="Longest incident span in force")
 
 
 class ViolationQueryParams(BaseModel):

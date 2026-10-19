@@ -195,6 +195,11 @@ export interface HealthResponse {
 // ============================================================================
 
 /**
+ * Rule severity, most to least severe (from the model's manifest)
+ */
+export type Severity = 'critical' | 'high' | 'medium' | 'low';
+
+/**
  * Violation type (extensible)
  */
 export type ViolationType = 'fall_detected' | string;
@@ -241,6 +246,8 @@ export interface ViolationEvidence {
    */
   frame_url?: string | null;
   frame_status?: EvidenceStatus | null;
+  /** The inferred frame cropped around the detection, for cards (320x240). */
+  frame_thumb_url?: string | null;
   /** Proxied URL - only valid if snapshot_status = "ready" */
   snapshot_url: string | null;
 
@@ -337,6 +344,16 @@ export interface Violation {
 
   /** Human label for the specific type ("Missing gloves"), or null. */
   detail_label?: string | null;
+
+  /** Firing rule's severity from its manifest (not confidence). */
+  severity?: Severity;
+
+  /** Camera display name, e.g. "REFORMER1_OUT_75081" (null when unknown) */
+  camera_display_name?: string | null;
+  /** Camera's area / manway, e.g. "REFORMER1" */
+  camera_area?: string | null;
+  /** Which side of the area the camera watches */
+  camera_in_out?: string | null;
 
   /** Reference to device - camera MAY be deleted */
   camera_id: UUID;
@@ -701,8 +718,17 @@ export interface AnalyticsSummaryResponse {
  * Note (F6 §7.1): Always specify sort_by - never assume default order.
  */
 export interface ViolationsQueryParams {
-  /** Filter by status */
-  status?: ViolationStatus;
+  /** Filter by status (one, or several) */
+  status?: ViolationStatus | ViolationStatus[];
+
+  /** Filter by severity (several allowed) */
+  severity?: Severity[];
+
+  /** Filter by camera area (manway) */
+  area?: string;
+
+  /** Pagination offset, for endpoints that page by offset */
+  offset?: number;
 
   /** Filter by camera ID */
   camera_id?: UUID;
@@ -866,4 +892,44 @@ export interface ViolationTypeOption {
 
 export interface ViolationTypesResponse {
   items: ViolationTypeOption[];
+}
+
+/**
+ * Repeated violations of one type on one camera, shown as one card.
+ *
+ * Source: GET /api/v1/violations/incidents
+ */
+export interface Incident {
+  incident_id: string;
+  camera_id: UUID;
+  camera_name: string;
+  camera_display_name?: string | null;
+  camera_area?: string | null;
+  camera_in_out?: string | null;
+  type: ViolationType;
+  type_detail: string | null;
+  type_label: string;
+  detail_label: string | null;
+  /** Worst member severity */
+  severity: Severity;
+  /** Violations in the incident (after filters) */
+  count: number;
+  open_count: number;
+  first_at: ISOTimestamp;
+  last_at: ISOTimestamp;
+  has_clip: boolean;
+  /** Members, newest first */
+  violation_ids: UUID[];
+  /** Members still open, newest first: what group actions apply to */
+  open_violation_ids: UUID[];
+  /** The latest member */
+  representative: Violation;
+}
+
+export interface IncidentListResponse {
+  items: Incident[];
+  total: number;
+  violations_total: number;
+  gap_minutes: number;
+  max_span_minutes: number;
 }

@@ -55,6 +55,7 @@ from app.models import (
     ViolationStatus,
 )
 from app.models.enums import is_known_violation_type, resolve_violation_type
+from app.services.violation_severity import resolve_severity
 from app.integrations.unified_runtime.router import RuntimeRouter
 from app.integrations.vas import VASClient
 
@@ -1725,6 +1726,13 @@ class InferenceLoopService:
                     stream_session_id=session_id,
                     type=violation_enum,
                     type_detail=violation_detail,
+                    severity=resolve_severity(
+                        reported=inference_result.get("severity"),
+                        type_=violation_enum,
+                        type_detail=violation_detail,
+                        model_id=model_id,
+                        store_models=enabled_store_models(),
+                    ),
                     status=ViolationStatus.OPEN,  # New violations start as OPEN
                     confidence=confidence,
                     timestamp=datetime.now(timezone.utc),

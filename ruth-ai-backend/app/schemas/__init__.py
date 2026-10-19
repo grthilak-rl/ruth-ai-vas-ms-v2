@@ -82,6 +82,8 @@ from app.schemas.evidence import (
     VideoEvidenceResponse,
 )
 from app.schemas.violation import (
+    IncidentListResponse,
+    IncidentResponse,
     ViolationDetailResponse,
     ViolationEvidenceSummary,
     ViolationListResponse,
@@ -122,6 +124,8 @@ __all__ = [
     # Violation schemas
     "ViolationResponse",
     "ViolationDetailResponse",
+    "IncidentResponse",
+    "IncidentListResponse",
     "ViolationEvidenceSummary",
     "ViolationListResponse",
     "ViolationQueryParams",

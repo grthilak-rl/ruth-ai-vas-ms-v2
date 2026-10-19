@@ -48,12 +48,21 @@ class StoreModelInfo:
     #: e.g. ("missing_gloves", "Missing gloves"). Pairs rather than a dict so
     #: the dataclass stays hashable; see ``rule_label``.
     rule_labels: Tuple[Tuple[str, str], ...] = field(default_factory=tuple)
+    #: (violation_type, severity) per rule, e.g. ("missing_vest", "critical").
+    rule_severities: Tuple[Tuple[str, str], ...] = field(default_factory=tuple)
 
     def rule_label(self, violation_type: str) -> Optional[str]:
         """The manifest's display name for a violation type, if it gives one."""
         for vtype, label in self.rule_labels:
             if vtype == violation_type:
                 return label
+        return None
+
+    def rule_severity(self, violation_type: str) -> Optional[str]:
+        """The manifest rule's severity for a violation type, if it gives one."""
+        for vtype, severity in self.rule_severities:
+            if vtype == violation_type:
+                return severity
         return None
 
 
@@ -79,6 +88,11 @@ def _info_from_manifest(model_id: str, version: str, manifest: dict) -> StoreMod
         and isinstance(r.get("display_name"), str)
         and r["display_name"].strip()
     )
+    rule_severities = tuple(
+        (str(r["violation_type"]).strip().lower(), str(r["severity"]).strip().lower())
+        for r in rules
+        if r.get("violation_type") and isinstance(r.get("severity"), str) and r["severity"].strip()
+    )
     floors = [
         float(r["min_confidence"])
         for r in rules
@@ -93,6 +107,7 @@ def _info_from_manifest(model_id: str, version: str, manifest: dict) -> StoreMod
         reports_ppe=reports_ppe,
         min_confidence=min(floors) if floors else 1.0,
         rule_labels=rule_labels,
+        rule_severities=rule_severities,
     )
 
 

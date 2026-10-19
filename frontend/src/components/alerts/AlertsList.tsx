@@ -1,85 +1,24 @@
-import { useState, useCallback, useMemo, useEffect, useRef } from 'react';
-import {
-  useViolationsQuery,
-  useAcknowledgeViolation,
-  useDismissViolation,
-} from '../../state';
-import type { Violation, ViolationStatus } from '../../state/api';
+import { useState, useCallback, useMemo } from 'react';
+import { useApplyViolationStatus, useIncidentsQuery } from '../../state';
+import type { Incident, Violation } from '../../state/api';
 import type { AlertFilters } from './AlertsFilterSidebar';
-import { ViolationCard } from './ViolationCard';
+import { IncidentCard, type IncidentAction } from './IncidentCard';
 import { DismissConfirmationDialog } from './DismissConfirmationDialog';
 import { Toast, type ToastType } from './Toast';
 import { AlertsListSkeleton } from './AlertsListSkeleton';
 import { Pagination } from '../ui';
-import { typeFilterToParams } from '../../utils/violationLabels';
+import { alertFiltersToParams } from './alertFilters';
+import { cameraHeadline, formatIncidentSpan } from '../../utils/violationDisplay';
 import './AlertsList.css';
 
-/** Default page size for violations list */
+/** Default page size (incidents) */
 const DEFAULT_PAGE_SIZE = 10;
 
-/**
- * Sort violations explicitly (F6 §7.1)
- *
- * HARD RULE: MUST NOT assume backend order.
- * Frontend must sort explicitly.
- *
- * Sorting: newest first by timestamp.
- */
-function sortViolations(violations: Violation[]): Violation[] {
-  return [...violations].sort((a, b) => {
-    const dateA = new Date(a.timestamp).getTime();
-    const dateB = new Date(b.timestamp).getTime();
-    return dateB - dateA; // Newest first
-  });
-}
+type PendingConfirm =
+  | { kind: 'group'; incident: Incident; action: IncidentAction; ids: string[] }
+  | { kind: 'member'; incident: Incident; violation: Violation };
 
-/**
- * Convert AlertFilters to API query parameters
- */
-function filtersToQueryParams(filters: AlertFilters, page: number, pageSize: number) {
-  // For status, we need to pick one or query multiple
-  // Since the API only supports one status, we'll use the first selected
-  // If multiple are selected, we fetch without status filter and filter client-side
-  const selectedStatuses = filters.statuses;
-  const singleStatus = selectedStatuses.length === 1 ? selectedStatuses[0] : undefined;
-
-  // Convert dates to ISO strings with time
-  let since: string | undefined;
-  let until: string | undefined;
-
-  if (filters.dateFrom) {
-    // Start of day
-    since = `${filters.dateFrom}T00:00:00Z`;
-  }
-
-  if (filters.dateTo) {
-    // End of day
-    until = `${filters.dateTo}T23:59:59Z`;
-  }
-
-  return {
-    status: singleStatus,
-    camera_id: filters.cameraId || undefined,
-    since,
-    until,
-    // Family and/or specific type, filtered server-side so pagination and
-    // totals stay right.
-    ...typeFilterToParams(filters.violationType),
-    sort_by: 'timestamp' as const,
-    sort_order: 'desc' as const,
-    page,
-    limit: pageSize,
-  };
-}
-
-/**
- * Filter violations by selected statuses (client-side)
- * Used when multiple statuses are selected
- */
-function filterByStatuses(violations: Violation[], statuses: ViolationStatus[]): Violation[] {
-  if (statuses.length === 0) return violations; // No filter = all
-  return violations.filter(v => statuses.includes(v.status as ViolationStatus));
-}
+const plural = (n: number, word: string) => `${n} ${word}${n === 1 ? '' : 's'}`;
 
 interface AlertsListProps {
   /** Filter configuration from sidebar */
@@ -87,262 +26,194 @@ interface AlertsListProps {
 }
 
 /**
- * Alerts List Component (F4/F5-aligned)
+ * Alerts List — violations grouped into incidents.
  *
- * Main list view for active violations.
+ * Repeated violations (same camera + specific type, each within the
+ * backend's window of the previous) are one card with a count and span, so
+ * a camera firing every few seconds no longer buries everything else.
  *
- * Per F5 §A1:
- * - New items prepend without scroll jump (via CSS)
- * - Each action completes independently
- * - No blocking between cards
- *
- * Per F4:
- * - Loading: Skeleton placeholders
- * - Empty: "No active violations" message
- * - Error: Friendly message + retry
- *
- * HARD RULES:
- * - F6 §7.1: MUST NOT assume backend order - sort explicitly
- * - F5: One failing action MUST NOT block others
- * - F3 Flow 3: Dismiss requires confirmation
+ * Actions:
+ * - On a card: apply to the incident's OPEN violations, after a count
+ *   confirmation ("Dismiss 12 violations?"). The ids are fixed when the
+ *   dialog opens, so repeats arriving meanwhile are not swept in unseen.
+ * - On an expanded row: that violation alone (Dismiss still confirms).
+ * Failures are reported per incident, with how many did not save.
  */
 export function AlertsList({ filters }: AlertsListProps) {
-  // Pagination state
-  const [currentPage, setCurrentPage] = useState(1);
+  // The page belongs to the filters it was chosen under: change a filter
+  // and the list is back on page 1, derived rather than reset in an effect.
+  const filterKey = JSON.stringify(filters);
+  const [paging, setPaging] = useState({ key: filterKey, page: 1 });
+  const currentPage = paging.key === filterKey ? paging.page : 1;
+  const setCurrentPage = useCallback((page: number) => setPaging({ key: filterKey, page }), [filterKey]);
   const [pageSize, setPageSize] = useState(DEFAULT_PAGE_SIZE);
 
-  // Reset to page 1 when filters change
-  const queryParams = useMemo(() => {
-    // Reset page when filters change (except for the first render)
-    return filtersToQueryParams(filters, currentPage, pageSize);
-  }, [filters, currentPage, pageSize]);
+  const queryParams = useMemo(
+    () => alertFiltersToParams(filters, currentPage, pageSize),
+    [filters, currentPage, pageSize]
+  );
+  const { data, isLoading, isFetching, isError, refetch } = useIncidentsQuery(queryParams);
 
-  // Fetch violations with filters and pagination
-  const {
-    data,
-    isLoading,
-    isFetching,
-    isError,
-    refetch,
-  } = useViolationsQuery(queryParams);
-
-  // Track previous filter values to detect changes
-  const prevFiltersRef = useRef<string | null>(null);
-
-  // Reset to page 1 when filters change
-  useEffect(() => {
-    const filterKey = `${filters.statuses.join(',')}-${filters.dateFrom}-${filters.dateTo}-${filters.cameraId}-${filters.violationType}`;
-
-    // Only reset page if filters actually changed (not on first render)
-    if (prevFiltersRef.current !== null && prevFiltersRef.current !== filterKey) {
-      setCurrentPage(1);
-    }
-    prevFiltersRef.current = filterKey;
-  }, [filters.statuses, filters.dateFrom, filters.dateTo, filters.cameraId, filters.violationType]);
-
-  // Handle page change
   const handlePageChange = useCallback((page: number) => {
     setCurrentPage(page);
-    // Scroll to top of list when page changes
     window.scrollTo({ top: 0, behavior: 'smooth' });
-  }, []);
+  }, [setCurrentPage]);
 
-  // Handle page size change
   const handlePageSizeChange = useCallback((size: number) => {
     setPageSize(size);
     setCurrentPage(1);
-  }, []);
+  }, [setCurrentPage]);
 
-  // Action mutations
-  const acknowledgeMutation = useAcknowledgeViolation();
-  const dismissMutation = useDismissViolation();
+  const applyStatus = useApplyViolationStatus();
+  const [pending, setPending] = useState<Record<string, boolean>>({});
+  const [errors, setErrors] = useState<Record<string, string>>({});
+  const [confirm, setConfirm] = useState<PendingConfirm | null>(null);
+  const [toast, setToast] = useState<{ message: string; type: ToastType; isVisible: boolean }>({
+    message: '',
+    type: 'success',
+    isVisible: false,
+  });
 
-  // Track per-card action state
-  const [pendingActions, setPendingActions] = useState<Record<string, 'acknowledge' | 'dismiss'>>({});
-  const [actionErrors, setActionErrors] = useState<Record<string, string>>({});
-
-  // Dismiss confirmation dialog state
-  const [dismissDialogState, setDismissDialogState] = useState<{
-    isOpen: boolean;
-    violationId: string | null;
-  }>({ isOpen: false, violationId: null });
-
-  // Toast state
-  const [toast, setToast] = useState<{
-    message: string;
-    type: ToastType;
-    isVisible: boolean;
-  }>({ message: '', type: 'success', isVisible: false });
-
-  // Sort and filter violations
-  const sortedViolations = useMemo(() => {
-    if (!data?.items) return [];
-
-    // If multiple statuses are selected, we fetched without status filter
-    // so we need to filter client-side
-    let violations = data.items;
-    if (filters.statuses.length !== 1) {
-      violations = filterByStatuses(violations, filters.statuses);
-    }
-
-    return sortViolations(violations);
-  }, [data?.items, filters.statuses]);
-
-  // Handle acknowledge action
-  const handleAcknowledge = useCallback(async (id: string) => {
-    // Clear any previous error for this card
-    setActionErrors((prev) => {
-      const next = { ...prev };
-      delete next[id];
-      return next;
-    });
-
-    // Mark as pending
-    setPendingActions((prev) => ({ ...prev, [id]: 'acknowledge' }));
-
-    try {
-      await acknowledgeMutation.acknowledge(id);
-
-      // Show success toast
-      setToast({
-        message: 'Violation marked as reviewed',
-        type: 'success',
-        isVisible: true,
-      });
-    } catch (err) {
-      // Show inline error (F5 §B3: no silent failures)
-      const message = err instanceof Error ? err.message : 'Couldn\'t save. Please try again.';
-      setActionErrors((prev) => ({ ...prev, [id]: message }));
-    } finally {
-      // Clear pending state
-      setPendingActions((prev) => {
+  /** Apply an action to ids; errors are recorded against `cardKey`. */
+  const run = useCallback(
+    async (cardKey: string, ids: string[], action: IncidentAction) => {
+      setErrors((prev) => {
         const next = { ...prev };
-        delete next[id];
+        delete next[cardKey];
         return next;
       });
-    }
-  }, [acknowledgeMutation]);
-
-  // Handle dismiss button click (opens confirmation)
-  const handleDismissClick = useCallback((id: string) => {
-    setDismissDialogState({ isOpen: true, violationId: id });
-  }, []);
-
-  // Handle dismiss confirmation
-  const handleDismissConfirm = useCallback(async () => {
-    const id = dismissDialogState.violationId;
-    if (!id) return;
-
-    // Clear any previous error
-    setActionErrors((prev) => {
-      const next = { ...prev };
-      delete next[id];
-      return next;
-    });
-
-    // Mark as pending
-    setPendingActions((prev) => ({ ...prev, [id]: 'dismiss' }));
-
-    try {
-      await dismissMutation.dismiss(id);
-
-      // Close dialog
-      setDismissDialogState({ isOpen: false, violationId: null });
-
-      // Show success toast (F5 §A1: "Toast: Violation dismissed")
-      setToast({
-        message: 'Violation dismissed',
-        type: 'success',
-        isVisible: true,
+      setPending((prev) => ({ ...prev, [cardKey]: true }));
+      const { succeeded, failed } = await applyStatus(ids, {
+        status: action === 'review' ? 'reviewed' : 'dismissed',
       });
-    } catch (err) {
-      // Close dialog and show inline error
-      setDismissDialogState({ isOpen: false, violationId: null });
-      const message = err instanceof Error ? err.message : 'Couldn\'t dismiss. Please try again.';
-      setActionErrors((prev) => ({ ...prev, [id]: message }));
-    } finally {
-      // Clear pending state
-      setPendingActions((prev) => {
+      setPending((prev) => {
         const next = { ...prev };
-        delete next[id];
+        delete next[cardKey];
         return next;
       });
+      if (failed.length) {
+        setErrors((prev) => ({
+          ...prev,
+          [cardKey]: `${failed.length} of ${ids.length} couldn't be saved. Please try again.`,
+        }));
+      }
+      if (succeeded.length) {
+        const verb = action === 'review' ? 'marked as reviewed' : 'dismissed';
+        setToast({ message: `${plural(succeeded.length, 'violation')} ${verb}`, type: 'success', isVisible: true });
+      }
+    },
+    [applyStatus]
+  );
+
+  const handleGroupAction = useCallback((incident: Incident, action: IncidentAction) => {
+    setConfirm({ kind: 'group', incident, action, ids: [...incident.open_violation_ids] });
+  }, []);
+
+  // Row actions report on their incident's card, where the row is.
+  const handleMemberAction = useCallback(
+    (incident: Incident, violation: Violation, action: IncidentAction) => {
+      if (action === 'dismiss') {
+        setConfirm({ kind: 'member', incident, violation });
+      } else {
+        void run(incident.incident_id, [violation.id], 'review');
+      }
+    },
+    [run]
+  );
+
+  const handleConfirm = useCallback(async () => {
+    if (!confirm) return;
+    const current = confirm;
+    setConfirm(null);
+    if (current.kind === 'group') {
+      await run(current.incident.incident_id, current.ids, current.action);
+    } else {
+      await run(current.incident.incident_id, [current.violation.id], 'dismiss');
     }
-  }, [dismissDialogState.violationId, dismissMutation]);
+  }, [confirm, run]);
 
-  // Handle dismiss cancel
-  const handleDismissCancel = useCallback(() => {
-    setDismissDialogState({ isOpen: false, violationId: null });
-  }, []);
+  const dialog = useMemo(() => {
+    if (!confirm) return null;
+    if (confirm.kind === 'member') return {};
+    const { incident, action, ids } = confirm;
+    const what = `${incident.detail_label ?? incident.type_label} on ${cameraHeadline(incident)}, ${formatIncidentSpan(incident.first_at, incident.last_at)}.`;
+    return action === 'dismiss'
+      ? {
+          title: `Dismiss ${plural(ids.length, 'violation')}?`,
+          message: what,
+          note: `Only the incident's open violations are dismissed. They stay findable under the "Dismissed" status filter.`,
+          confirmLabel: `Yes, dismiss ${ids.length}`,
+        }
+      : {
+          title: `Mark ${plural(ids.length, 'violation')} reviewed?`,
+          message: what,
+          note: `Only the incident's open violations are changed.`,
+          confirmLabel: `Mark ${ids.length} reviewed`,
+          pendingLabel: 'Saving...',
+        };
+  }, [confirm]);
 
-  // Handle toast dismiss
-  const handleToastDismiss = useCallback(() => {
-    setToast((prev) => ({ ...prev, isVisible: false }));
-  }, []);
-
-  // Loading state (F4: skeleton placeholders)
   if (isLoading) {
     return <AlertsListSkeleton />;
   }
 
-  // Error state (F4: friendly message + retry)
   if (isError) {
     return (
       <div className="alerts-list__error" role="alert">
-        <p className="alerts-list__error-message">
-          Couldn't load alerts. Please try again.
-        </p>
-        <button
-          type="button"
-          className="alerts-list__error-retry"
-          onClick={() => refetch()}
-        >
+        <p className="alerts-list__error-message">Couldn't load alerts. Please try again.</p>
+        <button type="button" className="alerts-list__error-retry" onClick={() => refetch()}>
           Retry
         </button>
       </div>
     );
   }
 
-  // Empty state
-  if (sortedViolations.length === 0) {
-    // Customize message based on filters
-    const hasFilters = filters.statuses.length > 0 ||
+  const incidents = data?.items ?? [];
+
+  if (incidents.length === 0) {
+    const hasFilters =
+      filters.statuses.length > 0 ||
       filters.dateFrom !== null ||
       filters.dateTo !== null ||
-      filters.cameraId !== null;
-
+      filters.cameraId !== null ||
+      filters.violationType !== '' ||
+      filters.severities.length > 0 ||
+      filters.area !== null;
     return (
       <div className="alerts-list__empty">
         <p className="alerts-list__empty-message">
           {hasFilters ? 'No violations match your filters' : 'No active violations'}
         </p>
         <p className="alerts-list__empty-hint">
-          {hasFilters
-            ? 'Try adjusting your filter criteria.'
-            : 'New detections will appear here automatically.'}
+          {hasFilters ? 'Try adjusting your filter criteria.' : 'New detections will appear here automatically.'}
         </p>
       </div>
     );
   }
 
-  // Normal state with violations
   return (
     <>
+      {data && (
+        <p className="alerts-list__grouping">
+          {plural(data.total, 'incident')} · {plural(data.violations_total, 'violation')} · repeats within{' '}
+          {data.gap_minutes} min on the same camera are grouped
+        </p>
+      )}
+
       <div className="alerts-list">
-        {sortedViolations.map((violation) => (
-          <ViolationCard
-            key={violation.id}
-            violation={violation}
-            onAcknowledge={handleAcknowledge}
-            onDismiss={handleDismissClick}
-            isActionPending={!!pendingActions[violation.id]}
-            pendingAction={pendingActions[violation.id] || null}
-            actionError={actionErrors[violation.id] || null}
+        {incidents.map((incident) => (
+          <IncidentCard
+            key={incident.incident_id}
+            incident={incident}
+            statuses={filters.statuses}
+            onGroupAction={handleGroupAction}
+            onMemberAction={handleMemberAction}
+            isPending={!!pending[incident.incident_id]}
+            error={errors[incident.incident_id] ?? null}
           />
         ))}
       </div>
 
-      {/* Pagination controls */}
       <Pagination
         currentPage={currentPage}
         totalItems={data?.total ?? 0}
@@ -353,24 +224,18 @@ export function AlertsList({ filters }: AlertsListProps) {
         disabled={isFetching}
       />
 
-      {/* Dismiss confirmation dialog */}
       <DismissConfirmationDialog
-        isOpen={dismissDialogState.isOpen}
-        onConfirm={handleDismissConfirm}
-        onCancel={handleDismissCancel}
-        isPending={
-          dismissDialogState.violationId
-            ? pendingActions[dismissDialogState.violationId] === 'dismiss'
-            : false
-        }
+        isOpen={confirm !== null}
+        onConfirm={handleConfirm}
+        onCancel={() => setConfirm(null)}
+        {...dialog}
       />
 
-      {/* Toast notifications */}
       <Toast
         message={toast.message}
         type={toast.type}
         isVisible={toast.isVisible}
-        onDismiss={handleToastDismiss}
+        onDismiss={() => setToast((prev) => ({ ...prev, isVisible: false }))}
       />
     </>
   );

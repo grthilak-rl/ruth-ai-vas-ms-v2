@@ -1,5 +1,7 @@
 import type { Violation } from '../../state/api';
 import type { ConfidenceCategory } from '../../state';
+import { SeverityBadge } from '../alerts/SeverityBadge';
+import { cameraHeadline, cameraNumber } from '../../utils/violationDisplay';
 import {
   LABEL_SEPARATOR,
   violationDetailLabel,
@@ -100,7 +102,17 @@ export function ViolationMetadata({
 
         <div className="violation-metadata__item">
           <dt className="violation-metadata__label">Camera</dt>
-          <dd className="violation-metadata__value">{violation.camera_name}</dd>
+          <dd className="violation-metadata__value">
+            <span className="violation-metadata__nowrap">{cameraHeadline(violation)}</span>{' '}
+            <span className="violation-metadata__nowrap">#{cameraNumber(violation)}</span>
+          </dd>
+        </div>
+
+        <div className="violation-metadata__item">
+          <dt className="violation-metadata__label">Severity</dt>
+          <dd className="violation-metadata__value">
+            <SeverityBadge severity={violation.severity} />
+          </dd>
         </div>
 
         <div className="violation-metadata__item">
