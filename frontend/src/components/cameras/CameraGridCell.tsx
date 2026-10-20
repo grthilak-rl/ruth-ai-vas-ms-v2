@@ -54,10 +54,13 @@ interface CameraGridCellProps {
   pickerError?: string | null;
   /** A standing warning about this camera's model combination. */
   pickerWarning?: string | null;
+  /** Auto-resume has given up on this camera for now (BL-11 A). */
+  recoveryFailed?: boolean;
 }
 
 export function CameraGridCell({
   camera,
+  recoveryFailed = false,
   status,
   detectionStatus,
   aiModels,
@@ -205,6 +208,16 @@ export function CameraGridCell({
             data-testid="feed-badge"
           >
             ⚠ {feed === 'no_video' ? 'NO VIDEO' : 'NOT RECORDING'}
+          </span>
+        ) : recoveryFailed ? (
+          // Ranked above NOT MONITORED because it is the *reason* this
+          // camera is unmonitored, and unlike that badge it says nothing
+          // will fix itself.
+          <span
+            className="camera-grid-cell__detection camera-grid-cell__detection--recovery-failed"
+            title="Inference stopped and could not be restarted automatically. The video is live and the services are up, so this needs looking at."
+          >
+            ⚠ RECOVERY FAILED
           </span>
         ) : isUncovered ? (
           <span

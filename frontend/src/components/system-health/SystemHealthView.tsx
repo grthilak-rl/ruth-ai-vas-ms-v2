@@ -3,6 +3,7 @@ import type { Device, HealthResponse, ModelStatusInfo } from '../../state';
 import { formatUptime } from '../../state';
 import { ServiceStatusCard, type ServiceHealthStatus } from './ServiceStatusCard';
 import { MonitoringCoverage } from './MonitoringCoverage';
+import { AutoResumeCard } from './AutoResumeCard';
 import { CameraFeeds } from './CameraFeeds';
 import {
   deriveStoreRuntimeStatus,
@@ -163,6 +164,7 @@ export function SystemHealthView({
       {/* Feeds first: a camera with no video can't be monitored at all. */}
       <CameraFeeds devices={devices} isLoading={devicesLoading} />
       <MonitoringCoverage devices={devices} isLoading={devicesLoading} />
+      <AutoResumeCard />
 
       <section className="system-health-view__section">
         <h2 className="system-health-view__section-title">Service Health</h2>

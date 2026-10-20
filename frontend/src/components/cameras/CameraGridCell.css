@@ -203,3 +203,12 @@
   border-radius: 3px;
   padding: 0.0625rem 0.375rem;
 }
+
+/* Auto-resume gave up on this camera (BL-11 A). Deliberately louder than
+ * NOT MONITORED: that badge says nobody is watching, this one says nobody
+ * is watching AND it will not come back without a person. */
+.camera-grid-cell__detection--recovery-failed {
+  color: #fff;
+  background-color: #b3261e;
+  font-weight: 600;
+}

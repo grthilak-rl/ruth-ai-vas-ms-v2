@@ -1,0 +1,65 @@
+/* Auto-resume (BL-11 A). Quiet when nothing needed restarting; loud when
+ * a camera is parked, because a parked camera will not fix itself. */
+.auto-resume {
+  padding: 0.875rem 1.125rem;
+  margin-bottom: 1.25rem;
+  background-color: #fff;
+  border: 1px solid #e0e0e0;
+  border-left-width: 4px;
+  border-radius: 8px;
+}
+
+.auto-resume--ok { border-left-color: #1e7e34; }
+.auto-resume--warn {
+  background-color: #fff8f7;
+  border-color: #f5c6c2;
+  border-left-color: #d93025;
+}
+
+.auto-resume__headline {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem 1rem;
+  align-items: baseline;
+  justify-content: space-between;
+}
+
+.auto-resume__label { font-size: 0.875rem; font-weight: 600; color: #1a1a1a; }
+.auto-resume__summary { font-size: 0.875rem; color: #555; }
+
+.auto-resume__dependency {
+  margin: 0.625rem 0 0 0;
+  font-size: 0.8125rem;
+  color: #8a6d00;
+}
+
+.auto-resume__parked {
+  margin-top: 0.75rem;
+  padding-top: 0.75rem;
+  border-top: 1px solid #f5c6c2;
+}
+
+.auto-resume__parked-title {
+  margin: 0 0 0.5rem 0;
+  font-size: 0.875rem;
+  font-weight: 500;
+  color: #b3261e;
+}
+
+.auto-resume__list, .auto-resume__recent {
+  margin: 0;
+  padding-left: 1.25rem;
+  font-size: 0.8125rem;
+  line-height: 1.6;
+  color: #333;
+}
+
+.auto-resume__recent { margin-top: 0.625rem; color: #666; }
+.auto-resume__camera { font-weight: 600; }
+.auto-resume__detail { color: #666; }
+.auto-resume__error {
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 0.75rem;
+  color: #8a1c15;
+  overflow-wrap: anywhere;
+}

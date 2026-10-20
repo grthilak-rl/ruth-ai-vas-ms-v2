@@ -5,6 +5,7 @@ import { CameraSelectorDropdown } from './CameraSelectorDropdown';
 import { ShiftConfigDropdown } from './ShiftConfigDropdown';
 import { ShiftIndicator } from './ShiftIndicator';
 import { CameraGridCell } from './CameraGridCell';
+import { useParkedCameras } from '../../state/hooks/useParkedCameras';
 import { useShiftViolationCountsQuery } from '../../state/hooks/useShiftQuery';
 import type { AIModel } from './AIModelSelector';
 import type { Device } from '../../state';
@@ -104,6 +105,8 @@ export function CameraMonitoringDashboard({
   showDisabled,
   onShowDisabledChange,
 }: CameraMonitoringDashboardProps) {
+  // Cameras auto-resume has given up on, for the tile badge (BL-11 A).
+  const parkedCameras = useParkedCameras();
   // Grid layout (rows x columns) and which camera sits at which position.
   // Positions are never trimmed on a layout change — shrinking hides tiles,
   // growing back shows the same cameras where they were — the same model as
@@ -665,6 +668,7 @@ export function CameraMonitoringDashboard({
               shouldAutoConnect={shouldAutoConnect}
               autoConnectDelayMs={autoConnectDelayMs}
               runningModelIds={runningModelIds(cell.camera)}
+              recoveryFailed={parkedCameras.has(cell.camera.id)}
               onPickerOpen={handlePickerOpen}
               pickerError={pickerErrors[cell.camera.id]}
               pickerWarning={ppeOverlapWarning(availableModels, runningModelIds(cell.camera))}

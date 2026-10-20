@@ -17,3 +17,4 @@ export { ModelStatusCard } from './ModelStatusCard';
 
 // Audit events
 export { MonitoringCoverage } from './MonitoringCoverage';
+export { AutoResumeCard } from './AutoResumeCard';
