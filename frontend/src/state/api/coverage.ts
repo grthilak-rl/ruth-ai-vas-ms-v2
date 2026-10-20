@@ -41,7 +41,15 @@ export type CoverageState =
   /** Video live, inference absent beyond the grace window. The alert. */
   | 'uncovered'
   /** No live video, so inference is not expected. Not a coverage problem. */
-  | 'no_video';
+  | 'no_video'
+  /**
+   * Nothing has been configured to run here. A *configuration* gap, not a
+   * monitoring failure: before this state such a camera read 'uncovered',
+   * which says "inference should be running and isn't" and sends an
+   * operator looking for a fault that does not exist. A newly added camera
+   * sits here until somebody picks models for it.
+   */
+  | 'no_models';
 
 export interface CameraCoverage {
   device: Device;
@@ -57,6 +65,7 @@ export interface CameraCoverage {
  */
 export function cameraCoverage(device: Device, now: number = Date.now()): CameraCoverage {
   const { video_live, active, inference_absent_since } = device.streaming;
+  const hasModels = (device.streaming.models ?? []).length > 0;
 
   // No video means inference is not expected to be running, so its absence
   // is not a coverage gap. A camera that is genuinely offline is a
@@ -69,6 +78,13 @@ export function cameraCoverage(device: Device, now: number = Date.now()): Camera
 
   if (active) {
     return { device, state: 'covered', absentForMs: null };
+  }
+
+  // Nothing configured to run. Checked after `active` deliberately: a
+  // camera that IS running inference is covered regardless of what the
+  // list says, because the running session is the better evidence.
+  if (!hasModels) {
+    return { device, state: 'no_models', absentForMs: null };
   }
 
   // Uncovered. How long for?
@@ -109,6 +125,18 @@ export interface CoverageSummary {
   noVideo: number;
   /** The cameras behind `noVideo`, so they can be named rather than counted. */
   noVideoDevices: Device[];
+  /**
+   * Enabled cameras with nothing configured to analyse them. Excluded from
+   * the ratio — inference was never asked for, so its absence is not a gap
+   * — but surfaced, because an unconfigured camera is invisible otherwise
+   * and a newly added one would sit unwatched indefinitely.
+   *
+   * Deliberately NOT limited to cameras with live video. A camera added to
+   * VAS but not yet reachable has no models either, and that is exactly
+   * when saying so is useful: the configuration can be done before the
+   * camera arrives, rather than discovered later by its silence.
+   */
+  noModels: Device[];
 }
 
 /**
@@ -127,12 +155,17 @@ export function coverageSummary(
   const settling = all.filter((c) => c.state === 'settling');
   const covered = all.filter((c) => c.state === 'covered').length;
   const noVideoDevices = all.filter((c) => c.state === 'no_video').map((c) => c.device);
+  // From the devices, not the coverage states: a camera with no video is
+  // classified 'no_video' (the more useful thing to say about it), but it
+  // still has no models and still needs configuring.
+  const noModels = devices.filter((d) => (d.streaming.models ?? []).length === 0);
 
   return {
     covered,
     expected: covered + settling.length + uncovered.length,
     uncovered,
     settling,
+    noModels,
     noVideo: noVideoDevices.length,
     noVideoDevices,
   };

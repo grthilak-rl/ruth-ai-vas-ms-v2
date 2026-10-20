@@ -214,3 +214,77 @@ describe('formatAbsentFor', () => {
     expect(formatAbsentFor(ms as number | null)).toBe(expected);
   });
 });
+
+// ---------------------------------------------------------------------------
+// Cameras with nothing configured (75129)
+//
+// A camera added to VAS before anyone picks models for it. Before this it
+// read 'uncovered' once video arrived — "inference should be running and
+// isn't" — which sends an operator hunting a fault that does not exist.
+// The real problem is that nobody has configured it, and that needs saying
+// rather than alarming.
+// ---------------------------------------------------------------------------
+
+describe('cameras with no models configured', () => {
+  it('live video and no models is a configuration gap, not an outage', () => {
+    const c = cameraCoverage(
+      device({ active: false, models: [], inference_absent_since: null }, '75129'),
+      NOW
+    );
+    expect(c.state).toBe('no_models');
+  });
+
+  it('is kept out of the coverage ratio', () => {
+    // Otherwise the ratio reads 1 of 2 for ever on a camera nobody asked
+    // to monitor, and a real gap stops standing out.
+    const s = coverageSummary(
+      [device({}, 'A'), device({ active: false, models: [] }, '75129')],
+      NOW
+    );
+    expect(`${s.covered} of ${s.expected}`).toBe('1 of 1');
+    expect(s.uncovered).toHaveLength(0);
+    expect(s.noModels.map((d) => d.name)).toEqual(['75129']);
+  });
+
+  it('no video and no models is still just no video', () => {
+    // 75129 before ops configure the camera: offline AND unconfigured.
+    // Video is the more useful thing to say first.
+    const c = cameraCoverage(
+      device({ video_live: false, active: false, models: [] }, '75129'),
+      NOW
+    );
+    expect(c.state).toBe('no_video');
+  });
+
+  it('but an offline camera still appears in the hint', () => {
+    // The newly-added case: 75129 exists in VAS and is not reachable yet.
+    // Saying it has no models now lets the configuration happen before the
+    // camera arrives, instead of being discovered later by its silence.
+    const s = coverageSummary(
+      [device({}, 'A'), device({ video_live: false, active: false, models: [] }, '75129')],
+      NOW
+    );
+    expect(s.noModels.map((d) => d.name)).toEqual(['75129']);
+    expect(s.noVideo).toBe(1);
+    expect(`${s.covered} of ${s.expected}`).toBe('1 of 1');
+  });
+
+  it('a running camera is covered even if the model list looks empty', () => {
+    // A live session is better evidence than the list, which can lag.
+    const c = cameraCoverage(device({ active: true, models: [] }, 'A'), NOW);
+    expect(c.state).toBe('covered');
+  });
+
+  it('a configured camera with inference absent is still uncovered', () => {
+    // The regression this must not cause: a real gap downgraded to a hint.
+    const c = cameraCoverage(
+      device({
+        active: false,
+        models: ['safety_vest'],
+        inference_absent_since: agoMs(COVERAGE_GRACE_MS + 1000),
+      }, 'A'),
+      NOW
+    );
+    expect(c.state).toBe('uncovered');
+  });
+});

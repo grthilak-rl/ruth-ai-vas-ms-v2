@@ -97,6 +97,20 @@ export function MonitoringCoverage({
       {/* Named, not just counted: "1 camera not streaming" hid which one
           and for how long. Not counted in the ratio — no video is a feed
           problem (Camera feeds, above), not a coverage gap. */}
+      {/* A configuration gap, not a fault: nobody has chosen what should
+          analyse these cameras. Shown separately from the ratio and in a
+          calmer tone than an uncovered camera, which IS a fault. */}
+      {summary.noModels.length > 0 && (
+        <p className="coverage__hint">
+          {summary.noModels.length === 1
+            ? '1 camera has no models: '
+            : `${summary.noModels.length} cameras have no models: `}
+          <span className="coverage__hint-names">
+            {summary.noModels.map((d) => d.display_name || d.name).join(', ')}
+          </span>
+        </p>
+      )}
+
       {summary.noVideo > 0 && (
         <div className="coverage__muted">
           <p>
