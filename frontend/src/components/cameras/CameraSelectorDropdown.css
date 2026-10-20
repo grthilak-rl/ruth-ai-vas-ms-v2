@@ -276,3 +276,11 @@
   outline: 2px solid var(--color-primary, #3b82f6);
   outline-offset: 2px;
 }
+/* Shown when the grid is genuinely full. The checkboxes grey out either
+ * way; this says why, which they cannot. */
+.camera-selector-dropdown__grid-full {
+  display: block;
+  margin-top: 0.25rem;
+  font-weight: 600;
+  color: #8a6d00;
+}

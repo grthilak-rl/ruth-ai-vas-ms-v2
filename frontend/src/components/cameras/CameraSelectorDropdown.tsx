@@ -31,6 +31,8 @@ interface CameraSelectorDropdownProps {
   onSelectionChange: (cameraIds: string[]) => void;
 }
 
+import { pruneSelection, isGridFull } from './pruneSelection';
+
 export function CameraSelectorDropdown({
   cameras,
   selectedCameraIds,
@@ -39,14 +41,19 @@ export function CameraSelectorDropdown({
   onSelectionChange,
 }: CameraSelectorDropdownProps) {
   const [isOpen, setIsOpen] = useState(false);
-  const [tempSelection, setTempSelection] = useState<string[]>(selectedCameraIds);
+  const [tempSelection, setTempSelection] = useState<string[]>(() =>
+    pruneSelection(selectedCameraIds, cameras)
+  );
   const dropdownRef = useRef<HTMLDivElement>(null);
   const { syncNow, isSyncing, lastSyncFailed } = useDeviceSync();
 
-  // Update temp selection when props change
+  // Update temp selection when props change. Pruned against the camera
+  // list: an id for a camera that is no longer listed must not hold a
+  // grid slot, which is what blocked adding a twelfth camera while a
+  // decommissioned one still counted.
   useEffect(() => {
-    setTempSelection(selectedCameraIds);
-  }, [selectedCameraIds]);
+    setTempSelection(pruneSelection(selectedCameraIds, cameras));
+  }, [selectedCameraIds, cameras]);
 
   // Close dropdown when clicking outside
   useEffect(() => {
@@ -63,6 +70,8 @@ export function CameraSelectorDropdown({
       };
     }
   }, [isOpen, tempSelection]);
+
+  const gridFull = isGridFull(tempSelection, maxCameras);
 
   const handleToggleOpen = () => {
     if (isOpen) {
@@ -99,14 +108,17 @@ export function CameraSelectorDropdown({
   };
 
   const handleApply = () => {
-    onSelectionChange(tempSelection);
+    // Prune on the way out too, so a stale id cannot be written back even
+    // if it was already persisted before this fix.
+    onSelectionChange(pruneSelection(tempSelection, cameras));
     setIsOpen(false);
   };
 
   const handleClose = () => {
     // Apply changes on close
-    if (JSON.stringify(tempSelection) !== JSON.stringify(selectedCameraIds)) {
-      onSelectionChange(tempSelection);
+    const pruned = pruneSelection(tempSelection, cameras);
+    if (JSON.stringify(pruned) !== JSON.stringify(selectedCameraIds)) {
+      onSelectionChange(pruned);
     }
     setIsOpen(false);
   };
@@ -196,7 +208,7 @@ export function CameraSelectorDropdown({
             <div className="camera-selector-dropdown__list">
               {cameras.map((camera) => {
                 const isSelected = tempSelection.includes(camera.id);
-                const isDisabled = !isSelected && tempSelection.length >= maxCameras;
+                const isDisabled = !isSelected && gridFull;
 
                 return (
                   <label
@@ -229,6 +241,14 @@ export function CameraSelectorDropdown({
 
             <div className="camera-selector-dropdown__footer-info">
               Selected: {tempSelection.length} / {maxCameras} (max for {layoutLabel} grid)
+              {gridFull && (
+                // Say why the remaining checkboxes are dead. Greying them
+                // out silently left an operator clicking a box that never
+                // ticked, with nothing on screen explaining it.
+                <span className="camera-selector-dropdown__grid-full">
+                  Grid full: choose a larger layout
+                </span>
+              )}
             </div>
           </div>
 
