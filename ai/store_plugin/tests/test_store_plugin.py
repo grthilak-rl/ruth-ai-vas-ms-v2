@@ -248,7 +248,7 @@ def load_installer():
     return module
 
 
-@pytest.mark.parametrize("name", ["hard_hat", "safety_vest", "gloves", "goggles", "harness", "no_goggles", "gloves_2"])
+@pytest.mark.parametrize("name", ["hard_hat", "safety_vest", "gloves", "goggles", "harness", "no_goggles", "gloves_2", "goggles_2"])
 def test_shipped_manifests_are_valid(name):
     """Unknown top-level keys (`diagnostics`, `_trial`) must not be rejected."""
     assert load_installer().manifest_problems(manifest(name)) == []
@@ -329,7 +329,7 @@ def drop_diagnostics(m):
     m.pop("diagnostics", None)
 
 
-TRIAL = {"goggles", "gloves", "harness", "no_goggles", "gloves_2"}
+TRIAL = {"goggles", "gloves", "harness", "no_goggles", "gloves_2", "goggles_2"}
 NOT_IN_TRIAL = ["hard_hat", "safety_vest"]
 
 
@@ -348,7 +348,7 @@ def test_which_models_are_in_trial_mode():
         assert "_trial" not in manifest(name)
 
 
-@pytest.mark.parametrize("name", ["hard_hat", "safety_vest", "gloves", "goggles", "harness", "no_goggles", "gloves_2"])
+@pytest.mark.parametrize("name", ["hard_hat", "safety_vest", "gloves", "goggles", "harness", "no_goggles", "gloves_2", "goggles_2"])
 def test_every_shipped_model_gates_violations_at_0_7(name):
     """The manifest floor is now the violation gate (backend side too).
 
@@ -734,14 +734,16 @@ def test_models_sharing_a_violation_type_are_known():
     """
     import collections
     names = ["hard_hat", "safety_vest", "gloves", "goggles", "harness",
-             "no_goggles", "gloves_2"]
+             "no_goggles", "gloves_2", "goggles_2"]
     by_type = collections.defaultdict(set)
     for n in names:
         for r in manifest(n)["rules"]:
             by_type[r["violation_type"]].add(n)
     shared = {t: v for t, v in by_type.items() if len(v) > 1}
     assert shared == {
-        "missing_goggles": {"goggles", "no_goggles"},
+        # Three now, not two. Any pair of these on one camera reports the
+        # same violation twice; all three reports it three times.
+        "missing_goggles": {"goggles", "no_goggles", "goggles_2"},
         "missing_gloves": {"gloves", "gloves_2"},
     }
 
@@ -754,3 +756,15 @@ def test_gloves_2_is_rtdetr_shaped():
     assert m["classes"] == {"0": "no-gloves"}
     assert m["weights"] == "gloves.pt"  # distinct from gloves' bestgloves.pt
     assert m["weights"] != manifest("gloves")["weights"]
+
+
+def test_goggles_2_is_flagged_as_a_mid_training_checkpoint():
+    """goggles2.pt is epoch 4 of a planned 50 and still carries optimizer
+    state (329 MB vs ~52 MB exported). That is not a defect in the
+    manifest, but it must be written down where the next reader sees it,
+    or an early checkpoint quietly becomes a shipped model."""
+    m = manifest("goggles_2")
+    assert m["imgsz"] == 1280
+    assert m["classes"] == {"0": "no-goggles"}
+    assert m["weights"] == "goggles2.pt"
+    assert "MID-TRAINING CHECKPOINT" in m["_trial"]

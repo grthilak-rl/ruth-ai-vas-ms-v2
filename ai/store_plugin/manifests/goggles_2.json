@@ -1,0 +1,18 @@
+{
+  "manifest_version": 1,
+  "model_id": "goggles_2",
+  "display_name": "Goggles 2",
+  "weights": "goggles2.pt",
+  "task": "detect",
+  "imgsz": 1280,
+  "classes": {"0": "no-goggles"},
+  "rules": [
+    {"id": "missing_goggles", "classes": ["no-goggles"], "min_confidence": 0.7,
+     "violation_type": "missing_goggles", "severity": "high",
+     "display_name": "Missing goggles"}
+  ],
+  "performance": {"inference_time_hint_ms": 100, "recommended_fps": 2},
+  "limits": {"max_memory_mb": 3072, "inference_timeout_ms": 8000},
+  "_trial": "TEMPORARY observation block, 2026-10-20. THIS IS A MID-TRAINING CHECKPOINT: epoch 4 of a planned 50, and the file still carries optimizer/scaler/stopper state (329 MB against ~52 MB for every exported model). RT-DETR (rtdetr-l) at imgsz 1280 on the same dataset as no_goggles (goggles.v1i.yolov8). Offline it fires on every frame at low confidence and never reaches 0.5; on the one frame with a confirmed bare face it scores 0.103, below no_goggles' 0.182. THIRD model emitting missing_goggles, with goggles and no_goggles: no two of the three may ever share a camera, or one violation is reported two or three times. Nothing enforces that. Remove once judged.",
+  "diagnostics": {"summary_log_sample": 1.0, "predict_floor": 0.01}
+}

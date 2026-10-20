@@ -9,6 +9,7 @@ Defensive async client for VAS-MS-V2 integration with:
 
 import asyncio
 import json
+import os
 import time
 from collections.abc import Sequence
 from contextlib import asynccontextmanager
@@ -63,6 +64,9 @@ TOKEN_REFRESH_THRESHOLD = 0.8
 # Default timeouts (in seconds)
 DEFAULT_TIMEOUT = 30.0
 STREAM_START_TIMEOUT = 45.0  # Stream start can take longer
+# Frame fetches are on the inference hot path and are never retried: a frame
+# slower than this is staler than max_age_ms would accept anyway.
+FRAME_FETCH_TIMEOUT = float(os.getenv("RUTH_VAS_FRAME_TIMEOUT_SEC", "3.0"))
 
 # Retry configuration
 MAX_RETRIES = 3
@@ -111,7 +115,18 @@ class VASClient:
         self._access_token: str | None = None
         self._refresh_token: str | None = None
         self._token_expires_at: float = 0
+        # Real TTL of the token we hold, as VAS reported it. Previously the
+        # refresh decision assumed 3600s, and computed it in a way that always
+        # yielded 3600 whatever the token's actual lifetime.
+        self._token_lifetime: float = 0
         self._token_lock = asyncio.Lock()
+        # Serialises the refresh itself. Separate from _token_lock because
+        # _authenticate/_refresh_access_token take that one to publish the new
+        # token, and asyncio.Lock is not reentrant — holding _token_lock across
+        # a refresh would deadlock. Without this second lock every concurrent
+        # caller refreshed at once and VAS's refresh-token rotation made each
+        # one revoke the others': 27 "Refresh token has been revoked" in 3h.
+        self._refresh_lock = asyncio.Lock()
 
         # HTTP client
         self._client: httpx.AsyncClient | None = None
@@ -178,6 +193,7 @@ class VASClient:
                 self._access_token = token_data.access_token
                 self._refresh_token = token_data.refresh_token
                 self._token_expires_at = time.time() + token_data.expires_in
+                self._token_lifetime = float(token_data.expires_in)
 
             logger.info(
                 "Authenticated with VAS",
@@ -213,6 +229,7 @@ class VASClient:
             async with self._token_lock:
                 self._access_token = token_data.access_token
                 self._token_expires_at = time.time() + token_data.expires_in
+                self._token_lifetime = float(token_data.expires_in)
 
             logger.debug("Access token refreshed", expires_in=token_data.expires_in)
 
@@ -222,6 +239,21 @@ class VASClient:
         except httpx.ConnectError as e:
             raise VASConnectionError(f"Failed to connect to VAS: {e}") from e
 
+    def _token_is_fresh(self) -> bool:
+        """True when the held token is still inside its usable window.
+
+        Refresh once TOKEN_REFRESH_THRESHOLD of the real TTL has elapsed, i.e.
+        while more than (1 - threshold) of it remains. The old arithmetic
+        compared the remaining time against 0.8 * lifetime, which refreshed
+        after 20% of the TTL rather than 80% — five times too often — and
+        derived `lifetime` as `expires_at - (expires_at - 3600)`, a constant
+        3600 that ignored what VAS actually issued.
+        """
+        if not self._access_token or self._token_lifetime <= 0:
+            return False
+        remaining = self._token_expires_at - time.time()
+        return remaining > self._token_lifetime * (1.0 - TOKEN_REFRESH_THRESHOLD)
+
     async def _ensure_valid_token(self) -> str:
         """Ensure we have a valid access token, refreshing if needed.
 
@@ -229,26 +261,42 @@ class VASClient:
             Valid access token
         """
         async with self._token_lock:
-            # Check if token needs refresh (at 80% TTL)
-            time_until_expiry = self._token_expires_at - time.time()
-            token_lifetime = self._token_expires_at - (
-                self._token_expires_at - 3600
-            )  # Assume 1hr default
-            threshold = token_lifetime * TOKEN_REFRESH_THRESHOLD
-
-            if time_until_expiry < threshold or not self._access_token:
-                # Release lock for refresh operation
-                pass
-            else:
+            if self._token_is_fresh():
                 return self._access_token
 
-        # Refresh outside lock to avoid blocking
-        await self._refresh_access_token()
+        # One refresh at a time. Concurrent callers queue here and the
+        # re-check below means all but the first return the token the first
+        # one fetched, instead of each firing its own rotation.
+        async with self._refresh_lock:
+            async with self._token_lock:
+                if self._token_is_fresh():
+                    return self._access_token
 
-        async with self._token_lock:
-            if not self._access_token:
-                raise VASAuthenticationError("Failed to obtain access token")
-            return self._access_token
+            await self._refresh_access_token()
+
+            async with self._token_lock:
+                if not self._access_token:
+                    raise VASAuthenticationError("Failed to obtain access token")
+                return self._access_token
+
+    async def _force_refresh_token(self, stale_token: str | None) -> str:
+        """Refresh after a 401, serialised like the expiry-driven path.
+
+        `stale_token` is the token that just got rejected. If another caller
+        has already replaced it while this one queued on the lock, that newer
+        token is returned instead of firing a second rotation.
+        """
+        async with self._refresh_lock:
+            async with self._token_lock:
+                if self._access_token and self._access_token != stale_token:
+                    return self._access_token
+
+            await self._refresh_access_token()
+
+            async with self._token_lock:
+                if not self._access_token:
+                    raise VASAuthenticationError("Failed to obtain access token")
+                return self._access_token
 
     def _get_auth_headers(self, token: str) -> dict[str, str]:
         """Build authorization headers."""
@@ -315,8 +363,7 @@ class VASClient:
                 if response.status_code == 401 and authenticated:
                     if attempt == 0:
                         logger.debug("Token expired, refreshing and retrying")
-                        await self._refresh_access_token()
-                        token = await self._ensure_valid_token()
+                        token = await self._force_refresh_token(token)
                         headers = self._get_auth_headers(token)
                         attempt += 1
                         continue
@@ -1221,10 +1268,20 @@ class VASClient:
         if max_age_ms is not None:
             params["max_age_ms"] = max_age_ms
 
+        # Deliberately short, and deliberately not retried (this bypasses
+        # _request's retry wrapper). The frame tap is refreshed at 2fps and
+        # the request is asked for with max_age_ms, so a frame that has not
+        # arrived within FRAME_FETCH_TIMEOUT is already too stale to infer
+        # on. Waiting out the 30s client default just held the tick open and
+        # pushed the whole camera's cadence out; failing fast lets the loop
+        # skip to the next tick. Retrying would be worse still: these stalls
+        # are a shared VAS event-loop stall (BL-12), so a retry queues more
+        # work behind the same blockage.
         response = await self._client.get(
             f"/v2/streams/{stream_id}/frame/latest",
             headers=self._get_auth_headers(token),
             params=params,
+            timeout=FRAME_FETCH_TIMEOUT,
         )
 
         if not response.is_success:
