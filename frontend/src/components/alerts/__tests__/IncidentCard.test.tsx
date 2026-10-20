@@ -404,8 +404,12 @@ describe('AlertsList actions go through POST /violations/bulk', () => {
 
     const selectPage = container.querySelector('.alerts-list__bulk-select input') as HTMLInputElement;
     await act(async () => selectPage.click());
-    expect(container.querySelector('.alerts-list__bulk-count')!.textContent).toBe('2 incidents · 5 open violations');
-    expect(container.querySelectorAll('.incident-card--selected')).toHaveLength(2);
+    // All three, including the fully-reviewed one: the evidence export
+    // covers reviewed and dismissed incidents, so they have to be
+    // selectable. The open-violation count is what the bulk actions use,
+    // and the closed incident contributes none.
+    expect(container.querySelector('.alerts-list__bulk-count')!.textContent).toBe('3 incidents · 5 open violations');
+    expect(container.querySelectorAll('.incident-card--selected')).toHaveLength(3);
 
     await act(async () => button('Dismiss…')!.click());
     expect(dialog()!.textContent).toContain('Dismiss 5 violations');
@@ -419,6 +423,23 @@ describe('AlertsList actions go through POST /violations/bulk', () => {
     });
     // Selection clears after a bulk action.
     await waitFor(() => !container.querySelector('.alerts-list__bulk-count'));
+  });
+
+  it('bulk review and dismiss are disabled when nothing open is selected', async () => {
+    // Selecting a fully-reviewed incident is allowed (for the export), but
+    // acting on it would be a no-op request, so the actions are blocked.
+    const closed = incident({ incident_id: 'closed', open_count: 0, open_violation_ids: [] });
+    api.fetchIncidents.mockResolvedValue(listResponse([closed]));
+    await renderList();
+    await waitFor(() => !!container.querySelector('.alerts-list__bulk'));
+
+    const selectPage = container.querySelector('.alerts-list__bulk-select input') as HTMLInputElement;
+    await act(async () => selectPage.click());
+    expect(container.querySelector('.alerts-list__bulk-count')!.textContent).toBe('1 incident · 0 open violations');
+    expect((button('Mark reviewed') as HTMLButtonElement).disabled).toBe(true);
+    expect((button('Dismiss…') as HTMLButtonElement).disabled).toBe(true);
+    // The export is still offered.
+    expect(button('Download snapshots…')).toBeTruthy();
   });
 
   it('expanding is delegated to the page (URL state)', async () => {

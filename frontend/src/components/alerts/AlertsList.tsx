@@ -7,6 +7,7 @@ import { DismissReasonDialog } from './DismissReasonDialog';
 import { SummaryStrip } from './SummaryStrip';
 import { Toast, type ToastType } from './Toast';
 import { AlertsListSkeleton } from './AlertsListSkeleton';
+import { ExportDialog } from './ExportDialog';
 import { Pagination } from '../ui';
 import { alertFiltersToParams, PAGE_SIZE_OPTIONS, type AlertFilters } from './alertFilters';
 import { cameraHeadline, formatIncidentSpan } from '../../utils/violationDisplay';
@@ -87,6 +88,7 @@ export function AlertsList({
   const [pending, setPending] = useState<Record<string, boolean>>({});
   const [errors, setErrors] = useState<Record<string, string>>({});
   const [dialog, setDialog] = useState<PendingAction | null>(null);
+  const [exportOpen, setExportOpen] = useState(false);
   const [isSaving, setIsSaving] = useState(false);
   const [toast, setToast] = useState<{ message: string; type: ToastType; isVisible: boolean }>({
     message: '',
@@ -95,9 +97,39 @@ export function AlertsList({
   });
 
   const incidents = useMemo(() => data?.items ?? [], [data?.items]);
-  const selectable = incidents.filter((i) => i.open_count > 0);
+  // Every incident is selectable, not just those with open violations: the
+  // evidence export covers reviewed and dismissed ones too, and a dismissed
+  // incident is often exactly what the AI engineer wants to look at. The
+  // bulk review/dismiss actions still only touch open violations, so they
+  // are disabled when a selection contains none.
+  const selectable = incidents;
   const selectedIncidents = Object.keys(selected).length;
   const selectedIds = useMemo(() => [...new Set(Object.values(selected).flat())], [selected]);
+  const selectedIncidentIds = useMemo(() => Object.keys(selected), [selected]);
+
+  // The same filters the list is showing, in the export's names. The
+  // server regroups incidents from these, so they must match or a
+  // selected incident key will not resolve.
+  const exportFilters = useMemo(
+    () => ({
+      // status may be a single value or an array in the query params;
+      // the export body always takes a list.
+      statuses:
+        queryParams.status == null
+          ? null
+          : Array.isArray(queryParams.status)
+            ? [...queryParams.status]
+            : [queryParams.status],
+      camera_id: queryParams.camera_id ?? null,
+      since: queryParams.since ?? null,
+      until: queryParams.until ?? null,
+      violation_type: queryParams.type ?? null,
+      type_detail: queryParams.type_detail ?? null,
+      severities: queryParams.severity ?? null,
+      area: queryParams.area ?? null,
+    }),
+    [queryParams]
+  );
 
   // Tell the page when there is something to scroll to.
   useLayoutEffect(() => {
@@ -286,7 +318,12 @@ export function AlertsList({
                 type="button"
                 className="alerts-list__bulk-action alerts-list__bulk-action--review"
                 onClick={() => handleBulk('review')}
-                disabled={!!pending.__bulk__}
+                disabled={!!pending.__bulk__ || selectedIds.length === 0}
+                title={
+                  selectedIds.length === 0
+                    ? 'The selected incidents have no open violations'
+                    : undefined
+                }
               >
                 Mark reviewed
               </button>
@@ -294,16 +331,39 @@ export function AlertsList({
                 type="button"
                 className="alerts-list__bulk-action"
                 onClick={() => handleBulk('dismiss')}
-                disabled={!!pending.__bulk__}
+                disabled={!!pending.__bulk__ || selectedIds.length === 0}
+                title={
+                  selectedIds.length === 0
+                    ? 'The selected incidents have no open violations'
+                    : undefined
+                }
               >
                 Dismiss…
+              </button>
+              <button
+                type="button"
+                className="alerts-list__bulk-action"
+                onClick={() => setExportOpen(true)}
+              >
+                Download snapshots…
               </button>
               <button type="button" className="alerts-list__bulk-clear" onClick={clearSelection}>
                 Clear
               </button>
             </>
           ) : (
-            <span className="alerts-list__bulk-hint">Select incidents to act on their open violations together</span>
+            <>
+              <span className="alerts-list__bulk-hint">
+                Select incidents to act on their open violations together
+              </span>
+              <button
+                type="button"
+                className="alerts-list__bulk-action"
+                onClick={() => setExportOpen(true)}
+              >
+                Download snapshots…
+              </button>
+            </>
           )}
         </div>
       )}
@@ -365,6 +425,14 @@ export function AlertsList({
         isVisible={toast.isVisible}
         onDismiss={() => setToast((prev) => ({ ...prev, isVisible: false }))}
       />
+
+      {exportOpen && (
+        <ExportDialog
+          filters={exportFilters}
+          incidentIds={selectedIncidentIds.length > 0 ? selectedIncidentIds : null}
+          onClose={() => setExportOpen(false)}
+        />
+      )}
     </>
   );
 }

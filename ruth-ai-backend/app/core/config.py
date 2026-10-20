@@ -261,6 +261,45 @@ class Settings(BaseSettings):
         ),
     )
 
+    # Bulk evidence export ("Download snapshots" on the Violations page)
+    violation_export_dir: str = Field(
+        default="/evidence/exports",
+        description=(
+            "Where built ZIPs are written. Under the evidence volume "
+            "(/mnt/storage/ruth-evidence on the host) so it needs no extra "
+            "mount; deliberately a sibling of frames/ rather than inside it, "
+            "because exports are disposable and frames are not."
+        ),
+    )
+    violation_export_max_violations: int = Field(
+        default=5000,
+        ge=1,
+        le=50000,
+        description=(
+            "Refuse an export covering more violations than this. At the "
+            "site's current rate 5000 is roughly three days; a month-long "
+            "export has to be narrowed. Counted before any work starts, so "
+            "the operator is told the number and can adjust the filters."
+        ),
+    )
+    violation_export_ttl_hours: int = Field(
+        default=24,
+        ge=1,
+        le=24 * 14,
+        description="How long a built ZIP stays downloadable before it is swept.",
+    )
+    violation_export_snapshot_concurrency: int = Field(
+        default=4,
+        ge=1,
+        le=32,
+        description=(
+            "Parallel snapshot fetches when the scene-snapshot fallback is "
+            "enabled. Each one is a VAS request for a ~810KB full-resolution "
+            "image, and VAS runs a single event loop that every camera's "
+            "frame fetch shares (BL-12), so this stays deliberately low."
+        ),
+    )
+
     # Clip status: background sync from VAS
     clip_sync_enabled: bool = Field(
         default=True,

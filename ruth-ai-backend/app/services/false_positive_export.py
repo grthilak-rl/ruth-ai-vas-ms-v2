@@ -64,6 +64,10 @@ class ExportItem:
     #: Relative to the evidence frame dir; None when no frame was saved.
     frame_file: str | None
     group_key: str = ""
+    #: Review state at export time. Carried for the operator-facing bulk
+    #: export, which includes reviewed and dismissed violations; the
+    #: dismissal path leaves it None because the status is implied.
+    status: str | None = None
 
 
 @dataclass
@@ -119,6 +123,73 @@ def _frame_size(path: Path, boxes: list | None) -> tuple[int | None, int | None]
         return None, None
 
 
+#: What the image in a sidecar's ``image`` field actually is.
+EVIDENCE_INFERRED_FRAME = "inferred_frame"
+EVIDENCE_SCENE_SNAPSHOT = "scene_snapshot"
+
+
+def build_sidecar(
+    item: ExportItem,
+    *,
+    image_name: str,
+    width: int | None,
+    height: int | None,
+    evidence_source: str = EVIDENCE_INFERRED_FRAME,
+    boxes_apply_to_image: bool = True,
+    extra: dict | None = None,
+) -> dict:
+    """The per-image JSON that travels with every exported image.
+
+    One builder for both exports — the dismissal-driven labelling copy and
+    the operator's bulk download — so the AI engineer never has to deal with
+    two shapes of the same record.
+
+    ``boxes_apply_to_image`` is not decoration. Boxes are in the pixel space
+    of the frame the model was given; the scene snapshot is a later capture
+    of a moved scene, so its boxes do not line up. A consumer must be able
+    to tell, from the file alone, whether drawing them would be a lie.
+    """
+    sidecar = {
+        "violation_id": str(item.violation_id),
+        "image": image_name,
+        "evidence_source": evidence_source,
+        "boxes_apply_to_image": boxes_apply_to_image,
+        "frame": {"width": width, "height": height},
+        "boxes": [
+            {
+                "x": b.get("x"),
+                "y": b.get("y"),
+                "width": b.get("width"),
+                "height": b.get("height"),
+                "label": b.get("label"),
+                "confidence": b.get("confidence"),
+                "frame_width": b.get("frame_width"),
+                "frame_height": b.get("frame_height"),
+            }
+            for b in (item.bounding_boxes or [])
+            if isinstance(b, dict)
+        ],
+        "box_units": "pixels of the frame given in each box (frame_width x frame_height)",
+        "model_id": item.model_id,
+        "model_version": item.model_version,
+        "type": item.type,
+        "type_detail": item.type_detail,
+        "severity": item.severity,
+        "status": item.status,
+        "confidence": item.confidence,
+        "detected_at": item.timestamp.isoformat(),
+        "camera": {
+            "name": item.camera_name,
+            "display_name": item.camera_display_name,
+            "area": item.camera_area,
+            "in_out": item.camera_in_out,
+        },
+    }
+    if extra:
+        sidecar.update(extra)
+    return sidecar
+
+
 def export_false_positives(
     items: list[ExportItem],
     reason: DismissReason | str,
@@ -158,45 +229,25 @@ def export_false_positives(
         try:
             out_dir.mkdir(parents=True, exist_ok=True)
             width, height = _frame_size(frame, item.bounding_boxes)
-            sidecar = {
-                "violation_id": stem,
-                "image": f"{stem}.jpg",
-                "frame": {"width": width, "height": height},
-                "boxes": [
-                    {
-                        "x": b.get("x"),
-                        "y": b.get("y"),
-                        "width": b.get("width"),
-                        "height": b.get("height"),
-                        "label": b.get("label"),
-                        "confidence": b.get("confidence"),
-                        "frame_width": b.get("frame_width"),
-                        "frame_height": b.get("frame_height"),
-                    }
-                    for b in (item.bounding_boxes or [])
-                    if isinstance(b, dict)
-                ],
-                "box_units": "pixels of the frame given in each box (frame_width x frame_height)",
-                "model_id": item.model_id,
-                "model_version": item.model_version,
-                "type": item.type,
-                "type_detail": item.type_detail,
-                "severity": item.severity,
-                "confidence": item.confidence,
-                "detected_at": item.timestamp.isoformat(),
-                "camera": {
-                    "name": item.camera_name,
-                    "display_name": item.camera_display_name,
-                    "area": item.camera_area,
-                    "in_out": item.camera_in_out,
+            sidecar = build_sidecar(
+                item,
+                image_name=f"{stem}.jpg",
+                width=width,
+                height=height,
+                # Always the inferred frame here: items without one were
+                # skipped above, precisely because snapshot boxes would
+                # teach the wrong thing.
+                evidence_source=EVIDENCE_INFERRED_FRAME,
+                boxes_apply_to_image=True,
+                extra={
+                    "dismiss_reason": reason.value,
+                    "dismiss_reason_label": REASON_LABELS[reason],
+                    "note": note,
+                    "dismissed_by": dismissed_by,
+                    "dismissed_at": dismissed_at,
+                    "yolo_background": background,
                 },
-                "dismiss_reason": reason.value,
-                "dismiss_reason_label": REASON_LABELS[reason],
-                "note": note,
-                "dismissed_by": dismissed_by,
-                "dismissed_at": dismissed_at,
-                "yolo_background": background,
-            }
+            )
             _write_atomic(out_dir / f"{stem}.jpg", lambda p: shutil.copyfile(frame, p))
             _write_atomic(
                 out_dir / f"{stem}.json",

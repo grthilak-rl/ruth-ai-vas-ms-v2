@@ -42,6 +42,13 @@ from app.models.project import (
 )
 from app.models.stream_session import StreamSession
 from app.models.violation import Violation
+from app.models.violation_export import (
+    EXPORT_BUILDING,
+    EXPORT_EXPIRED,
+    EXPORT_FAILED,
+    EXPORT_READY,
+    ViolationExport,
+)
 
 __all__ = [
     # Base
@@ -65,6 +72,11 @@ __all__ = [
     "Violation",
     "Evidence",
     "DeviceInferenceIntent",
+    "ViolationExport",
+    "EXPORT_BUILDING",
+    "EXPORT_READY",
+    "EXPORT_FAILED",
+    "EXPORT_EXPIRED",
     "INTENT_ACTIVE",
     "INTENT_OFF",
     "INTENT_SUSPENDED",

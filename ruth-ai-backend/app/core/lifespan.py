@@ -339,6 +339,15 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     except Exception as e:
         logger.error("Failed to start clip status sync", error=str(e))
 
+    # Sweeps expired evidence-export archives and reaps builds a restart
+    # abandoned. Non-fatal, but without it ZIPs accumulate and a job the
+    # operator is watching can spin for ever.
+    try:
+        from app.services.violation_export_job import export_sweeper
+        export_sweeper.start()
+    except Exception as e:
+        logger.error("Failed to start export sweeper", error=str(e))
+
     logger.info("Ruth AI Backend startup complete")
 
     yield  # Application runs here
@@ -368,6 +377,12 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
         await clip_status_sync.stop()
     except Exception as e:
         logger.error("Error stopping clip status sync", error=str(e))
+
+    try:
+        from app.services.violation_export_job import export_sweeper
+        await export_sweeper.stop()
+    except Exception as e:
+        logger.error("Error stopping export sweeper", error=str(e))
 
     # Stop VAS event consumer
     try:

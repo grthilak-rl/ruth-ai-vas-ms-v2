@@ -37,7 +37,7 @@ export function setSessionExpiredHandler(handler: SessionExpiredHandler | null):
   onSessionExpired = handler;
 }
 
-const ADMIN_API_PREFIX = '/api/v1/admin';
+export const ADMIN_API_PREFIX = '/api/v1/admin';
 const TIMEOUT_MS = 30_000;
 
 // ============================================================================
