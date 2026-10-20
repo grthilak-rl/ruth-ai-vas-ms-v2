@@ -26,6 +26,12 @@ from app.models.enums import (
 )
 from app.models.event import Event
 from app.models.evidence import Evidence
+from app.models.inference_intent import (
+    INTENT_ACTIVE,
+    INTENT_OFF,
+    INTENT_SUSPENDED,
+    DeviceInferenceIntent,
+)
 from app.models.model_store import ModelStoreFile, ModelStoreModel, ModelStoreUpload
 from app.models.project import (
     PROJECT_START_LOCK_KEY,
@@ -58,6 +64,10 @@ __all__ = [
     "Event",
     "Violation",
     "Evidence",
+    "DeviceInferenceIntent",
+    "INTENT_ACTIVE",
+    "INTENT_OFF",
+    "INTENT_SUSPENDED",
     "ModelStoreModel",
     "ModelStoreFile",
     "ModelStoreUpload",

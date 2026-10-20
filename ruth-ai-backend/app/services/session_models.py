@@ -66,6 +66,8 @@ def session_entries(session: StreamSession | None) -> list[dict[str, Any]]:
 
 class SessionModelsService:
     def __init__(self, stream_service: StreamService, db: AsyncSession):
+        # Intent is written in the same transaction as the session change,
+        # so the two can never disagree about what the operator asked for.
         self._streams = stream_service
         self._db = db
 
@@ -76,6 +78,28 @@ class SessionModelsService:
             .with_for_update()
         )
         return (await self._db.execute(stmt)).scalars().first()
+
+    async def _record_intent(
+        self, device_id: UUID, entries: list[dict[str, Any]], *, session: StreamSession | None = None
+    ) -> None:
+        """Mirror the resulting model list into desired state.
+
+        An empty list is an operator switching inference off, not an
+        empty configuration — so it writes `off`, which the reconciler
+        will never override.
+        """
+        from app.services.inference_intent import InferenceIntentService
+
+        intents = InferenceIntentService(self._db)
+        if entries:
+            await intents.set_active(
+                device_id,
+                entries,
+                inference_fps=getattr(session, "inference_fps", None),
+                confidence_threshold=getattr(session, "confidence_threshold", None),
+            )
+        else:
+            await intents.set_off(device_id)
 
     def _write(self, session: StreamSession, entries: list[dict[str, Any]]) -> None:
         """Store the list, mirror models[0] into the legacy columns, bump revision."""
@@ -117,6 +141,7 @@ class SessionModelsService:
                     raise
             else:
                 self._write(session, [entry])
+                await self._record_intent(device_id, [entry], session=session)
                 await self._db.flush()
                 logger.info("Started session with model", device_id=str(device_id), model_id=entry["model_id"])
                 return ModelsResult(session, True)
@@ -129,6 +154,7 @@ class SessionModelsService:
                 409, "too_many_models", f"a camera can run at most {MAX_MODELS_PER_CAMERA} models"
             )
         self._write(session, entries + [entry])
+        await self._record_intent(device_id, entries + [entry], session=session)
         await self._db.flush()
         logger.info(
             "Added model to session",
@@ -149,6 +175,7 @@ class SessionModelsService:
             raise SessionModelError(404, "model_not_active", f"{model_id} is not running on this camera")
         target.update(changes)
         self._write(session, entries)
+        await self._record_intent(device_id, entries, session=session)
         await self._db.flush()
         logger.info(
             "Updated session model",
@@ -168,9 +195,13 @@ class SessionModelsService:
         if not remaining:
             with contextlib.suppress(StreamNotActiveError):
                 await self._streams.stop_inference(device_id)
+            # Unticking the last model is an operator stopping inference.
+            # Desired off, so the reconciler leaves it alone for good.
+            await self._record_intent(device_id, [])
             logger.info("Removed last model; inference stopped", device_id=str(device_id), model_id=model_id)
             return None
         self._write(session, remaining)
+        await self._record_intent(device_id, remaining, session=session)
         await self._db.flush()
         logger.info(
             "Removed model from session",

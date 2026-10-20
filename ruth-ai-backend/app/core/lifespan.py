@@ -31,6 +31,7 @@ from app.integrations.unified_runtime.client import UnifiedRuntimeClient
 from app.integrations.unified_runtime.config import get_unified_runtime_config
 from app.integrations.unified_runtime.store_router import StoreAwareRouter
 from app.services.inference_loop import InferenceLoopService, set_inference_loop
+from app.services.inference_reconciler import InferenceReconciler, set_reconciler
 
 logger = get_logger(__name__)
 
@@ -38,6 +39,7 @@ logger = get_logger(__name__)
 _vas_client: VASClient | None = None
 _nlp_chat_client: NLPChatClient | None = None
 _inference_loop: InferenceLoopService | None = None
+_reconciler: InferenceReconciler | None = None
 
 # Startup timestamp for uptime calculation
 _startup_time: float | None = None
@@ -88,7 +90,7 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     Args:
         app: FastAPI application instance
     """
-    global _vas_client, _nlp_chat_client, _inference_loop, _startup_time
+    global _vas_client, _nlp_chat_client, _inference_loop, _reconciler, _startup_time
 
     # Record startup time
     _startup_time = time.time()
@@ -299,6 +301,21 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
             set_inference_loop(_inference_loop)
 
             logger.info("Inference loop started")
+
+            # Auto-resume (BL-11 A). Separate from the inference loop: the
+            # loop runs what sessions exist, this one notices when a session
+            # an operator asked for has stopped existing.
+            if settings.inference_reconcile_enabled:
+                from app.services.stream_service import StreamService
+
+                _reconciler = InferenceReconciler(
+                    db_session_factory=get_db_session,
+                    stream_service_factory=lambda db: StreamService(_vas_client, db),
+                    vas_client=_vas_client,
+                    interval_seconds=settings.inference_reconcile_seconds,
+                )
+                await _reconciler.start()
+                set_reconciler(_reconciler)
         except Exception as e:
             logger.error(
                 "Failed to initialize inference loop",
@@ -336,6 +353,14 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
             logger.info("Inference loop stopped")
         except Exception as e:
             logger.error("Error stopping inference loop", error=str(e))
+
+    # Stop the reconciler
+    if _reconciler:
+        try:
+            await _reconciler.stop()
+        except Exception as e:
+            logger.error("Error stopping reconciler", error=str(e))
+        set_reconciler(None)
 
     # Stop clip status sync
     try:

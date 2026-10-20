@@ -17,12 +17,14 @@ All checks implement proper timeouts to prevent blocking.
 from datetime import datetime, timezone
 
 from fastapi import APIRouter
+from sqlalchemy import select
 
 from app import __version__
 from app.core.config import get_settings
 from app.core.database import get_engine
 from app.core.lifespan import get_uptime_seconds
 from app.core.logging import get_logger
+from app.deps import DBSession
 from app.deps.services import get_redis_client_optional, get_vas_client_optional
 from app.schemas.health import (
     ComponentHealth,
@@ -143,6 +145,62 @@ async def health_check() -> HealthResponse:
     )
 
     return response
+
+
+@router.get(
+    "/health/auto-resume",
+    summary="Auto-resume activity and parked cameras",
+    description=(
+        "What the reconciler has done in the last 24 hours, and which "
+        "cameras it has given up on for now. A parked camera is one whose "
+        "video is live and whose dependencies are up, but which still will "
+        "not start — a real fault, not a blip."
+    ),
+)
+async def auto_resume_status(db: DBSession) -> dict:
+    from app.models import INTENT_ACTIVE, Device, DeviceInferenceIntent
+    from app.services.inference_intent import is_parked, retry_due_at
+    from app.services.inference_reconciler import get_reconciler
+
+    reconciler = get_reconciler()
+    rows = (
+        await db.execute(
+            select(DeviceInferenceIntent, Device)
+            .join(Device, Device.id == DeviceInferenceIntent.device_id)
+            .where(DeviceInferenceIntent.desired_state == INTENT_ACTIVE)
+        )
+    ).all()
+
+    parked = []
+    for intent, device in rows:
+        if not is_parked(intent):
+            continue
+        due = retry_due_at(intent)
+        parked.append(
+            {
+                "camera": device.name,
+                "device_id": str(device.id),
+                "since": intent.last_attempt_at.isoformat() if intent.last_attempt_at else None,
+                "consecutive_failures": intent.consecutive_failures,
+                "last_error": intent.last_error,
+                "retry_due_at": due.isoformat() if due else None,
+            }
+        )
+
+    resumes = reconciler.resumes_last_24h() if reconciler else []
+    last = reconciler.last_outcome if reconciler else None
+    return {
+        "enabled": reconciler is not None,
+        "last_run_at": reconciler.last_run_at.isoformat()
+        if reconciler and reconciler.last_run_at
+        else None,
+        "resumes_last_24h": resumes,
+        "resume_count_24h": len(resumes),
+        "parked": parked,
+        # Set when the whole cycle was skipped because a shared dependency
+        # was down. One alert for the fleet, not one per camera.
+        "dependency_error": last.dependency_error if last else None,
+    }
 
 
 @router.get(

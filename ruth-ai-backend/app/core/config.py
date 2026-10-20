@@ -214,6 +214,20 @@ class Settings(BaseSettings):
         ),
     )
 
+    # Auto-resume (BL-11 A)
+    inference_reconcile_seconds: float = Field(
+        default=60.0,
+        ge=10.0,
+        description=(
+            "How often to check that every camera an operator wants running "
+            "actually is. 0 disables auto-resume entirely."
+        ),
+    )
+    inference_reconcile_enabled: bool = Field(
+        default=True,
+        description="Put inference back when a session stops on its own.",
+    )
+
     # Violation evidence: the inferred frame, saved by Ruth
     evidence_frame_dir: str = Field(
         default="/evidence/frames",

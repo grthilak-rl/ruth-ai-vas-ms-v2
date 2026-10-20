@@ -26,7 +26,7 @@ from app.core.cache import (
     devices_list_cache_key,
 )
 from app.core.logging import get_logger
-from app.deps import DeviceServiceDep, StreamServiceDep, VASClientDep
+from app.deps import DBSession, DeviceServiceDep, StreamServiceDep, VASClientDep
 from app.integrations.vas import VASError, VASNotFoundError
 from app.integrations.vas.models import SnapshotCreateRequest, SnapshotSource
 from app.schemas import (
@@ -44,6 +44,7 @@ from app.schemas import (
     DeviceNamingUpdateResponse,
     ManwayListResponse,
 )
+from app.services.inference_intent import InferenceIntentService
 from app.services import (
     DeviceInactiveError,
     DeviceNotFoundError,
@@ -430,6 +431,7 @@ async def get_device(
 async def start_inference(
     device_id: UUID,
     stream_service: StreamServiceDep,
+    db: DBSession,
     request: InferenceStartRequest | None = None,
 ) -> InferenceStartResponse:
     """Start AI inference on a device.
@@ -476,6 +478,19 @@ async def start_inference(
             inference_fps=request.inference_fps,
             confidence_threshold=request.confidence_threshold,
             model_config=request.config,
+        )
+        # Desired state, so a lost session is restored rather than
+        # silently staying off (BL-11).
+        await InferenceIntentService(db).set_active(
+            device_id,
+            [{
+                "model_id": request.model_id,
+                "model_version": request.model_version,
+                "config": request.config,
+                "fps_override": None,
+            }],
+            inference_fps=request.inference_fps,
+            confidence_threshold=request.confidence_threshold,
         )
     except DeviceNotFoundError as e:
         raise HTTPException(
@@ -541,6 +556,7 @@ async def start_inference(
 async def stop_inference(
     device_id: UUID,
     stream_service: StreamServiceDep,
+    db: DBSession,
 ) -> InferenceStopResponse:
     """Stop AI inference on a device.
 
@@ -566,6 +582,11 @@ async def stop_inference(
             "No active session to stop (idempotent)",
             device_id=str(device_id),
         )
+        # Still an operator saying "off". Without this, stopping a camera
+        # whose session had already died would leave intent active and the
+        # reconciler would start it again a minute later.
+        await InferenceIntentService(db).set_off(device_id)
+        await db.commit()
         # Return idempotent response
         return InferenceStopResponse(
             session_id=None,  # type: ignore
@@ -576,6 +597,7 @@ async def stop_inference(
 
     try:
         session = await stream_service.stop_inference(device_id)
+        await InferenceIntentService(db).set_off(device_id)
     except StreamNotActiveError:
         # Idempotent - already stopped
         logger.info(
