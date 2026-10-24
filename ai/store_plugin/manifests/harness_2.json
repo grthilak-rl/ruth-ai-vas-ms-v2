@@ -1,0 +1,18 @@
+{
+  "manifest_version": 1,
+  "model_id": "harness_2",
+  "display_name": "Harness 2",
+  "weights": "harness.pt",
+  "task": "detect",
+  "imgsz": 1280,
+  "classes": {"0": "no harness"},
+  "rules": [
+    {"id": "missing_harness", "classes": ["no harness"], "min_confidence": 0.7,
+     "violation_type": "missing_harness", "severity": "critical",
+     "display_name": "Missing harness"}
+  ],
+  "performance": {"inference_time_hint_ms": 110, "recommended_fps": 2},
+  "limits": {"max_memory_mb": 1536, "inference_timeout_ms": 8000},
+  "_trial": "TEMPORARY observation block, 2026-10-24. mid-training checkpoint (harness-7 last.pt, epoch 12 of 50); replace with the finished best.pt when training completes. RT-DETR (rtdetr-l) at imgsz 1280, ultralytics 8.4.182, single class 'no harness' (no compliant class); val mAP50 0.567, recall 0.509 at epoch 12. Offline (conf floor 0.01) on 906 frames from 75130 it scores p50 0.68 and >=0.7 on 25, from a fixed box on the left edge of the EMPTY vessel (no person): at 0.7 it would raise false critical violations there. Old harness peaks 0.18 on the same frames. ~108 ms/frame, ~610 MB GPU peak. Raises missing_harness like 'harness': never on the same camera. Remove once judged.",
+  "diagnostics": {"summary_log_sample": 1.0, "predict_floor": 0.01}
+}
