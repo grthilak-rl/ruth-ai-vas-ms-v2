@@ -1,0 +1,18 @@
+{
+  "manifest_version": 1,
+  "model_id": "goggles_3",
+  "display_name": "Goggles 3",
+  "weights": "goggles3.pt",
+  "task": "detect",
+  "imgsz": 1280,
+  "classes": {"0": "no-goggles"},
+  "rules": [
+    {"id": "missing_goggles", "classes": ["no-goggles"], "min_confidence": 0.7,
+     "violation_type": "missing_goggles", "severity": "high",
+     "display_name": "Missing goggles"}
+  ],
+  "performance": {"inference_time_hint_ms": 105, "recommended_fps": 2},
+  "limits": {"max_memory_mb": 1536, "inference_timeout_ms": 8000},
+  "_trial": "TEMPORARY observation block, 2026-10-24. Finished export (epoch -1, optimizer stripped) of the goggles_2 training run: RT-DETR (rtdetr-l) at imgsz 1280, ultralytics 8.4.182, best epoch 21 of a run early-stopped at 31/50 (patience 10); val mAP50 0.772, mAP50-95 0.371, P 0.790, R 0.736 (val losses NaN from epoch 4). Offline on the 36 saved frames (eval/2026-10-18, 2026-10-19; conf floor 0.01): max 0.522, p50 0.153, 2 frames >=0.5, none >=0.7; 0.386 on the confirmed bare-face frame (goggles_2 0.103, no_goggles 0.182); ~103 ms/frame, ~610 MB GPU peak. FOURTH model emitting missing_goggles, with goggles, no_goggles and goggles_2: no two may ever share a camera, or one violation is reported more than once. Nothing enforces that. Remove once judged.",
+  "diagnostics": {"summary_log_sample": 1.0, "predict_floor": 0.01}
+}
