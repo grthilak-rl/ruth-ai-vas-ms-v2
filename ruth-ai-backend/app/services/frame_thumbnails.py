@@ -80,8 +80,8 @@ def crop_rect(boxes: list[Box], frame_w: int, frame_h: int) -> tuple[int, int, i
     return round(left), round(top), round(left + w), round(top + h)
 
 
-def render_thumbnail(frame_path: Path, bounding_boxes, out_path: Path) -> Path:
-    """Crop, scale and annotate; written atomically to ``out_path``."""
+def annotated_crop(frame_path: Path, bounding_boxes, size: tuple[int, int] = THUMB_SIZE, line: int = 2):
+    """The frame cropped around the boxes at 4:3, scaled to ``size``, boxed."""
     from PIL import Image, ImageDraw
 
     with Image.open(frame_path) as image:
@@ -89,11 +89,11 @@ def render_thumbnail(frame_path: Path, bounding_boxes, out_path: Path) -> Path:
         fw, fh = image.size
         boxes = boxes_in_frame(bounding_boxes, fw, fh)
         left, top, right, bottom = crop_rect(boxes, fw, fh)
-        thumb = image.crop((left, top, right, bottom)).resize(THUMB_SIZE, Image.LANCZOS)
+        crop = image.crop((left, top, right, bottom)).resize(size, Image.LANCZOS)
 
-    scale_x = THUMB_SIZE[0] / (right - left)
-    scale_y = THUMB_SIZE[1] / (bottom - top)
-    draw = ImageDraw.Draw(thumb)
+    scale_x = size[0] / (right - left)
+    scale_y = size[1] / (bottom - top)
+    draw = ImageDraw.Draw(crop)
     for b in boxes:
         draw.rectangle(
             (
@@ -103,8 +103,14 @@ def render_thumbnail(frame_path: Path, bounding_boxes, out_path: Path) -> Path:
                 (b.y + b.height - top) * scale_y,
             ),
             outline=BOX_COLOR,
-            width=2,
+            width=line,
         )
+    return crop
+
+
+def render_thumbnail(frame_path: Path, bounding_boxes, out_path: Path) -> Path:
+    """Crop, scale and annotate; written atomically to ``out_path``."""
+    thumb = annotated_crop(frame_path, bounding_boxes)
 
     out_path.parent.mkdir(parents=True, exist_ok=True)
     # Unique temp name: two first requests for one card can render at once.

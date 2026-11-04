@@ -24,6 +24,9 @@ from app.models.base import Base, TimestampMixin, generate_uuid
 #: Key under which the site-global shift schedule is stored.
 SHIFT_SCHEDULE_KEY = "shift_schedule"
 
+#: Key under which the customer report branding (name, logo) is stored.
+REPORT_BRANDING_KEY = "report_branding"
+
 
 class AppSetting(Base, TimestampMixin):
     """One site-global setting.

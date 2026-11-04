@@ -42,6 +42,7 @@ from app.models.project import (
 )
 from app.models.stream_session import StreamSession
 from app.models.violation import Violation
+from app.models.customer_report import CustomerReport
 from app.models.violation_export import (
     EXPORT_BUILDING,
     EXPORT_EXPIRED,
@@ -65,6 +66,7 @@ __all__ = [
     # Models
     "AppSetting",
     "SHIFT_SCHEDULE_KEY",
+    "CustomerReport",
     "BookmarkAnalysis",
     "Device",
     "StreamSession",

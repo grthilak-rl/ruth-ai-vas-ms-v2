@@ -334,6 +334,29 @@ class Settings(BaseSettings):
             "so a camera that fires all day is not one card."
         ),
     )
+    # Customer report (Analytics -> Export Data). Branding lives in the
+    # `report_branding` app setting, edited under Settings -> Report branding.
+    customer_report_dir: str = Field(
+        default="/evidence/reports",
+        description="Where built customer reports are kept for re-download.",
+    )
+    customer_report_retention_days: int = Field(
+        default=30,
+        ge=1,
+        le=365,
+        description="How long a built report stays downloadable before it is swept.",
+    )
+    customer_report_max_days: int = Field(
+        default=92,
+        ge=1,
+        le=366,
+        description="Longest custom period a report may cover.",
+    )
+    report_branding_dir: str = Field(
+        default="/evidence/branding",
+        description="Where the uploaded customer logo is stored.",
+    )
+
     evidence_bookmark_cooldown_seconds: int = Field(
         default=60,
         ge=0,

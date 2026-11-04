@@ -7,7 +7,15 @@ depends on this package.
 
 from fastapi import APIRouter, Depends
 
-from app.api.v1.admin import auth, me, model_store, projects, violation_exports
+from app.api.v1.admin import (
+    auth,
+    customer_reports,
+    me,
+    model_store,
+    projects,
+    report_branding,
+    violation_exports,
+)
 from app.core.admin_auth import require_admin
 
 router = APIRouter(prefix="/admin", tags=["Admin"])
@@ -21,6 +29,8 @@ protected_router.include_router(me.router)
 protected_router.include_router(model_store.router)
 protected_router.include_router(projects.router)
 protected_router.include_router(violation_exports.router)
+protected_router.include_router(customer_reports.router)
+protected_router.include_router(report_branding.router)
 router.include_router(protected_router)
 
 __all__ = ["router"]

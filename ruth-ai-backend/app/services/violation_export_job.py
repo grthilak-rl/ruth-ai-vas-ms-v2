@@ -427,6 +427,10 @@ class ExportSweeper:
         factory = get_session_factory()
         if factory is None:
             return {"removed": 0, "abandoned": 0}
+        # Customer reports share the lifecycle, so they share the sweep.
+        from app.services.report.job import sweep_customer_reports
+
+        await sweep_customer_reports(factory)
         return await sweep_expired(factory)
 
     async def _loop(self) -> None:
