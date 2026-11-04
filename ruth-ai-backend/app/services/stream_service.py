@@ -135,6 +135,13 @@ class StreamService:
             StreamAlreadyActiveError: Stream already active for device
             StreamStartError: VAS failed to start stream
         """
+        # Nothing starts a camera while the project is stopped or ended: the
+        # start-inference endpoint, the model picker and the reconciler all
+        # come through here (409 via the global error mapping).
+        from app.services.project_lifecycle import ensure_running
+
+        await ensure_running(self._db)
+
         logger.info(
             "Starting stream",
             device_id=str(device_id),

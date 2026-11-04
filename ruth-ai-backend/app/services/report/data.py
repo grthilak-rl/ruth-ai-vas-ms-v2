@@ -53,7 +53,7 @@ from app.core.logging import get_logger
 from app.models import Device, Violation
 from app.models.enums import EvidenceStatus, EvidenceType, ViolationStatus
 from app.models.evidence import Evidence
-from app.models.project import Project
+from app.models.project import CURRENT_PROJECT_STATES, Project
 from app.services.incidents import group_incidents
 from app.services.report.branding import ReportBranding, get_branding
 from app.services.shift_schedule import ShiftSchedule
@@ -696,7 +696,7 @@ async def _project_for(db: AsyncSession, start: datetime, end: datetime) -> tupl
     active project's start is where the live data begins.
     """
     projects = (await db.execute(select(Project).order_by(Project.started_at))).scalars().all()
-    active = next((p for p in projects if p.state == "active"), None)
+    active = next((p for p in projects if p.state in CURRENT_PROJECT_STATES), None)
     overlapping = [
         p for p in projects if p.started_at < end and (p.ended_at is None or p.ended_at > start)
     ]

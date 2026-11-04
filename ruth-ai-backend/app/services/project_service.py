@@ -54,6 +54,10 @@ from app.models import (
     PROJECT_START_LOCK_KEY,
     PROJECT_STATE_ACTIVE,
     PROJECT_STATE_ARCHIVED,
+    PROJECT_STATE_ENDED,
+    PROJECT_STATE_RESUMING,
+    PROJECT_STATE_STOPPED,
+    PROJECT_STATE_STOPPING,
     Device,
     Evidence,
     Project,
@@ -122,14 +126,14 @@ _RESTORE_ORDER: tuple[tuple[str, tuple[str, ...], tuple[str, ...]], ...] = (
             "id", "device_id", "stream_session_id", "type", "type_detail",
             "status", "confidence", "timestamp", "camera_name", "model_id",
             "model_version", "bounding_boxes", "reviewed_by", "reviewed_at",
-            "resolution_notes", "created_at", "updated_at",
+            "resolution_notes", "severity", "dismiss_reason", "created_at", "updated_at",
         ),
         (
             "id", "device_id", "stream_session_id", "type::violation_type",
             "type_detail", "status::violation_status", "confidence",
             "timestamp", "camera_name", "model_id", "model_version",
             "bounding_boxes", "reviewed_by", "reviewed_at",
-            "resolution_notes", "created_at", "updated_at",
+            "resolution_notes", "severity", "dismiss_reason", "created_at", "updated_at",
         ),
     ),
     (
@@ -437,6 +441,21 @@ class ProjectService:
         cameras = await self.live_cameras()
 
         blockers: list[str] = []
+        # A stopped/ended project is still the current one; starting a new
+        # project after Stop/End is deferred, so it is refused here rather
+        # than letting the archive flow open a second "current" project.
+        idle = (
+            await self._db.execute(
+                select(Project).where(
+                    Project.state.in_(
+                        (PROJECT_STATE_STOPPING, PROJECT_STATE_STOPPED,
+                         PROJECT_STATE_RESUMING, PROJECT_STATE_ENDED)
+                    )
+                )
+            )
+        ).scalars().first()
+        if idle is not None:
+            blockers.append("project_not_active")
         if cameras and not allow_stop_inference:
             blockers.append("inference_active")
         if total > MAX_UNBATCHED_ROWS:
@@ -828,13 +847,15 @@ class ProjectService:
                     id, device_id, stream_session_id, type, type_detail, status,
                     confidence, timestamp, camera_name, model_id, model_version,
                     bounding_boxes, reviewed_by, reviewed_at, resolution_notes,
+                    severity, dismiss_reason,
                     created_at, updated_at, archive_batch_id, project_id
                 )
                 SELECT
                     id, device_id, stream_session_id, type::text, type_detail,
                     status::text, confidence, timestamp, camera_name, model_id,
                     model_version, bounding_boxes, reviewed_by, reviewed_at,
-                    resolution_notes, created_at, updated_at,
+                    resolution_notes, severity, dismiss_reason,
+                    created_at, updated_at,
                     CAST(:batch AS uuid), CAST(:project AS uuid)
                 FROM violations
                 """

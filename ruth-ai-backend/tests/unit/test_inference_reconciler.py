@@ -25,6 +25,17 @@ from app.services.inference_intent import (
     retry_due_at,
 )
 
+
+@pytest.fixture(autouse=True)
+def _project_running(monkeypatch):
+    """These fakes answer queries in order; the project-state guard (tested
+    in test_project_lifecycle.py) would add one. Run as "no project yet"."""
+
+    async def no_project(_db):
+        return None
+
+    monkeypatch.setattr("app.services.project_lifecycle.site_state", no_project)
+
 NOW = datetime(2026, 10, 19, 12, 0, tzinfo=timezone.utc)
 
 

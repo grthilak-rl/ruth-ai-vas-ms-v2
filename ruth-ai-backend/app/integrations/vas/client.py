@@ -897,6 +897,22 @@ class VASClient:
 
             yield response
 
+    async def set_device_enabled(self, device_id: str, enabled: bool) -> Device:
+        """VAS's operator switch for a camera (PATCH /devices/{id}/enabled).
+
+        Disabled: VAS stops the stream (live view, recording and AI frames
+        are one ffmpeg process) and refuses every start path, including its
+        own crash restarts and auto-resume after a VAS reboot. Nothing is
+        deleted; enabling again starts the stream. Idempotent in VAS.
+        """
+        response = await self._request(
+            "PATCH",
+            f"/api/v1/devices/{device_id}/enabled",
+            json={"enabled": enabled},
+            retries=0,
+        )
+        return Device.model_validate(response.json())
+
     # -------------------------------------------------------------------------
     # Storage / footage retention (VAS is the single source of truth)
     # -------------------------------------------------------------------------

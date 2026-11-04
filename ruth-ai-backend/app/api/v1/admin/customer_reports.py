@@ -27,7 +27,7 @@ from app.core.config import get_settings
 from app.core.logging import get_logger
 from app.deps import DBSession
 from app.models.customer_report import CustomerReport
-from app.models.project import Project
+from app.models.project import CURRENT_PROJECT_STATES, Project
 from app.models.violation_export import EXPORT_READY
 from app.schemas.customer_report import (
     GALLERY_SIZES,
@@ -69,7 +69,7 @@ async def report_defaults(db: DBSession, _admin: AdminUser) -> CustomerReportDef
     offset = day_offset_minutes(schedule)
     now_local = datetime.now(schedule.tzinfo)
     active = (
-        await db.execute(select(Project).where(Project.state == "active"))
+        await db.execute(select(Project).where(Project.state.in_(CURRENT_PROJECT_STATES)))
     ).scalars().first()
     settings = get_settings()
     return CustomerReportDefaults(

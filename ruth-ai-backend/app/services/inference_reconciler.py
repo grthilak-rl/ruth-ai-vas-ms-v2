@@ -81,6 +81,8 @@ class ReconcileOutcome:
         self.resumed: list[str] = []
         self.failed: list[str] = []
         self.skipped_no_video: list[str] = []
+        #: Set when the whole cycle was skipped because the project is not active.
+        self.skipped_project: Optional[str] = None
         self.skipped_grace: list[str] = []
         self.parked: list[str] = []
         self.suspended: list[str] = []
@@ -93,6 +95,7 @@ class ReconcileOutcome:
             "resumed": self.resumed,
             "failed": self.failed,
             "skipped_no_video": self.skipped_no_video,
+            "skipped_project": self.skipped_project,
             "skipped_grace": self.skipped_grace,
             "parked": self.parked,
             "suspended": self.suspended,
@@ -171,6 +174,15 @@ class InferenceReconciler:
         now = datetime.now(timezone.utc)
 
         async with self._db() as db:
+            # A stopped/ended project keeps every camera off: no resumes, no
+            # suspensions, no VAS reads. Checked first, before anything else.
+            from app.services.project_lifecycle import is_running, site_state
+
+            state = await site_state(db)
+            if not is_running(state):
+                out.skipped_project = state
+                return out
+
             intents = (
                 await db.execute(
                     select(DeviceInferenceIntent, Device)

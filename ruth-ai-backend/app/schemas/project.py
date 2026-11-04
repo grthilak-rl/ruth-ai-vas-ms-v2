@@ -29,8 +29,50 @@ class ProjectSummary(BaseModel):
     archive_batch_id: uuid.UUID | None = None
     archived_counts: dict[str, int] | None = None
     backup_path: str | None = None
+    stopped_at: datetime | None = None
+    stopped_by: str | None = None
+    resumed_at: datetime | None = None
+    resumed_by: str | None = None
+    lifecycle_error: str | None = None
 
     model_config = {"from_attributes": True}
+
+
+class LifecycleCamera(BaseModel):
+    """One camera in a Stop/Resume/End plan: what it is now, what will change."""
+
+    name: str
+    vas_device_id: str
+    device_id: str | None
+    vas_enabled_now: bool
+    intent: str | None
+    intent_models: int
+    live_session: bool
+    actions: list[str]
+    vas_change: bool
+
+
+class LifecyclePreflightResponse(BaseModel):
+    action: str
+    project: ProjectSummary | None
+    allowed: bool
+    blocked_reason: str | None = None
+    cameras: list[LifecycleCamera]
+    #: Site-wide effects, in plain words.
+    effects: list[str]
+
+
+class LifecycleResultResponse(BaseModel):
+    action: str
+    project: ProjectSummary
+    complete: bool
+    errors: list[str]
+    cameras: list[LifecycleCamera]
+    retention_paused: bool | None
+
+
+class EndProjectRequest(BaseModel):
+    confirm_name: str = Field(..., description="The project name, typed exactly")
 
 
 class ProjectListResponse(BaseModel):

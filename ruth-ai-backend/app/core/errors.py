@@ -239,6 +239,11 @@ def map_domain_exception(exc: ServiceError) -> RuthAPIError:
             details=exc.details,
         )
 
+    from app.services.project_lifecycle import ProjectNotRunningError
+
+    if isinstance(exc, ProjectNotRunningError):
+        return ConflictAPIError(message=exc.message, details=exc.details)
+
     if isinstance(exc, StreamAlreadyActiveError):
         # Idempotent - this should return success, not error
         # But if it does reach here, return conflict

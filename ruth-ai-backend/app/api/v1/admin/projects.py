@@ -22,7 +22,7 @@ from app.core.cache import DEVICES_LIST_CACHE_KEYS, cache_delete
 from app.core.logging import get_logger
 from app.deps import DBSession, StreamServiceDep, VASClientDep
 from app.models import (
-    PROJECT_STATE_ACTIVE,
+    CURRENT_PROJECT_STATES,
     EvidenceArchive,
     Project,
     ViolationArchive,
@@ -31,6 +31,10 @@ from app.schemas import ErrorResponse
 from app.schemas.project import (
     ArchivedViolation,
     ArchivedViolationListResponse,
+    EndProjectRequest,
+    LifecycleCamera,
+    LifecyclePreflightResponse,
+    LifecycleResultResponse,
     PreflightResponse,
     ProjectListResponse,
     ProjectSummary,
@@ -71,7 +75,9 @@ async def list_projects(db: DBSession, _admin: AdminUser) -> ProjectListResponse
     service = ProjectService(db)
     projects = await service.list_projects()
     items = [ProjectSummary.model_validate(p) for p in projects]
-    active = next((i for i in items if i.state == PROJECT_STATE_ACTIVE), None)
+    # "active" in the response means the current project, whatever its
+    # lifecycle state (a stopped project is still the current one).
+    active = next((i for i in items if i.state in CURRENT_PROJECT_STATES), None)
     return ProjectListResponse(items=items, active=active)
 
 
@@ -178,6 +184,14 @@ async def start_project(
                     f"{pre.backup_dir} exists and is writable."
                 ),
             },
+        )
+    if "project_not_active" in pre.blockers:
+        raise _conflict(
+            "project_not_active",
+            (
+                "The current project is stopped or ended. Starting a new project "
+                "after Stop/End is not available yet; resume the project first."
+            ),
         )
     if "inference_active" in pre.blockers:
         raise _conflict(
@@ -381,4 +395,124 @@ async def archived_violations(
             for v, snapshot_path, video_path in rows
         ],
         total=int(total),
+    )
+
+
+# ---------------------------------------------------------------------------
+# Stop / Resume / End (see app/services/project_lifecycle.py)
+# ---------------------------------------------------------------------------
+
+_EFFECTS = {
+    "stop": [
+        "Footage deletion is paused in VAS (nothing is deleted while stopped).",
+        "Automatic inference restarts (reconciler) do nothing while stopped.",
+        "Starting inference is refused (409) until the project is resumed.",
+        "Configuration is kept: cameras, models per camera and intents are untouched.",
+        "Nothing is deleted: footage, evidence frames, violations and reports stay readable.",
+    ],
+    "end": [
+        "Same as Stop, and the project cannot be resumed.",
+        "Footage deletion stays paused.",
+        "Nothing is deleted or archived: footage, evidence frames, violations and reports stay readable.",
+    ],
+    "resume": [
+        "Footage deletion pause is lifted (deletion itself stays OFF unless someone turned it on).",
+        "Only the cameras that were enabled when the project was stopped are re-enabled.",
+        "Inference returns on its own (reconciler, about 90 s) where the intent is active.",
+    ],
+}
+
+
+def _lifecycle_service(db, vas_client, stream_service):
+    from app.services.project_lifecycle import ProjectLifecycleService
+
+    return ProjectLifecycleService(db, vas_client, stream_service)
+
+
+@router.get(
+    "/lifecycle/preflight",
+    response_model=LifecyclePreflightResponse,
+    summary="What Stop / Resume / End would change, per camera",
+)
+async def lifecycle_preflight(
+    db: DBSession,
+    _admin: AdminUser,
+    stream_service: StreamServiceDep,
+    vas_client: VASClientDep,
+    action: str = Query(..., pattern="^(stop|resume|end)$"),
+) -> LifecyclePreflightResponse:
+    from app.services.project_lifecycle import LifecycleError, check_allowed, plan_as_dict
+
+    service = _lifecycle_service(db, vas_client, stream_service)
+    project, plans = await service.preflight(action)
+    blocked = None
+    try:
+        # The name check belongs to the submit, not the preview.
+        check_allowed(action, project.state if project else None,
+                      project_name=project.name if project else None,
+                      confirm_name=project.name if project else None)
+    except LifecycleError as e:
+        blocked = e.message
+    return LifecyclePreflightResponse(
+        action=action,
+        project=ProjectSummary.model_validate(project) if project else None,
+        allowed=blocked is None,
+        blocked_reason=blocked,
+        cameras=[LifecycleCamera(**plan_as_dict(p)) for p in plans],
+        effects=_EFFECTS[action],
+    )
+
+
+async def _run_lifecycle(action: str, run) -> LifecycleResultResponse:
+    from app.services.project_lifecycle import LifecycleError, plan_as_dict
+
+    try:
+        result = await run()
+    except LifecycleError as e:
+        raise HTTPException(
+            status_code=(
+                status.HTTP_422_UNPROCESSABLE_ENTITY
+                if e.code == "confirmation_mismatch"
+                else status.HTTP_409_CONFLICT
+            ),
+            detail={"error": e.code, "message": e.message},
+        ) from e
+    await cache_delete(*DEVICES_LIST_CACHE_KEYS)
+    return LifecycleResultResponse(
+        action=action,
+        project=ProjectSummary.model_validate(result.project),
+        complete=result.complete,
+        errors=result.errors,
+        cameras=[LifecycleCamera(**plan_as_dict(p)) for p in result.cameras],
+        retention_paused=result.retention_paused,
+    )
+
+
+@router.post("/lifecycle/stop", response_model=LifecycleResultResponse, summary="Stop the project")
+async def stop_project(
+    db: DBSession, admin: AdminUser, stream_service: StreamServiceDep, vas_client: VASClientDep
+) -> LifecycleResultResponse:
+    service = _lifecycle_service(db, vas_client, stream_service)
+    return await _run_lifecycle("stop", lambda: service.stop(admin.username))
+
+
+@router.post("/lifecycle/resume", response_model=LifecycleResultResponse, summary="Resume the project")
+async def resume_project(
+    db: DBSession, admin: AdminUser, stream_service: StreamServiceDep, vas_client: VASClientDep
+) -> LifecycleResultResponse:
+    service = _lifecycle_service(db, vas_client, stream_service)
+    return await _run_lifecycle("resume", lambda: service.resume(admin.username))
+
+
+@router.post("/lifecycle/end", response_model=LifecycleResultResponse, summary="End the project")
+async def end_project(
+    request: EndProjectRequest,
+    db: DBSession,
+    admin: AdminUser,
+    stream_service: StreamServiceDep,
+    vas_client: VASClientDep,
+) -> LifecycleResultResponse:
+    service = _lifecycle_service(db, vas_client, stream_service)
+    return await _run_lifecycle(
+        "end", lambda: service.stop(admin.username, end=True, confirm_name=request.confirm_name)
     )

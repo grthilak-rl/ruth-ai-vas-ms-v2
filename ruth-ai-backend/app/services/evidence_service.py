@@ -195,10 +195,12 @@ class EvidenceService:
 
         # Trigger VAS snapshot creation
         try:
+            source = await self._capture_source(violation)
             vas_snapshot = await self._vas.create_snapshot(
                 vas_stream_id,
                 SnapshotCreateRequest(
-                    source="live",
+                    source=source,
+                    timestamp=violation.timestamp if source == "historical" else None,
                     created_by=created_by,
                     metadata={
                         "violation_id": str(violation.id),
@@ -325,7 +327,7 @@ class EvidenceService:
             vas_bookmark = await self._vas.create_bookmark(
                 vas_stream_id,
                 BookmarkCreateRequest(
-                    source="live",
+                    source=await self._capture_source(violation),
                     label=f"Violation: {violation.type.value}",
                     event_type=violation.type.value,
                     confidence=violation.confidence,
@@ -763,13 +765,15 @@ class EvidenceService:
 
         # Re-trigger VAS creation based on type
         vas_stream_id = await self._resolve_vas_stream_id(violation)
+        source = await self._capture_source(violation)
 
         try:
             if evidence.evidence_type == EvidenceType.SNAPSHOT:
                 vas_snapshot = await self._vas.create_snapshot(
                     vas_stream_id,
                     SnapshotCreateRequest(
-                        source="live",
+                        source=source,
+                        timestamp=violation.timestamp if source == "historical" else None,
                         created_by="ruth-ai",
                         metadata={
                             "violation_id": str(violation.id),
@@ -784,7 +788,7 @@ class EvidenceService:
                 vas_bookmark = await self._vas.create_bookmark(
                     vas_stream_id,
                     BookmarkCreateRequest(
-                        source="live",
+                        source=source,
                         label=f"Violation: {violation.type.value}",
                         event_type=violation.type.value,
                         confidence=violation.confidence,
@@ -882,7 +886,43 @@ class EvidenceService:
         if active_session and active_session.vas_stream_id:
             return active_session.vas_stream_id
 
+        # Camera stopped (project stopped, camera disabled): the newest
+        # session of any state still names the VAS stream, and VAS keeps
+        # stream ids across disable/enable, so its recordings are reachable.
+        latest = (
+            await self._db.execute(
+                select(StreamSession)
+                .where(
+                    StreamSession.device_id == violation.device_id,
+                    StreamSession.vas_stream_id.isnot(None),
+                )
+                .order_by(StreamSession.started_at.desc())
+                .limit(1)
+            )
+        ).scalars().first()
+        if latest is not None:
+            return latest.vas_stream_id
+
         raise NoActiveStreamError(violation.id, violation.device_id)
+
+    async def _capture_source(self, violation: Violation) -> str:
+        """"live" while the camera has a live session, else "historical".
+
+        A stopped camera has no live frame to capture and VAS refuses live
+        captures for it (400); the recording at the violation's own time is
+        the evidence then. Live captures keep today's behaviour otherwise.
+        """
+        from app.models import StreamSession, StreamState
+
+        live = (
+            await self._db.execute(
+                select(StreamSession.id).where(
+                    StreamSession.device_id == violation.device_id,
+                    StreamSession.state == StreamState.LIVE,
+                )
+            )
+        ).first()
+        return "live" if live else "historical"
 
     async def _mark_evidence_failed(
         self,
