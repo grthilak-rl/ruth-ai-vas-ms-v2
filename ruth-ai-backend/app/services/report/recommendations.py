@@ -5,7 +5,7 @@ numbers it rests on. At most four, ranked by how many incidents they
 concern, no more than two about one area. Types whose detection began or
 stopped inside the comparison window are left out of the change-based
 rule, so a model rollout never reads as a deteriorating site. Nothing here
-refers to review backlogs: operators only dismiss obvious false alarms.
+refers to review backlogs: operators only dismiss the obvious cases.
 """
 
 from __future__ import annotations

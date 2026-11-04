@@ -526,8 +526,8 @@ def _counting_note(r: ReportData) -> str:
         f"An <b>incident</b> is one or more detections from the same camera and of the same "
         f"type, each within {r.gap_minutes} minutes of the previous, lasting at most "
         f"{r.max_span_minutes} minutes. Incidents are the unit of this report; raw detections "
-        f"are shown for reference only. Detections dismissed by operators as false alarms are "
-        f"not counted."
+        f"are shown for reference only. Detections an operator dismissed (false alarms, "
+        f"duplicates, or people and places the PPE rule does not apply to) are not counted."
     )
     if r.day_offset:
         text += f" Days are shift days: each runs from the first shift's start ({_day_hours(r)})."
@@ -610,7 +610,7 @@ def summary_section(r: ReportData, st: dict) -> list:
     dismissed = sum(r.dismissed_by_type.values())
     if dismissed:
         secondary += (
-            f". Dismissed by operators as false alarms, not counted: {fmt_int(dismissed)} "
+            f". Dismissed by operators, not counted: {fmt_int(dismissed)} "
             f"incident{'s' * (dismissed != 1)}"
         )
     notes = [secondary + "."]
@@ -733,8 +733,8 @@ def trend_section(r: ReportData, st: dict) -> list:
         Paragraph(f"Incidents by {_type_heading(r)}", st["h2"]),
         Paragraph(
             "Share of all incidents in the period."
-            + (" “Dismissed” shows incidents operators set aside as false alarms; they are "
-               "not counted." if dismissed else ""),
+            + (" “Dismissed” shows incidents operators set aside (false alarms, duplicates "
+               "or exemptions); they are not counted." if dismissed else ""),
             st["caption"],
         ),
         charts.hbars(by_type, CONTENT_W, total=r.current.incidents, annotations=notes)
@@ -745,7 +745,7 @@ def trend_section(r: ReportData, st: dict) -> list:
     if only_dismissed:
         out.append(Spacer(1, 4))
         out.append(Paragraph(
-            "Dismissed as false alarms only: "
+            "Dismissed only: "
             + " · ".join(f"{_esc(k)} {v}" for k, v in only_dismissed),
             st["caption"],
         ))

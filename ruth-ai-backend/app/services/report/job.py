@@ -142,7 +142,12 @@ async def run_report_job(report_id: uuid.UUID, session_factory) -> None:
 
             await _stage(db, report_id, 1)
             if options.get("gallery", True):
-                report.gallery = await load_gallery(db, report, int(options.get("gallery_size", 12)))
+                report.gallery = await load_gallery(
+                    db,
+                    report,
+                    int(options.get("gallery_size", 12)),
+                    exclude=options.get("gallery_exclude") or (),
+                )
 
             await _stage(db, report_id, 2)
             pdf = await run_in_threadpool(render_pdf, report)

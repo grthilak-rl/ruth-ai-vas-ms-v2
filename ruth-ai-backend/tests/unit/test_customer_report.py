@@ -15,6 +15,7 @@ from app.services.report.branding import LogoError, ReportBranding, prepare_logo
 from app.services.report.data import (
     MODE_VERIFIED,
     rank_for_gallery,
+    select_gallery,
     PRESET_CUSTOM,
     PRESET_DAILY,
     Camera,
@@ -329,3 +330,30 @@ def test_gallery_spreads_across_cameras_then_fills():
     framed = {r.incidents[0].key}
     picked = rank_for_gallery(r.incidents, 2, usable=lambda i: i.key in framed)
     assert picked[0].key in framed
+
+
+def test_exempt_dismissal_is_excluded_but_never_labelled():
+    from app.models.dismiss_reasons import REASON_LABELS, DismissReason
+    from app.services.false_positive_export import is_false_alarm
+
+    assert not is_false_alarm("exempt")
+    assert REASON_LABELS[DismissReason.EXEMPT] == "Exempt / not required"
+    rows = [row(ist(DAY, 9)), row(ist(DAY, 11), status=ViolationStatus.DISMISSED)]
+    assert run(rows).current.incidents == 1
+
+
+class _NoFrames:
+    """A session whose queries find nothing: every candidate is frameless."""
+
+    async def execute(self, _stmt):
+        return SimpleNamespace(all=lambda: [])
+
+
+async def test_removed_gallery_candidates_are_replaced_by_the_next():
+    r = run(busy_rows())
+    first = await select_gallery(_NoFrames(), r, 3)
+    removed = first[0].incident.key
+    again = await select_gallery(_NoFrames(), r, 3, exclude=[removed])
+    assert len(again) == 3
+    assert removed not in {p.incident.key for p in again}
+    assert {p.incident.key for p in first[1:]} <= {p.incident.key for p in again}

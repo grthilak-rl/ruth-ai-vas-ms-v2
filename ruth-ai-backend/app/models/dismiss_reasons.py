@@ -24,6 +24,10 @@ class DismissReason(str, Enum):
     OTHER_FALSE_ALARM = "other_false_alarm"
     #: Not a false alarm: a duplicate, or already handled.
     DUPLICATE = "duplicate"
+    #: Not a false alarm and not a model error: the PPE is not required for
+    #: this person or place (a turban instead of a hard hat, an area where
+    #: the item is not mandated). Excluded from reports, never labelled.
+    EXEMPT = "exempt"
 
 
 REASON_LABELS: dict[DismissReason, str] = {
@@ -32,6 +36,7 @@ REASON_LABELS: dict[DismissReason, str] = {
     DismissReason.PPE_WORN: "PPE actually worn",
     DismissReason.OTHER_FALSE_ALARM: "Other false alarm",
     DismissReason.DUPLICATE: "Duplicate / already handled",
+    DismissReason.EXEMPT: "Exempt / not required",
 }
 
 #: Reasons that mean the model was wrong: exported for labelling.

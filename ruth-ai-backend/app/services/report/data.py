@@ -4,8 +4,9 @@ The headline unit is the incident (``app.services.incidents``), not the raw
 detection: one person without gloves for ten minutes is one incident and a
 dozen detections. Counting rules:
 
-- Dismissed detections are false alarms and never count. Operators only
-  dismiss the obvious ones, so everything else counts by default.
+- Dismissed detections never count: false alarms, duplicates and
+  exemptions alike. Operators only dismiss the obvious ones, so everything
+  else counts by default.
 - "verified" mode keeps only incidents with at least one member reviewed or
   resolved. It is optional and labelled as such on every page.
 - Dismissed detections are grouped the same way and reported per type as a
@@ -66,7 +67,7 @@ MODE_ALL = "all"
 MODE_VERIFIED = "verified"
 
 MODE_LABELS = {
-    MODE_ALL: "All incidents, excluding those dismissed as false alarms",
+    MODE_ALL: "All incidents, excluding those dismissed by an operator",
     MODE_VERIFIED: "Verified incidents only (reviewed or resolved by an operator)",
 }
 
@@ -238,7 +239,7 @@ class ReportData:
     current: PeriodTotals
     prev: PeriodTotals
     areas: list[AreaSummary]
-    #: Type label -> incidents dismissed as false alarms in the period.
+    #: Type label -> incidents dismissed by an operator in the period.
     dismissed_by_type: Counter
     #: Report days of the over-time chart (the period, or the last 30 for daily).
     by_day: list[tuple[date, int]]
@@ -815,17 +816,31 @@ def _gallery_image(frame_path: Path, boxes) -> bytes | None:
     return out.getvalue()
 
 
-async def load_gallery(db: AsyncSession, report: ReportData, size: int) -> list[GalleryItem]:
-    """The top ``size`` incidents with their best saved frame, cropped.
+@dataclass(frozen=True)
+class GalleryPick:
+    incident: ReportIncident
+    #: The member whose saved frame represents the incident, and the file.
+    violation_id: UUID | None
+    frame_path: Path | None
 
-    Incidents with a frame are preferred; the gallery is only topped up with
-    frameless ones when there are not enough. Crops run in a thread.
+
+async def select_gallery(
+    db: AsyncSession,
+    report: ReportData,
+    size: int,
+    exclude: Iterable[str] = (),
+) -> list[GalleryPick]:
+    """The top ``size`` incidents and the frame for each, in gallery order.
+
+    ``exclude`` holds incident keys an admin removed; the next candidates
+    fill in. Incidents with a saved frame are preferred; frameless ones only
+    top up when there are not enough. Shared by the preview and the build,
+    so what the admin approved is what the PDF shows.
     """
-    from starlette.concurrency import run_in_threadpool
-
+    removed = set(exclude)
     if size <= 0 or not report.incidents:
         return []
-    pool = gallery_order(report.incidents)[:GALLERY_POOL]
+    pool = [i for i in gallery_order(report.incidents) if i.key not in removed][:GALLERY_POOL]
     ids = {vid for inc in pool for vid in inc.frame_candidates[:FRAME_CANDIDATES]}
     frames = dict(
         (
@@ -851,25 +866,33 @@ async def load_gallery(db: AsyncSession, report: ReportData, size: int) -> list[
 
     chosen = {inc.key: best_frame(inc) for inc in pool}
     picked = rank_for_gallery(pool, size, usable=lambda i: chosen[i.key] is not None)
+    return [
+        GalleryPick(i, *(chosen[i.key] or (None, None))) for i in gallery_order(picked)
+    ]
 
-    with_frame = {chosen[i.key][0]: i for i in picked if chosen.get(i.key)}
+
+async def load_gallery(
+    db: AsyncSession, report: ReportData, size: int, exclude: Iterable[str] = ()
+) -> list[GalleryItem]:
+    """``select_gallery``, with each frame cropped for print (in a thread)."""
+    from starlette.concurrency import run_in_threadpool
+
+    picks = await select_gallery(db, report, size, exclude)
+    framed = [p.violation_id for p in picks if p.violation_id]
     boxes = dict(
         (
             await db.execute(
-                select(Violation.id, Violation.bounding_boxes).where(
-                    Violation.id.in_(list(with_frame))
-                )
+                select(Violation.id, Violation.bounding_boxes).where(Violation.id.in_(framed))
             )
         ).all()
-    ) if with_frame else {}
+    ) if framed else {}
 
     items: list[GalleryItem] = []
-    for inc in gallery_order(picked):
-        frame = chosen.get(inc.key)
+    for pick in picks:
         image = (
-            await run_in_threadpool(_gallery_image, frame[1], boxes.get(frame[0]))
-            if frame
+            await run_in_threadpool(_gallery_image, pick.frame_path, boxes.get(pick.violation_id))
+            if pick.frame_path
             else None
         )
-        items.append(GalleryItem(incident=inc, image=image))
+        items.append(GalleryItem(incident=pick.incident, image=image))
     return items

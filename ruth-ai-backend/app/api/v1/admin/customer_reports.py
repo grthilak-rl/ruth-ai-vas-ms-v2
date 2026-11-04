@@ -1,6 +1,7 @@
 """Customer report API (admin protected_router).
 
 - GET  /admin/customer-reports/defaults        periods the Export page offers
+- POST /admin/customer-reports/gallery-preview  the evidence the report would show
 - POST /admin/customer-reports                 start building one
 - GET  /admin/customer-reports                 recent reports, newest first
 - GET  /admin/customer-reports/{id}            progress
@@ -31,11 +32,18 @@ from app.models.violation_export import EXPORT_READY
 from app.schemas.customer_report import (
     GALLERY_SIZES,
     CustomerReportDefaults,
+    GalleryCandidate,
+    GalleryPreview,
     CustomerReportJob,
     CustomerReportList,
     CustomerReportRequest,
 )
-from app.services.report.data import day_offset_minutes, report_day_of
+from app.services.report.data import (
+    day_offset_minutes,
+    load_report,
+    report_day_of,
+    select_gallery,
+)
 from app.services.report.job import PeriodError, report_period, run_report_job
 from app.services.shift_service import ShiftService
 
@@ -79,6 +87,55 @@ async def report_defaults(db: DBSession, _admin: AdminUser) -> CustomerReportDef
     )
 
 
+async def _period_or_422(request: CustomerReportRequest, db):
+    schedule = await ShiftService(db).get_schedule()
+    try:
+        return report_period(
+            request.preset, schedule, day=request.day, start=request.start, end=request.end
+        )
+    except PeriodError as e:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail={"error": "invalid_period", "message": str(e)},
+        ) from e
+
+
+@router.post(
+    "/gallery-preview",
+    response_model=GalleryPreview,
+    summary="Evidence gallery candidates for a report",
+)
+async def gallery_preview(
+    request: CustomerReportRequest, db: DBSession, _admin: AdminUser
+) -> GalleryPreview:
+    """What the gallery would show, minus ``gallery_exclude``.
+
+    The same selection the build uses, so an approved set is the printed set.
+    The admin removes a candidate by adding its key to ``gallery_exclude``
+    and asking again; the next candidate fills in.
+    """
+    start, end, _ = await _period_or_422(request, db)
+    report = await load_report(db, start=start, end=end, preset=request.preset, mode=request.mode)
+    picks = await select_gallery(db, report, request.gallery_size, request.gallery_exclude)
+    return GalleryPreview(
+        items=[
+            GalleryCandidate(
+                key=p.incident.key,
+                violation_id=p.violation_id,
+                area=p.incident.area,
+                camera=p.incident.camera,
+                type_label=p.incident.type_label,
+                severity=p.incident.severity,
+                started=f"{p.incident.started_at:%a %-d %b, %H:%M}",
+                minutes=max(1, round(p.incident.duration_minutes)),
+                detections=p.incident.detections,
+            )
+            for p in picks
+        ],
+        incidents=report.current.incidents,
+    )
+
+
 @router.post(
     "",
     response_model=CustomerReportJob,
@@ -88,16 +145,7 @@ async def report_defaults(db: DBSession, _admin: AdminUser) -> CustomerReportDef
 async def create_report(
     request: CustomerReportRequest, db: DBSession, admin: AdminUser
 ) -> CustomerReportJob:
-    schedule = await ShiftService(db).get_schedule()
-    try:
-        start, end, label = report_period(
-            request.preset, schedule, day=request.day, start=request.start, end=request.end
-        )
-    except PeriodError as e:
-        raise HTTPException(
-            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
-            detail={"error": "invalid_period", "message": str(e)},
-        ) from e
+    start, end, label = await _period_or_422(request, db)
 
     now = datetime.now(timezone.utc)
     row = CustomerReport(
@@ -139,6 +187,7 @@ async def create_report(
         period=label,
         mode=request.mode,
         gallery=request.gallery,
+        gallery_removed=len(request.gallery_exclude),
         by=admin.username,
     )
     return CustomerReportJob.model_validate(row)

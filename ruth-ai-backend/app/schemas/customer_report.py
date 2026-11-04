@@ -22,6 +22,29 @@ class CustomerReportRequest(BaseModel):
     mode: Literal["all", "verified"] = "all"
     gallery: bool = True
     gallery_size: int = Field(default=12, ge=1, le=max(GALLERY_SIZES))
+    #: Incident keys an admin removed from the gallery; the next fill in.
+    gallery_exclude: list[str] = Field(default_factory=list, max_length=500)
+
+
+class GalleryCandidate(BaseModel):
+    key: str
+    #: The violation whose saved frame represents the incident, if any;
+    #: its thumbnail is /api/v1/violations/{id}/frame/thumb.
+    violation_id: uuid.UUID | None
+    area: str
+    camera: str
+    type_label: str
+    severity: str
+    #: In the site's time zone, e.g. "Wed 28 Oct, 07:05".
+    started: str
+    minutes: int
+    detections: int
+
+
+class GalleryPreview(BaseModel):
+    items: list[GalleryCandidate]
+    #: Incidents in the period, before any were removed.
+    incidents: int
 
 
 class CustomerReportJob(BaseModel):
