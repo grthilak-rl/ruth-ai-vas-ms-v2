@@ -125,6 +125,9 @@ class InferenceReconciler:
         self.last_run_at: Optional[datetime] = None
         #: device_id -> when it was auto-resumed, for the 24 h summary.
         self._resume_log: list[tuple[datetime, str]] = []
+        #: Project state the last cycle skipped for, so the skip is logged
+        #: once per state change rather than every minute.
+        self._skipping_for: Optional[str] = None
 
     def _db(self):
         """A DB session whose rollback path actually runs on failure.
@@ -181,7 +184,19 @@ class InferenceReconciler:
             state = await site_state(db)
             if not is_running(state):
                 out.skipped_project = state
+                if state != self._skipping_for:
+                    logger.info(
+                        "Inference reconciler idle: project not active",
+                        project_state=state,
+                    )
+                    self._skipping_for = state
                 return out
+            if self._skipping_for is not None:
+                logger.info(
+                    "Inference reconciler active again",
+                    previous_project_state=self._skipping_for,
+                )
+                self._skipping_for = None
 
             intents = (
                 await db.execute(

@@ -589,7 +589,7 @@ async def stop_inference(
         await db.commit()
         # Return idempotent response
         return InferenceStopResponse(
-            session_id=None,  # type: ignore
+            session_id=None,
             device_id=device_id,
             state="stopped",
             stopped_at=None,

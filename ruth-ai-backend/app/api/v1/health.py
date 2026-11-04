@@ -200,6 +200,10 @@ async def auto_resume_status(db: DBSession) -> dict:
         # Set when the whole cycle was skipped because a shared dependency
         # was down. One alert for the fleet, not one per camera.
         "dependency_error": last.dependency_error if last else None,
+        # Set when the whole cycle was skipped because the project is not
+        # active (stopping/stopped/resuming/ended): the reconciler is idle on
+        # purpose, not broken.
+        "skipped_project": last.skipped_project if last else None,
     }
 
 

@@ -355,3 +355,45 @@ def test_database_check_constraint_allows_every_state():
 
     assert set(module.STATES) == set(PROJECT_STATES)
     assert set(module.CURRENT_STATES) == set(CURRENT_PROJECT_STATES)
+
+
+async def test_reconciler_logs_the_skip_once_per_state_change(monkeypatch):
+    import app.services.inference_reconciler as rec_mod
+
+    states = iter(["stopped", "stopped", "stopped", "ended", None])
+
+    async def next_state(_db):
+        return next(states)
+
+    logged = []
+    monkeypatch.setattr(pl, "site_state", next_state)
+    monkeypatch.setattr(rec_mod.logger, "info", lambda event, **kw: logged.append((event, kw)))
+
+    async def factory():
+        yield FakeDB()
+
+    rec = InferenceReconciler(factory, lambda db: None, None)
+    for _ in range(4):
+        await rec.reconcile_once()
+    assert [kw.get("project_state") for e, kw in logged] == ["stopped", "ended"]
+
+    # Running again: one "active again" line, then the normal cycle (no intents here).
+    async def no_intents(*_a, **_k):
+        return SimpleNamespace(all=lambda: [])
+
+    class DB(FakeDB):
+        execute = staticmethod(no_intents)
+
+    async def factory2():
+        yield DB()
+
+    rec._db_session_factory = factory2
+    await rec.reconcile_once()
+    assert logged[-1][0] == "Inference reconciler active again"
+
+
+def test_stop_response_allows_no_session():
+    from app.schemas.device import InferenceStopResponse
+
+    r = InferenceStopResponse(session_id=None, device_id=uuid.uuid4(), state="stopped")
+    assert r.session_id is None

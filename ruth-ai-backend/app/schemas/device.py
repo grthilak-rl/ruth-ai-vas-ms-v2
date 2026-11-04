@@ -201,7 +201,9 @@ class InferenceStartResponse(BaseModel):
 class InferenceStopResponse(BaseModel):
     """Response schema for POST /api/v1/devices/{id}/stop-inference."""
 
-    session_id: uuid.UUID = Field(..., description="Stream session UUID")
+    session_id: uuid.UUID | None = Field(
+        None, description="Stream session UUID; null when no session was running"
+    )
     device_id: uuid.UUID = Field(..., description="Device UUID")
     state: str = Field(..., description="Stream state (stopped)")
     stopped_at: datetime | None = Field(None, description="Session stop timestamp")
