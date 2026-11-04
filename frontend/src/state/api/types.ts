@@ -199,6 +199,9 @@ export interface HealthResponse {
  */
 export type Severity = 'critical' | 'high' | 'medium' | 'low';
 
+/** Confidence bucket, computed by the backend from the model's confidence. */
+export type ConfidenceLevel = 'high' | 'medium' | 'low';
+
 /**
  * Why a violation was dismissed. The first four are false alarms and copy
  * the inferred frame to the labelling set; "duplicate" is not.
@@ -383,12 +386,19 @@ export interface Violation {
   status: ViolationStatus;
 
   /**
-   * Confidence score 0.0-1.0
+   * Confidence score 0.0-1.0, as the model reported it.
    *
-   * HARD RULE: Frontend MUST NOT display as raw number.
-   * MUST convert to categorical: High (>=0.8), Medium (0.6-0.79), Low (<0.6)
+   * HARD RULE: Frontend MUST NOT display as raw number. Show
+   * `confidence_level` instead.
    */
   confidence: number;
+
+  /**
+   * The backend's bucket for `confidence`. The cut-offs live only in the
+   * backend (app/models/confidence_levels.py); the frontend never derives
+   * a bucket itself. Absent from older backends.
+   */
+  confidence_level?: ConfidenceLevel;
 
   /** When detection occurred */
   timestamp: ISOTimestamp;
@@ -756,6 +766,9 @@ export interface ViolationsQueryParams {
   /** Filter by severity (several allowed) */
   severity?: Severity[];
 
+  /** Filter by confidence bucket (several allowed) */
+  confidence?: ConfidenceLevel[];
+
   /** Filter by camera area (manway) */
   area?: string;
 
@@ -974,6 +987,8 @@ export interface IncidentListResponse {
   items: Incident[];
   total: number;
   violations_total: number;
+  /** Of those, still open: what "select all matching" acts on. Absent from older backends. */
+  open_violations_total?: number;
   gap_minutes: number;
   max_span_minutes: number;
   /** Absent from older backends */
@@ -981,12 +996,33 @@ export interface IncidentListResponse {
 }
 
 /** POST /api/v1/violations/bulk */
-export interface ViolationBulkRequest {
-  ids: UUID[];
+/**
+ * "Select all matching": the page's filters, applied server-side to open
+ * violations only. `until` is required and frozen when the dialog opens.
+ */
+export interface ViolationBulkFilter {
+  camera_id?: UUID | null;
+  since?: ISOTimestamp | null;
+  until: ISOTimestamp;
+  violation_type?: string | null;
+  type_detail?: string | null;
+  severities?: Severity[] | null;
+  confidences?: ConfidenceLevel[] | null;
+  area?: string | null;
+}
+
+/**
+ * Either `ids`, or `filter` with the `expected_count` the operator
+ * confirmed (409 if it no longer matches, 422 over BULK_LIMIT).
+ */
+export type ViolationBulkRequest = (
+  | { ids: UUID[]; filter?: never; expected_count?: never }
+  | { filter: ViolationBulkFilter; expected_count: number; ids?: never }
+) & {
   action: 'review' | 'dismiss';
   dismiss_reason?: DismissReason;
   note?: string;
-}
+};
 
 export interface ViolationBulkResponse {
   updated: UUID[];

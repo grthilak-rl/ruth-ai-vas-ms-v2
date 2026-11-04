@@ -136,24 +136,19 @@ export function useViolationQuery(id: string) {
 }
 
 /**
- * Convert numeric confidence to categorical (F6 §3.2)
+ * The violation's confidence bucket, as the backend computed it (F6 §3.2).
  *
  * HARD RULE: Frontend MUST NOT display numeric confidence.
- * Always use categorical labels.
- *
- * Re-exported from API module for convenience.
  */
-export function getConfidenceCategory(confidence: number): ConfidenceCategory {
-  return apiGetConfidenceCategory(confidence);
+export function getConfidenceCategory(
+  violation: Pick<Violation, 'confidence_level'>
+): ConfidenceCategory | null {
+  return apiGetConfidenceCategory(violation);
 }
 
-/**
- * Get display text for confidence category (F6 §3.2)
- *
- * Re-exported from API module for convenience.
- */
-export function getConfidenceDisplay(confidence: number): string {
-  return getConfidenceLabel(confidence);
+/** Display text for the violation's confidence bucket (F6 §3.2). */
+export function getConfidenceDisplay(violation: Pick<Violation, 'confidence_level'>): string {
+  return getConfidenceLabel(violation);
 }
 
 // ============================================================================

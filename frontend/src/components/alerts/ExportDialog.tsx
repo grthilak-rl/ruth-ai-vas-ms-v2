@@ -183,7 +183,8 @@ export function ExportDialog({ filters, incidentIds, onClose }: ExportDialogProp
                 checked={scope === 'one_per_incident'}
                 onChange={() => setScope('one_per_incident')}
               />
-              One image per incident (highest confidence)
+              One image per incident: the highest-confidence frame per incident
+              (not necessarily the latest, which the card shows)
             </label>
             <label>
               <input

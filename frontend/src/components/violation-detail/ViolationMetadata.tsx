@@ -12,7 +12,8 @@ import './ViolationMetadata.css';
 
 interface ViolationMetadataProps {
   violation: Violation;
-  confidenceCategory: ConfidenceCategory;
+  /** null when the backend sent no bucket */
+  confidenceCategory: ConfidenceCategory | null;
   confidenceLabel: string;
 }
 
@@ -118,7 +119,7 @@ export function ViolationMetadata({
 
         <div className="violation-metadata__item">
           <dt className="violation-metadata__label">Confidence</dt>
-          <dd className={`violation-metadata__value violation-metadata__confidence--${confidenceCategory}`}>
+          <dd className={`violation-metadata__value violation-metadata__confidence--${confidenceCategory ?? 'unknown'}`}>
             {confidenceLabel}
           </dd>
         </div>

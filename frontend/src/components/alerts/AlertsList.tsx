@@ -1,6 +1,15 @@
 import { useState, useCallback, useMemo, useLayoutEffect } from 'react';
 import { useBulkViolationAction, useIncidentsQuery } from '../../state';
-import type { DismissReason, Incident, Violation } from '../../state/api';
+import {
+  ApiError,
+  BULK_LIMIT,
+  fetchIncidents,
+  type DismissReason,
+  type Incident,
+  type Violation,
+  type ViolationBulkFilter,
+  type ViolationBulkRequest,
+} from '../../state/api';
 import { IncidentCard, type IncidentAction } from './IncidentCard';
 import { DismissConfirmationDialog } from './DismissConfirmationDialog';
 import { DismissReasonDialog } from './DismissReasonDialog';
@@ -9,12 +18,18 @@ import { Toast, type ToastType } from './Toast';
 import { AlertsListSkeleton } from './AlertsListSkeleton';
 import { ExportDialog } from './ExportDialog';
 import { Pagination } from '../ui';
-import { alertFiltersToParams, PAGE_SIZE_OPTIONS, type AlertFilters } from './alertFilters';
+import {
+  alertFiltersToParams,
+  frozenOpenSelection,
+  PAGE_SIZE_OPTIONS,
+  type AlertFilters,
+} from './alertFilters';
 import { cameraHeadline, formatIncidentSpan } from '../../utils/violationDisplay';
 import { summarizeBulkResult } from './bulkResult';
 import './AlertsList.css';
 
-const plural = (n: number, word: string) => `${n} ${word}${n === 1 ? '' : 's'}`;
+const plural = (n: number, word: string) =>
+  `${n.toLocaleString('en-US')} ${word}${n === 1 ? '' : 's'}`;
 
 const RANGE_LABELS: Record<AlertFilters['range'], string> = {
   today: 'Today',
@@ -24,13 +39,53 @@ const RANGE_LABELS: Record<AlertFilters['range'], string> = {
   custom: 'Custom range',
 };
 
+/** What an action applies to: listed violations, or every open one matching a frozen filter. */
+type Target =
+  | { kind: 'ids'; ids: string[] }
+  | { kind: 'filter'; filter: ViolationBulkFilter; expected: number; incidents: number };
+
+const targetCount = (target: Target) => (target.kind === 'ids' ? target.ids.length : target.expected);
+
 /** What a confirmation dialog is about to do. */
 type PendingAction =
-  | { kind: 'review'; ids: string[]; cardKey: string | null; title: string; message: string }
-  | { kind: 'dismiss'; ids: string[]; cardKey: string | null; context: string };
+  | { kind: 'review'; target: Target; cardKey: string | null; title: string; message: string }
+  | { kind: 'dismiss'; target: Target; cardKey: string | null; context: string };
+
+/**
+ * The bulk selection, kept per set of filters (so it survives paging and
+ * is dropped when a filter changes, since filters change what an incident
+ * contains). Either incidents picked by hand on any page — each holding the
+ * open violations it had when picked — or "all matching this filter".
+ */
+type Selection =
+  | {
+      mode: 'ids';
+      key: string;
+      ids: Record<string, string[]>;
+      /** Set when leaving "all matching" narrowed the selection to this page. */
+      narrowed?: boolean;
+    }
+  | { mode: 'all'; key: string };
 
 function describe(incident: Incident): string {
   return `${incident.detail_label ?? incident.type_label} on ${cameraHeadline(incident)}, ${formatIncidentSpan(incident.first_at, incident.last_at)}.`;
+}
+
+function filterMessage(target: Extract<Target, { kind: 'filter' }>): string {
+  const asOf = new Date(target.filter.until).toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' });
+  return `Every open violation matching the current filters, up to ${asOf}: ${plural(target.expected, 'open violation')} in ${plural(target.incidents, 'incident')}. Violations arriving after that are not included.`;
+}
+
+function confirmationFor(
+  kind: IncidentAction,
+  target: Target,
+  cardKey: string | null,
+  message: string
+): PendingAction {
+  const n = targetCount(target);
+  return kind === 'dismiss'
+    ? { kind: 'dismiss', target, cardKey, context: message }
+    : { kind: 'review', target, cardKey, title: `Mark ${plural(n, 'violation')} reviewed?`, message };
 }
 
 interface AlertsListProps {
@@ -52,10 +107,12 @@ interface AlertsListProps {
  * Filters, page, page size and the expanded incident are owned by the page
  * (in the URL); this component owns the selection and the action dialogs.
  *
- * Every action — a card's group action, a selected batch, or one row —
- * goes through POST /violations/bulk: one request, the same validation, and
- * false-alarm dismissals always reach the labelling export. Ids are fixed
- * when the dialog opens, so repeats arriving meanwhile are not swept in.
+ * Every action — a card's group action, a selection, "all matching", or one
+ * row — goes through POST /violations/bulk: one request, the same
+ * validation, and false-alarm dismissals always reach the labelling export.
+ * Ids are fixed when the incident is selected, and "all matching" is a
+ * filter frozen when the dialog opens and re-counted by the server, so
+ * repeats arriving meanwhile are never swept in.
  */
 export function AlertsList({
   filters,
@@ -74,15 +131,19 @@ export function AlertsList({
   const { data, isLoading, isFetching, isError, refetch } = useIncidentsQuery(queryParams);
   const bulk = useBulkViolationAction();
 
-  // Selection belongs to the page of results it was made on.
-  const selectionKey = JSON.stringify(queryParams);
-  const [selection, setSelection] = useState<{ key: string; ids: Record<string, string[]> }>({
-    key: selectionKey,
-    ids: {},
-  });
-  const selected = useMemo(
-    () => (selection.key === selectionKey ? selection.ids : {}),
-    [selection, selectionKey]
+  // The selection belongs to the filters it was made under, not the page:
+  // paging keeps it, any filter change drops it. Keyed on the filter state
+  // rather than the query, whose relative "since" moves every minute.
+  const filtersKey = JSON.stringify(filters);
+  const [selection, setSelection] = useState<Selection>({ mode: 'ids', key: filtersKey, ids: {} });
+  const current = useMemo<Selection>(
+    () => (selection.key === filtersKey ? selection : { mode: 'ids', key: filtersKey, ids: {} }),
+    [selection, filtersKey]
+  );
+  const allMatching = current.mode === 'all';
+  const picked = useMemo(
+    () => (current.mode === 'ids' ? current.ids : {}),
+    [current]
   );
 
   const [pending, setPending] = useState<Record<string, boolean>>({});
@@ -95,17 +156,28 @@ export function AlertsList({
     type: 'success',
     isVisible: false,
   });
+  const showToast = useCallback(
+    (message: string, type: ToastType) => setToast({ message, type, isVisible: true }),
+    []
+  );
 
   const incidents = useMemo(() => data?.items ?? [], [data?.items]);
-  // Every incident is selectable, not just those with open violations: the
-  // evidence export covers reviewed and dismissed ones too, and a dismissed
-  // incident is often exactly what the AI engineer wants to look at. The
-  // bulk review/dismiss actions still only touch open violations, so they
-  // are disabled when a selection contains none.
-  const selectable = incidents;
-  const selectedIncidents = Object.keys(selected).length;
-  const selectedIds = useMemo(() => [...new Set(Object.values(selected).flat())], [selected]);
-  const selectedIncidentIds = useMemo(() => Object.keys(selected), [selected]);
+  // Only incidents with something open are selectable — by their own
+  // checkbox and by "Select page" alike — since review and dismiss only
+  // ever change open violations. The snapshot export without a selection
+  // still covers reviewed and dismissed ones, through the filters.
+  const selectable = useMemo(() => incidents.filter((i) => i.open_count > 0), [incidents]);
+  const isSelected = useCallback(
+    (incident: Incident) => (allMatching ? incident.open_count > 0 : !!picked[incident.incident_id]),
+    [allMatching, picked]
+  );
+  const selectedIncidentIds = useMemo(() => Object.keys(picked), [picked]);
+  const selectedIds = useMemo(() => [...new Set(Object.values(picked).flat())], [picked]);
+  // Open violations matching the filters (status forced open), all pages.
+  // Absent from older backends, which then offer no "select all".
+  const openMatching = data?.open_violations_total;
+  const pageAllSelected = selectable.length > 0 && selectable.every(isSelected);
+  const overLimit = allMatching && (openMatching ?? 0) > BULK_LIMIT;
 
   // The same filters the list is showing, in the export's names. The
   // server regroups incidents from these, so they must match or a
@@ -126,6 +198,7 @@ export function AlertsList({
       violation_type: queryParams.type ?? null,
       type_detail: queryParams.type_detail ?? null,
       severities: queryParams.severity ?? null,
+      confidences: queryParams.confidence ?? null,
       area: queryParams.area ?? null,
     }),
     [queryParams]
@@ -139,123 +212,174 @@ export function AlertsList({
   const toggleSelect = useCallback(
     (incident: Incident) => {
       setSelection((prev) => {
-        const ids = prev.key === selectionKey ? { ...prev.ids } : {};
-        if (ids[incident.incident_id]) delete ids[incident.incident_id];
-        else ids[incident.incident_id] = [...incident.open_violation_ids];
-        return { key: selectionKey, ids };
+        const id = incident.incident_id;
+        if (prev.key === filtersKey && prev.mode === 'all') {
+          // Unticking one card while "all matching" is on falls back to
+          // this page's open incidents minus that card — this page only.
+          // "Select all" had already replaced any picks on other pages, so
+          // the bar says the selection narrowed rather than dropping them
+          // silently.
+          const ids = Object.fromEntries(
+            selectable.filter((i) => i.incident_id !== id).map((i) => [i.incident_id, [...i.open_violation_ids]])
+          );
+          return { mode: 'ids', key: filtersKey, ids, narrowed: true };
+        }
+        const ids = { ...(prev.key === filtersKey && prev.mode === 'ids' ? prev.ids : {}) };
+        if (ids[id]) delete ids[id];
+        else ids[id] = [...incident.open_violation_ids];
+        return { mode: 'ids', key: filtersKey, ids };
       });
     },
-    [selectionKey]
+    [filtersKey, selectable]
   );
 
-  const allSelected = selectable.length > 0 && selectable.every((i) => selected[i.incident_id]);
+  // Adds or removes this page's open incidents; other pages' picks stay.
   const toggleSelectPage = useCallback(() => {
-    setSelection({
-      key: selectionKey,
-      ids: allSelected
-        ? {}
-        : Object.fromEntries(selectable.map((i) => [i.incident_id, [...i.open_violation_ids]])),
+    setSelection((prev) => {
+      if (prev.key === filtersKey && prev.mode === 'all') return { mode: 'ids', key: filtersKey, ids: {} };
+      const ids = { ...(prev.key === filtersKey && prev.mode === 'ids' ? prev.ids : {}) };
+      for (const incident of selectable) {
+        if (pageAllSelected) delete ids[incident.incident_id];
+        else ids[incident.incident_id] ??= [...incident.open_violation_ids];
+      }
+      return { mode: 'ids', key: filtersKey, ids };
     });
-  }, [allSelected, selectable, selectionKey]);
+  }, [filtersKey, pageAllSelected, selectable]);
 
-  const clearSelection = useCallback(() => setSelection({ key: selectionKey, ids: {} }), [selectionKey]);
+  const selectAllMatching = useCallback(
+    () => setSelection({ mode: 'all', key: filtersKey }),
+    [filtersKey]
+  );
+  const clearSelection = useCallback(
+    () => setSelection({ mode: 'ids', key: filtersKey, ids: {} }),
+    [filtersKey]
+  );
 
   const run = useCallback(
-    async (
-      action: 'review' | 'dismiss',
-      ids: string[],
-      cardKey: string | null,
-      reason?: DismissReason,
-      note?: string
-    ) => {
+    async (action: PendingAction, reason?: DismissReason, note?: string) => {
+      const { target, cardKey } = action;
       const key = cardKey ?? '__bulk__';
+      const kind: IncidentAction = action.kind;
+      let next: PendingAction | null = null;
       setErrors((prev) => {
-        const next = { ...prev };
-        delete next[key];
-        return next;
+        const rest = { ...prev };
+        delete rest[key];
+        return rest;
       });
       setPending((prev) => ({ ...prev, [key]: true }));
       setIsSaving(true);
       try {
-        const result = await bulk({ ids, action, dismiss_reason: reason, note });
+        const common = { action: kind, dismiss_reason: reason, note };
+        const request: ViolationBulkRequest =
+          target.kind === 'ids'
+            ? { ...common, ids: target.ids }
+            : { ...common, filter: target.filter, expected_count: target.expected };
+        const result = await bulk(request);
         const failedExport = (result.labelling?.failed ?? 0) > 0;
-        setToast({
-          message: summarizeBulkResult(result, action),
-          type: failedExport ? 'error' : 'success',
-          isVisible: true,
-        });
+        showToast(summarizeBulkResult(result, kind), failedExport ? 'error' : 'success');
         if (cardKey && result.skipped.length) {
           setErrors((prev) => ({
             ...prev,
-            [cardKey]: `${result.skipped.length} of ${ids.length} were already reviewed or dismissed and were left as they were.`,
+            [cardKey]: `${result.skipped.length} of ${targetCount(target)} were already reviewed or dismissed and were left as they were.`,
           }));
         }
         if (!cardKey) clearSelection();
       } catch (err) {
-        const message = err instanceof Error ? err.message : "Couldn't save. Please try again.";
-        if (cardKey) setErrors((prev) => ({ ...prev, [cardKey]: message }));
-        else setToast({ message, type: 'error', isVisible: true });
+        const currentCount = Number(err instanceof ApiError ? err.details?.current_count : NaN);
+        if (err instanceof ApiError && err.status === 409 && target.kind === 'filter' && currentCount > 0) {
+          // Something changed between counting and saving. Nothing was
+          // changed; ask again with the number that matches now.
+          const retarget = { ...target, expected: currentCount };
+          next = confirmationFor(
+            kind,
+            retarget,
+            cardKey,
+            `The number changed while this was open, and nothing has been changed yet. ${filterMessage(retarget)}`
+          );
+        } else if (err instanceof ApiError && err.status === 409 && target.kind === 'filter') {
+          showToast('No open violations match these filters any more. Nothing was changed.', 'error');
+          clearSelection();
+        } else {
+          const message = err instanceof Error ? err.message : "Couldn't save. Please try again.";
+          if (cardKey) setErrors((prev) => ({ ...prev, [cardKey]: message }));
+          else showToast(message, 'error');
+        }
       } finally {
         setPending((prev) => {
-          const next = { ...prev };
-          delete next[key];
-          return next;
+          const rest = { ...prev };
+          delete rest[key];
+          return rest;
         });
         setIsSaving(false);
-        setDialog(null);
+        setDialog(next);
       }
     },
-    [bulk, clearSelection]
+    [bulk, clearSelection, showToast]
   );
 
   const handleGroupAction = useCallback((incident: Incident, action: IncidentAction) => {
-    const ids = [...incident.open_violation_ids];
-    setDialog(
-      action === 'dismiss'
-        ? { kind: 'dismiss', ids, cardKey: incident.incident_id, context: describe(incident) }
-        : {
-            kind: 'review',
-            ids,
-            cardKey: incident.incident_id,
-            title: `Mark ${plural(ids.length, 'violation')} reviewed?`,
-            message: describe(incident),
-          }
-    );
+    const target: Target = { kind: 'ids', ids: [...incident.open_violation_ids] };
+    setDialog(confirmationFor(action, target, incident.incident_id, describe(incident)));
   }, []);
 
   // Row actions report on their incident's card, where the row is.
   const handleMemberAction = useCallback(
     (incident: Incident, violation: Violation, action: IncidentAction) => {
+      const target: Target = { kind: 'ids', ids: [violation.id] };
       if (action === 'dismiss') {
-        setDialog({
-          kind: 'dismiss',
-          ids: [violation.id],
-          cardKey: incident.incident_id,
-          context: `One violation at ${new Date(violation.timestamp).toLocaleTimeString('en-US')}: ${describe(incident)}`,
-        });
+        setDialog(
+          confirmationFor(
+            'dismiss',
+            target,
+            incident.incident_id,
+            `One violation at ${new Date(violation.timestamp).toLocaleTimeString('en-US')}: ${describe(incident)}`
+          )
+        );
       } else {
-        void run('review', [violation.id], incident.incident_id);
+        void run(confirmationFor('review', target, incident.incident_id, ''));
       }
     },
     [run]
   );
 
   const handleBulk = useCallback(
-    (action: IncidentAction) => {
-      const message = `${plural(selectedIds.length, 'open violation')} in ${plural(selectedIncidents, 'selected incident')}.`;
-      setDialog(
-        action === 'dismiss'
-          ? { kind: 'dismiss', ids: selectedIds, cardKey: null, context: message }
-          : {
-              kind: 'review',
-              ids: selectedIds,
-              cardKey: null,
-              title: `Mark ${plural(selectedIds.length, 'violation')} reviewed?`,
-              message,
-            }
-      );
+    async (action: IncidentAction) => {
+      if (!allMatching) {
+        const message = `${plural(selectedIds.length, 'open violation')} in ${plural(selectedIncidentIds.length, 'selected incident')}.`;
+        setDialog(confirmationFor(action, { kind: 'ids', ids: selectedIds }, null, message));
+        return;
+      }
+      // "All matching": freeze the range now, then count exactly what that
+      // frozen filter will change, so the dialog states the real total.
+      const { filter, countParams } = frozenOpenSelection(filters);
+      setPending((prev) => ({ ...prev, __bulk__: true }));
+      try {
+        const counted = await fetchIncidents(countParams);
+        // Status is forced open here, so every counted violation is open.
+        const n = counted.violations_total;
+        if (n === 0) {
+          showToast('No open violations match these filters any more.', 'error');
+          clearSelection();
+        } else if (n > BULK_LIMIT) {
+          showToast(
+            `${plural(n, 'open violation')} match; at most ${BULK_LIMIT.toLocaleString('en-US')} can be changed at once. Narrow the filters.`,
+            'error'
+          );
+        } else {
+          const target: Target = { kind: 'filter', filter, expected: n, incidents: counted.total };
+          setDialog(confirmationFor(action, target, null, filterMessage(target)));
+        }
+      } catch (err) {
+        showToast(err instanceof Error ? err.message : "Couldn't count the matching violations.", 'error');
+      } finally {
+        setPending((prev) => {
+          const rest = { ...prev };
+          delete rest.__bulk__;
+          return rest;
+        });
+      }
     },
-    [selectedIds, selectedIncidents]
+    [allMatching, clearSelection, filters, selectedIds, selectedIncidentIds.length, showToast]
   );
 
   if (isLoading) {
@@ -299,74 +423,109 @@ export function AlertsList({
     );
   }
 
+  const hasSelection = allMatching || selectedIncidentIds.length > 0;
+  // Exact totals on every button: picked violations, or all that match.
+  const actionCount = allMatching ? (openMatching ?? 0) : selectedIds.length;
+  const actionsDisabled = !!pending.__bulk__ || actionCount === 0 || overLimit;
+  const actionsTitle = overLimit
+    ? `More than ${BULK_LIMIT.toLocaleString('en-US')} open violations match. Narrow the filters to act on them together.`
+    : actionCount === 0
+      ? 'The selected incidents have no open violations'
+      : undefined;
+  const moreToSelect =
+    !allMatching && pageAllSelected && openMatching !== undefined && openMatching > selectedIds.length;
+
   return (
     <>
       {strip}
 
-      {selectable.length > 0 && (
-        <div className="alerts-list__bulk" role="toolbar" aria-label="Bulk actions">
-          <label className="alerts-list__bulk-select">
-            <input type="checkbox" checked={allSelected} onChange={toggleSelectPage} />
-            <span>Select page</span>
-          </label>
-          {selectedIncidents > 0 ? (
-            <>
-              <span className="alerts-list__bulk-count">
-                {plural(selectedIncidents, 'incident')} · {plural(selectedIds.length, 'open violation')}
-              </span>
-              <button
-                type="button"
-                className="alerts-list__bulk-action alerts-list__bulk-action--review"
-                onClick={() => handleBulk('review')}
-                disabled={!!pending.__bulk__ || selectedIds.length === 0}
-                title={
-                  selectedIds.length === 0
-                    ? 'The selected incidents have no open violations'
-                    : undefined
-                }
-              >
-                Mark reviewed
-              </button>
-              <button
-                type="button"
-                className="alerts-list__bulk-action"
-                onClick={() => handleBulk('dismiss')}
-                disabled={!!pending.__bulk__ || selectedIds.length === 0}
-                title={
-                  selectedIds.length === 0
-                    ? 'The selected incidents have no open violations'
-                    : undefined
-                }
-              >
-                Dismiss…
-              </button>
-              <button
-                type="button"
-                className="alerts-list__bulk-action"
-                onClick={() => setExportOpen(true)}
-              >
-                Download snapshots…
-              </button>
-              <button type="button" className="alerts-list__bulk-clear" onClick={clearSelection}>
-                Clear
-              </button>
-            </>
-          ) : (
-            <>
+      <div className="alerts-list__bulk" role="toolbar" aria-label="Bulk actions">
+        <label className="alerts-list__bulk-select">
+          <input
+            type="checkbox"
+            checked={pageAllSelected}
+            onChange={toggleSelectPage}
+            disabled={selectable.length === 0}
+          />
+          <span>Select page</span>
+        </label>
+        {hasSelection ? (
+          <>
+            <span className="alerts-list__bulk-count" aria-live="polite">
+              {allMatching
+                ? `All ${plural(openMatching ?? 0, 'open violation')} matching these filters selected`
+                : `${plural(selectedIncidentIds.length, 'incident')} · ${plural(selectedIds.length, 'open violation')} selected`}
+            </span>
+            <button
+              type="button"
+              className="alerts-list__bulk-action alerts-list__bulk-action--review"
+              onClick={() => void handleBulk('review')}
+              disabled={actionsDisabled}
+              title={actionsTitle}
+            >
+              Mark {actionCount.toLocaleString('en-US')} reviewed
+            </button>
+            <button
+              type="button"
+              className="alerts-list__bulk-action"
+              onClick={() => void handleBulk('dismiss')}
+              disabled={actionsDisabled}
+              title={actionsTitle}
+            >
+              Dismiss {actionCount.toLocaleString('en-US')}…
+            </button>
+            <button
+              type="button"
+              className="alerts-list__bulk-action"
+              onClick={() => setExportOpen(true)}
+            >
+              Download snapshots…
+            </button>
+            <button type="button" className="alerts-list__bulk-clear" onClick={clearSelection}>
+              Clear
+            </button>
+          </>
+        ) : (
+          <>
+            <span className="alerts-list__bulk-hint">
+              Select incidents to act on their open violations together
+            </span>
+            <button
+              type="button"
+              className="alerts-list__bulk-action"
+              onClick={() => setExportOpen(true)}
+            >
+              Download snapshots…
+            </button>
+          </>
+        )}
+        {moreToSelect && (
+          <div className="alerts-list__bulk-more">
+            All open incidents on this page are selected.{' '}
+            <button type="button" className="alerts-list__bulk-link" onClick={selectAllMatching}>
+              Select all {plural(openMatching, 'open violation')} matching these filters
+            </button>
+            {openMatching > BULK_LIMIT && (
               <span className="alerts-list__bulk-hint">
-                Select incidents to act on their open violations together
+                {' '}(over the {BULK_LIMIT.toLocaleString('en-US')} that can be changed at once)
               </span>
-              <button
-                type="button"
-                className="alerts-list__bulk-action"
-                onClick={() => setExportOpen(true)}
-              >
-                Download snapshots…
-              </button>
-            </>
-          )}
-        </div>
-      )}
+            )}
+          </div>
+        )}
+        {current.mode === 'ids' && current.narrowed && selectedIncidentIds.length > 0 && (
+          <div className="alerts-list__bulk-more" role="status">
+            Now only this page's incidents are selected; other pages are no longer included.
+          </div>
+        )}
+        {allMatching && (
+          <div className="alerts-list__bulk-more">
+            Includes violations on every page.{' '}
+            <button type="button" className="alerts-list__bulk-link" onClick={clearSelection}>
+              Clear selection
+            </button>
+          </div>
+        )}
+      </div>
 
       <div className="alerts-list">
         {incidents.map((incident) => (
@@ -380,7 +539,7 @@ export function AlertsList({
             error={errors[incident.incident_id] ?? null}
             expanded={expanded === incident.incident_id}
             onToggleExpand={(i) => onToggleExpand(expanded === i.incident_id ? null : i.incident_id)}
-            selected={!!selected[incident.incident_id]}
+            selected={isSelected(incident)}
             onToggleSelect={toggleSelect}
           />
         ))}
@@ -398,24 +557,22 @@ export function AlertsList({
 
       <DismissReasonDialog
         isOpen={dialog?.kind === 'dismiss'}
-        count={dialog?.ids.length ?? 0}
+        count={dialog ? targetCount(dialog.target) : 0}
         context={dialog?.kind === 'dismiss' ? dialog.context : undefined}
         isPending={isSaving}
         onCancel={() => setDialog(null)}
-        onConfirm={(reason, note) =>
-          dialog && void run('dismiss', dialog.ids, dialog.cardKey, reason, note)
-        }
+        onConfirm={(reason, note) => dialog && void run(dialog, reason, note)}
       />
 
       <DismissConfirmationDialog
         isOpen={dialog?.kind === 'review'}
         isPending={isSaving}
         onCancel={() => setDialog(null)}
-        onConfirm={() => dialog && void run('review', dialog.ids, dialog.cardKey)}
+        onConfirm={() => dialog && void run(dialog)}
         title={dialog?.kind === 'review' ? dialog.title : undefined}
         message={dialog?.kind === 'review' ? dialog.message : undefined}
         note="Only open violations are changed; anything already reviewed or dismissed is left as it is."
-        confirmLabel={`Mark ${dialog?.ids.length ?? 0} reviewed`}
+        confirmLabel={`Mark ${(dialog ? targetCount(dialog.target) : 0).toLocaleString('en-US')} reviewed`}
         pendingLabel="Saving..."
       />
 
@@ -429,7 +586,7 @@ export function AlertsList({
       {exportOpen && (
         <ExportDialog
           filters={exportFilters}
-          incidentIds={selectedIncidentIds.length > 0 ? selectedIncidentIds : null}
+          incidentIds={!allMatching && selectedIncidentIds.length > 0 ? selectedIncidentIds : null}
           onClose={() => setExportOpen(false)}
         />
       )}

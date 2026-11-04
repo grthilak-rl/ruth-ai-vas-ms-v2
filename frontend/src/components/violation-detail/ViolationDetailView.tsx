@@ -67,8 +67,8 @@ export function ViolationDetailView({
   }>({ message: '', type: 'success', isVisible: false });
 
   // Confidence for display
-  const confidenceCategory = getConfidenceCategory(violation.confidence);
-  const confidenceLabel = getConfidenceDisplay(violation.confidence);
+  const confidenceCategory = getConfidenceCategory(violation);
+  const confidenceLabel = getConfidenceDisplay(violation);
 
   // Handle acknowledge
   const handleAcknowledge = useCallback(async () => {

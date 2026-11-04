@@ -129,3 +129,20 @@
   font-size: 0.875rem;
   color: #666;
 }
+
+/* "Select all N matching" / "all matching selected" line, under the toolbar */
+.alerts-list__bulk-more {
+  flex-basis: 100%;
+  color: #555;
+}
+
+.alerts-list__bulk-link {
+  padding: 0;
+  font: inherit;
+  font-weight: 600;
+  color: #1a73e8;
+  background: none;
+  border: none;
+  text-decoration: underline;
+  cursor: pointer;
+}

@@ -56,8 +56,8 @@ export function CameraViolationsList({
 }
 
 function ViolationItem({ violation }: { violation: Violation }) {
-  const confidenceCategory = getConfidenceCategory(violation.confidence);
-  const confidenceLabel = getConfidenceDisplay(violation.confidence);
+  const confidenceCategory = getConfidenceCategory(violation) ?? 'unknown';
+  const confidenceLabel = getConfidenceDisplay(violation);
   const time = formatTime(violation.timestamp);
 
   return (

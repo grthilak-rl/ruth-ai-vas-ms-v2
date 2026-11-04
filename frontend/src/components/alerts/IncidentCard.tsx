@@ -153,7 +153,7 @@ export function IncidentCard({
             <span>{formatIncidentSpan(incident.first_at, incident.last_at)}</span>
             <span>{formatRelativeTime(incident.last_at)}</span>
             <span className="incident-card__confidence">
-              Latest: {getConfidenceDisplay(latest.confidence)} confidence
+              Latest: {getConfidenceDisplay(latest)} confidence
             </span>
           </div>
 
@@ -256,7 +256,7 @@ function IncidentMembers({ incident, statuses, onMemberAction }: IncidentMembers
           <li key={violation.id} className="incident-members__row">
             <span className="incident-members__time">{formatClock(violation.timestamp)}</span>
             <span className="incident-members__confidence">
-              {getConfidenceDisplay(violation.confidence)} confidence
+              {getConfidenceDisplay(violation)} confidence
             </span>
             {hasClip && <ClipIcon title="Clip available" />}
             {!isOpen && <StatusBadge status={violation.status} />}

@@ -20,6 +20,7 @@
 
 import { apiGet, apiPatch, apiPost } from './client';
 import type {
+  ConfidenceLevel,
   Violation,
   ViolationsListResponse,
   ViolationsQueryParams,
@@ -56,6 +57,9 @@ export function buildQueryString(params?: ViolationsQueryParams): string {
   }
   for (const level of params.severity ?? []) {
     searchParams.append('severity', level);
+  }
+  for (const level of params.confidence ?? []) {
+    searchParams.append('confidence', level);
   }
   if (params.area) {
     searchParams.set('area', params.area);
@@ -265,36 +269,34 @@ export async function updateViolationStatus(
  * HARD RULE: Frontend MUST NOT display raw confidence numbers.
  * Always use categorical labels.
  */
-export type ConfidenceCategory = 'high' | 'medium' | 'low';
+export type ConfidenceCategory = ConfidenceLevel;
+
+/** Most violations one bulk request may change (backend BULK_LIMIT). */
+export const BULK_LIMIT = 1000;
 
 /**
- * Convert numeric confidence to category (F6 §3.2)
+ * The violation's confidence bucket, as the backend computed it.
  *
- * | Backend Value | Frontend Display |
- * |---------------|------------------|
- * | >= 0.8        | "High"           |
- * | 0.6 – 0.79    | "Medium"         |
- * | < 0.6         | "Low"            |
+ * The Low/Medium/High cut-offs live only in the backend
+ * (app/models/confidence_levels.py), which also filters on them, so the
+ * badge and the filter cannot disagree. null when the backend sent none.
  */
-export function getConfidenceCategory(confidence: number): ConfidenceCategory {
-  if (confidence >= 0.8) return 'high';
-  if (confidence >= 0.6) return 'medium';
-  return 'low';
+export function getConfidenceCategory(
+  violation: Pick<Violation, 'confidence_level'>
+): ConfidenceCategory | null {
+  return violation.confidence_level ?? null;
 }
 
-/**
- * Get display label for confidence category
- */
-export function getConfidenceLabel(confidence: number): string {
-  const category = getConfidenceCategory(confidence);
-  switch (category) {
-    case 'high':
-      return 'High';
-    case 'medium':
-      return 'Medium';
-    case 'low':
-      return 'Low';
-  }
+const CONFIDENCE_LABELS: Record<ConfidenceCategory, string> = {
+  high: 'High',
+  medium: 'Medium',
+  low: 'Low',
+};
+
+/** "High" / "Medium" / "Low", or "Unknown" when the backend sent no bucket. */
+export function getConfidenceLabel(violation: Pick<Violation, 'confidence_level'>): string {
+  const category = getConfidenceCategory(violation);
+  return category ? CONFIDENCE_LABELS[category] : 'Unknown';
 }
 
 // ============================================================================

@@ -133,7 +133,7 @@ interface ViolationRowProps {
  * Single violation row (read-only)
  */
 function ViolationRow({ violation }: ViolationRowProps) {
-  const confidenceLabel = getConfidenceLabel(violation.confidence);
+  const confidenceLabel = getConfidenceLabel(violation);
   const timeAgo = formatTimeAgo(violation.timestamp);
   const typeLabel = violationShortLabel(violation);
 

@@ -188,6 +188,13 @@
   font-style: italic;
 }
 
+.alerts-filter-sidebar__help {
+  margin: 0.5rem 0 0;
+  font-size: 0.75rem;
+  line-height: 1.4;
+  color: var(--color-text-secondary, #6b7280);
+}
+
 /* Responsive: hide sidebar on small screens */
 @media (max-width: 768px) {
   .alerts-filter-sidebar {

@@ -1,9 +1,9 @@
 import { useCallback, useMemo } from 'react';
-import type { ViolationStatus, Device, ViolationTypeOption, Severity } from '../../state/api';
+import type { ConfidenceLevel, ViolationStatus, Device, ViolationTypeOption, Severity } from '../../state/api';
 import { deviceDisplayName } from '../../state/api';
 import { buildTypeFilterEntries } from '../../utils/violationLabels';
 import { SEVERITY_LEVELS, severityLabel } from '../../utils/violationDisplay';
-import { DEFAULT_FILTERS, cameraAreas, type AlertFilters, type DateRange } from './alertFilters';
+import { CONFIDENCE_LEVELS, DEFAULT_FILTERS, cameraAreas, type AlertFilters, type DateRange } from './alertFilters';
 import './AlertsFilterSidebar.css';
 
 interface AlertsFilterSidebarProps {
@@ -30,6 +30,12 @@ const STATUS_OPTIONS: { value: ViolationStatus; label: string }[] = [
   { value: 'dismissed', label: 'Dismissed' },
   { value: 'resolved', label: 'Resolved' },
 ];
+
+const CONFIDENCE_LABELS: Record<ConfidenceLevel, string> = {
+  high: 'High',
+  medium: 'Medium',
+  low: 'Low',
+};
 
 const DATE_RANGES: { value: DateRange; label: string }[] = [
   { value: 'today', label: 'Today' },
@@ -109,6 +115,15 @@ export function AlertsFilterSidebar({
     });
   }, [filters, onFiltersChange]);
 
+  const handleConfidenceToggle = useCallback((level: ConfidenceLevel) => {
+    onFiltersChange({
+      ...filters,
+      confidences: filters.confidences.includes(level)
+        ? filters.confidences.filter((c) => c !== level)
+        : [...filters.confidences, level],
+    });
+  }, [filters, onFiltersChange]);
+
   const handleAreaChange = useCallback((value: string) => {
     onFiltersChange({ ...filters, area: value || null });
   }, [filters, onFiltersChange]);
@@ -142,6 +157,7 @@ export function AlertsFilterSidebar({
       filters.cameraId !== null ||
       filters.violationType !== '' ||
       filters.severities.length > 0 ||
+      filters.confidences.length > 0 ||
       filters.area !== null
     );
   }, [filters]);
@@ -265,6 +281,31 @@ export function AlertsFilterSidebar({
             </label>
           ))}
         </div>
+      </section>
+
+      {/* Confidence Filter — how sure the model was, per violation */}
+      <section className="alerts-filter-sidebar__section">
+        <h3 className="alerts-filter-sidebar__section-title" id="alerts-filter-confidence">
+          Confidence
+        </h3>
+        <div className="alerts-filter-sidebar__checkboxes" role="group" aria-labelledby="alerts-filter-confidence">
+          {CONFIDENCE_LEVELS.map((level) => (
+            <label key={level} className="alerts-filter-sidebar__checkbox-label">
+              <input
+                type="checkbox"
+                checked={filters.confidences.includes(level)}
+                onChange={() => handleConfidenceToggle(level)}
+                className="alerts-filter-sidebar__checkbox"
+              />
+              <span className="alerts-filter-sidebar__checkbox-text">{CONFIDENCE_LABELS[level]}</span>
+            </label>
+          ))}
+        </div>
+        <p className="alerts-filter-sidebar__help">
+          Confidence comes from the model: how sure it was, not how serious the
+          violation is. Low is usually empty, because a violation is only
+          recorded once the model's confidence clears its threshold.
+        </p>
       </section>
 
       {/* Area Filter — the camera's manway */}

@@ -20,6 +20,7 @@ export interface ExportFilters {
   violation_type?: string | null;
   type_detail?: string | null;
   severities?: string[] | null;
+  confidences?: string[] | null;
   area?: string | null;
 }
 

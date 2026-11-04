@@ -4,6 +4,7 @@ import {
   DEFAULT_FILTERS,
   alertFiltersToParams,
   cameraAreas,
+  frozenOpenSelection,
   listStateFromSearch,
   listStateToSearch,
   resolveDateRange,
@@ -105,6 +106,7 @@ describe('URL state', () => {
         cameraId: 'cam-1',
         violationType: 'ppe_violation:missing_gloves',
         severities: ['critical'],
+        confidences: ['medium', 'low'],
         area: 'MW02 PF COLUMN',
       },
       page: 3,
@@ -114,7 +116,8 @@ describe('URL state', () => {
     const search = listStateToSearch(full);
     expect(search.toString()).toBe(
       'status=open&status=reviewed&range=custom&from=2026-10-01&to=2026-10-05&camera=cam-1' +
-        '&type=ppe_violation%3Amissing_gloves&severity=critical&area=MW02+PF+COLUMN&page=3&per_page=25' +
+        '&type=ppe_violation%3Amissing_gloves&severity=critical&confidence=medium&confidence=low' +
+        '&area=MW02+PF+COLUMN&page=3&per_page=25' +
         '&open=cam-1%3Amissing_gloves%3Av1'
     );
     expect(listStateFromSearch(new URLSearchParams(search.toString()))).toEqual(full);
@@ -128,12 +131,13 @@ describe('URL state', () => {
 
   it('ignores junk and uses the remembered page size when the URL has none', () => {
     const parsed = listStateFromSearch(
-      new URLSearchParams('status=bogus&range=year&severity=urgent&page=-2&per_page=7'),
+      new URLSearchParams('status=bogus&range=year&severity=urgent&confidence=sure&page=-2&per_page=7'),
       25
     );
     expect(parsed.filters.statuses).toEqual([]); // a status param was given; none valid
     expect(parsed.filters.range).toBe('7d');
     expect(parsed.filters.severities).toEqual([]);
+    expect(parsed.filters.confidences).toEqual([]);
     expect(parsed.page).toBe(1);
     expect(parsed.pageSize).toBe(25);
     // ...and a URL that matches the remembered size doesn't repeat it
@@ -149,5 +153,38 @@ describe('area options', () => {
         { manway: 'REFORMER2' }, { manway: null }, { manway: '  ' },
       ])
     ).toEqual(['MW02 PF COLUMN', 'MW10 PF COLUMN', 'REFORMER2']);
+  });
+});
+
+describe('confidence filter', () => {
+  it('is sent as repeatable confidence params, and only when set', () => {
+    expect(alertFiltersToParams(DEFAULT_FILTERS, 1, 10, NOW).confidence).toBeUndefined();
+    const params = alertFiltersToParams({ ...DEFAULT_FILTERS, confidences: ['high', 'low'] }, 1, 10, NOW);
+    expect(buildQueryString(params)).toContain('confidence=high&confidence=low');
+  });
+});
+
+describe('select all matching: a frozen, open-only selection', () => {
+  it('closes a relative range at now and forces status open', () => {
+    const filters = { ...DEFAULT_FILTERS, statuses: ['reviewed' as const], severities: ['high' as const], confidences: ['low' as const] };
+    const { filter, countParams } = frozenOpenSelection(filters, NOW);
+    expect(filter.until).toBe(NOW.toISOString());
+    expect(filter.since).toBe('2026-10-12T04:30:00.000Z');
+    expect(filter).toMatchObject({ severities: ['high'], confidences: ['low'] });
+    expect(filter).not.toHaveProperty('statuses');
+    expect(countParams).toMatchObject({ status: ['open'], until: NOW.toISOString(), since: filter.since, limit: 1, offset: 0 });
+  });
+
+  it('keeps a custom end that is already past, and caps a future one at now', () => {
+    const past = frozenOpenSelection({ ...DEFAULT_FILTERS, range: 'custom', dateFrom: '2026-10-01', dateTo: '2026-10-05' }, NOW);
+    expect(past.filter.until).toBe('2026-10-05T18:29:59.999Z'); // end of 5 Oct, IST
+    const future = frozenOpenSelection({ ...DEFAULT_FILTERS, range: 'custom', dateFrom: '2026-10-18', dateTo: '2026-10-25' }, NOW);
+    expect(future.filter.until).toBe(NOW.toISOString());
+  });
+
+  it('"all time" still gets an end', () => {
+    const { filter } = frozenOpenSelection({ ...DEFAULT_FILTERS, range: 'all' }, NOW);
+    expect(filter.since).toBeNull();
+    expect(filter.until).toBe(NOW.toISOString());
   });
 });

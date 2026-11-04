@@ -11,6 +11,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { Incident, Violation } from '../../../state/api';
 import { IncidentCard } from '../IncidentCard';
 import { AlertsList } from '../AlertsList';
+import { ApiError } from '../../../state/api';
 import { DEFAULT_FILTERS } from '../alertFilters';
 
 const api = vi.hoisted(() => ({
@@ -41,6 +42,7 @@ function violation(over: Partial<Violation> = {}): Violation {
     camera_in_out: 'OUT',
     status: 'open',
     confidence: 0.72,
+    confidence_level: 'medium', // the backend's bucket; the UI never derives one
     timestamp: '2026-10-19T09:31:00Z',
     reviewed_by: null,
     reviewed_at: null,
@@ -272,8 +274,11 @@ const SUMMARY = {
   top_area_violations: 9,
 };
 
-function listResponse(items: Incident[]) {
-  return { items, total: items.length, violations_total: 12, gap_minutes: 5, max_span_minutes: 60, summary: SUMMARY };
+function listResponse(items: Incident[], over: Record<string, unknown> = {}) {
+  return {
+    items, total: items.length, violations_total: 12, open_violations_total: 12,
+    gap_minutes: 5, max_span_minutes: 60, summary: SUMMARY, ...over,
+  };
 }
 
 function renderList(over: Partial<React.ComponentProps<typeof AlertsList>> = {}) {
@@ -404,14 +409,15 @@ describe('AlertsList actions go through POST /violations/bulk', () => {
 
     const selectPage = container.querySelector('.alerts-list__bulk-select input') as HTMLInputElement;
     await act(async () => selectPage.click());
-    // All three, including the fully-reviewed one: the evidence export
-    // covers reviewed and dismissed incidents, so they have to be
-    // selectable. The open-violation count is what the bulk actions use,
-    // and the closed incident contributes none.
-    expect(container.querySelector('.alerts-list__bulk-count')!.textContent).toBe('3 incidents · 5 open violations');
-    expect(container.querySelectorAll('.incident-card--selected')).toHaveLength(3);
+    // Only incidents with something open: review and dismiss only touch
+    // open violations, so a fully-reviewed incident is not selectable by
+    // its own checkbox or by "Select page".
+    expect(container.querySelector('.alerts-list__bulk-count')!.textContent).toBe('2 incidents · 5 open violations selected');
+    expect(container.querySelectorAll('.incident-card--selected')).toHaveLength(2);
+    // Exact totals on the buttons.
+    expect(button('Mark 5 reviewed')).toBeTruthy();
 
-    await act(async () => button('Dismiss…')!.click());
+    await act(async () => button('Dismiss 5…')!.click());
     expect(dialog()!.textContent).toContain('Dismiss 5 violations');
     await chooseReason('Pipework / object');
     await act(async () => dialogButton('Dismiss 5')!.click());
@@ -425,20 +431,18 @@ describe('AlertsList actions go through POST /violations/bulk', () => {
     await waitFor(() => !container.querySelector('.alerts-list__bulk-count'));
   });
 
-  it('bulk review and dismiss are disabled when nothing open is selected', async () => {
-    // Selecting a fully-reviewed incident is allowed (for the export), but
-    // acting on it would be a no-op request, so the actions are blocked.
+  it('"Select page" is unavailable when nothing on the page is open', async () => {
     const closed = incident({ incident_id: 'closed', open_count: 0, open_violation_ids: [] });
-    api.fetchIncidents.mockResolvedValue(listResponse([closed]));
+    api.fetchIncidents.mockResolvedValue(listResponse([closed], { open_violations_total: 0 }));
     await renderList();
     await waitFor(() => !!container.querySelector('.alerts-list__bulk'));
 
     const selectPage = container.querySelector('.alerts-list__bulk-select input') as HTMLInputElement;
+    expect(selectPage.disabled).toBe(true);
     await act(async () => selectPage.click());
-    expect(container.querySelector('.alerts-list__bulk-count')!.textContent).toBe('1 incident · 0 open violations');
-    expect((button('Mark reviewed') as HTMLButtonElement).disabled).toBe(true);
-    expect((button('Dismiss…') as HTMLButtonElement).disabled).toBe(true);
-    // The export is still offered.
+    expect(container.querySelector('.alerts-list__bulk-count')).toBeNull();
+    expect(container.querySelectorAll('.incident-card--selected')).toHaveLength(0);
+    // The export (by filters) is still offered.
     expect(button('Download snapshots…')).toBeTruthy();
   });
 
@@ -449,5 +453,114 @@ describe('AlertsList actions go through POST /violations/bulk', () => {
     await waitFor(() => !!button('Show all 12'));
     await act(async () => button('Show all 12')!.click());
     expect(onToggleExpand).toHaveBeenCalledWith('cam-1:missing_gloves:v-first');
+  });
+
+  it('keeps the selection across pages, and drops it when a filter changes', async () => {
+    const second = incident({ incident_id: 'p2', camera_id: 'cam-2', open_count: 2, open_violation_ids: ['x1', 'x2'] });
+    api.fetchIncidents.mockResolvedValue(listResponse([incident()]));
+    await renderList();
+    await waitFor(() => !!container.querySelector('.incident-card__select input'));
+    await act(async () => (container.querySelector('.incident-card__select input') as HTMLInputElement).click());
+
+    api.fetchIncidents.mockResolvedValue(listResponse([second]));
+    await renderList({ page: 2 });
+    await waitFor(() => !!button('Dismiss 2'));
+    await act(async () => (container.querySelector('.incident-card__select input') as HTMLInputElement).click());
+    expect(container.querySelector('.alerts-list__bulk-count')!.textContent).toBe('2 incidents · 5 open violations selected');
+
+    await act(async () => button('Mark 5 reviewed')!.click());
+    await act(async () => dialogButton('Mark 5 reviewed')!.click());
+    await waitFor(() => api.bulkUpdateViolations.mock.calls.length === 1);
+    expect(api.bulkUpdateViolations.mock.calls[0][0].ids).toEqual(['v-latest', 'v2', 'v3', 'x1', 'x2']);
+
+    // A new selection, then a filter change: gone.
+    await waitFor(() => !container.querySelector('.alerts-list__bulk-count'));
+    await act(async () => (container.querySelector('.incident-card__select input') as HTMLInputElement).click());
+    expect(container.querySelector('.alerts-list__bulk-count')).toBeTruthy();
+    await renderList({ page: 2, filters: { ...DEFAULT_FILTERS, confidences: ['low'] } });
+    expect(container.querySelector('.alerts-list__bulk-count')).toBeNull();
+  });
+
+  async function selectAllMatching(openTotal: number) {
+    api.fetchIncidents.mockResolvedValue(listResponse([incident()], { total: 40, open_violations_total: openTotal }));
+    await renderList();
+    await waitFor(() => !!container.querySelector('.alerts-list__bulk-select input'));
+    await act(async () => (container.querySelector('.alerts-list__bulk-select input') as HTMLInputElement).click());
+    const link = button(`Select all ${openTotal.toLocaleString('en-US')} open violations matching these filters`)!;
+    expect(link).toBeTruthy();
+    await act(async () => link.click());
+  }
+
+  it('select all matching: counts the frozen filter, states the exact total, sends filter + expected_count', async () => {
+    await selectAllMatching(120);
+    expect(container.querySelector('.alerts-list__bulk-count')!.textContent).toBe(
+      'All 120 open violations matching these filters selected'
+    );
+    expect(container.querySelectorAll('.incident-card--selected')).toHaveLength(1);
+
+    // The confirmation re-counts with the range frozen and status forced open.
+    api.fetchIncidents.mockResolvedValueOnce(listResponse([], { total: 31, violations_total: 118 }));
+    await act(async () => button('Mark 120 reviewed')!.click());
+    await waitFor(() => !!dialog());
+    const countCall = api.fetchIncidents.mock.calls.at(-1)![0];
+    expect(countCall).toMatchObject({ status: ['open'], limit: 1 });
+    expect(countCall.until).toEqual(expect.any(String));
+    expect(dialog()!.textContent).toContain('Mark 118 violations reviewed?');
+    expect(dialog()!.textContent).toContain('118 open violations in 31 incidents');
+
+    await act(async () => dialogButton('Mark 118 reviewed')!.click());
+    await waitFor(() => api.bulkUpdateViolations.mock.calls.length === 1);
+    const sent = api.bulkUpdateViolations.mock.calls[0][0];
+    expect(sent).toMatchObject({ action: 'review', expected_count: 118 });
+    expect(sent.ids).toBeUndefined();
+    expect(sent.filter.until).toBe(countCall.until);
+    expect(sent.filter).not.toHaveProperty('statuses');
+  });
+
+  it('select all matching: a 409 asks again with the new count, changing nothing', async () => {
+    await selectAllMatching(120);
+    api.fetchIncidents.mockResolvedValueOnce(listResponse([], { total: 31, violations_total: 118 }));
+    await act(async () => button('Dismiss 120…')!.click());
+    await waitFor(() => !!dialog());
+    api.bulkUpdateViolations.mockRejectedValueOnce(
+      new ApiError({
+        status: 409, message: '117 open violations match now', category: 'client', retryable: false,
+        userMessage: 'Conflict', code: 'count_changed', details: { expected_count: 118, current_count: 117 },
+      })
+    );
+    await chooseReason('Duplicate');
+    await act(async () => dialogButton('Dismiss 118')!.click());
+    await waitFor(() => !!dialogButton('Dismiss 117'));
+    expect(dialog()!.textContent).toContain('The number changed');
+    expect(api.bulkUpdateViolations.mock.calls[0][0].expected_count).toBe(118);
+
+    await chooseReason('Duplicate');
+    await act(async () => dialogButton('Dismiss 117')!.click());
+    await waitFor(() => api.bulkUpdateViolations.mock.calls.length === 2);
+    expect(api.bulkUpdateViolations.mock.calls[1][0]).toMatchObject({ expected_count: 117, dismiss_reason: 'duplicate' });
+  });
+
+  it('select all matching over the cap: actions disabled, with the reason', async () => {
+    await selectAllMatching(1500);
+    const review = button('Mark 1,500 reviewed') as HTMLButtonElement;
+    expect(review.disabled).toBe(true);
+    expect(review.title).toContain('More than 1,000');
+    expect((button('Dismiss 1,500…') as HTMLButtonElement).disabled).toBe(true);
+  });
+
+  it('select all matching: unticking one card narrows to this page, and says so', async () => {
+    const second = incident({ incident_id: 'p1b', camera_id: 'cam-2', open_count: 2, open_violation_ids: ['x1', 'x2'] });
+    api.fetchIncidents.mockResolvedValue(listResponse([incident(), second], { total: 40, open_violations_total: 120 }));
+    await renderList();
+    await waitFor(() => !!container.querySelector('.alerts-list__bulk-select input'));
+    await act(async () => (container.querySelector('.alerts-list__bulk-select input') as HTMLInputElement).click());
+    await act(async () => button('Select all 120 open violations matching these filters')!.click());
+    expect(container.querySelector('.alerts-list__bulk-count')!.textContent).toContain('All 120');
+
+    const boxes = container.querySelectorAll('.incident-card__select input');
+    await act(async () => (boxes[0] as HTMLInputElement).click());
+    expect(container.querySelector('.alerts-list__bulk-count')!.textContent).toBe('1 incident · 2 open violations selected');
+    expect(container.textContent).toContain("Now only this page's incidents are selected");
+    expect(button('Mark 2 reviewed')).toBeTruthy();
   });
 });

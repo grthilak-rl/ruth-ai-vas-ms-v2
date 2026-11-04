@@ -1,4 +1,11 @@
-import type { Device, Severity, ViolationStatus, ViolationsQueryParams } from '../../state/api';
+import type {
+  ConfidenceLevel,
+  Device,
+  Severity,
+  ViolationBulkFilter,
+  ViolationStatus,
+  ViolationsQueryParams,
+} from '../../state/api';
 import { typeFilterToParams } from '../../utils/violationLabels';
 import { SEVERITY_LEVELS } from '../../utils/violationDisplay';
 
@@ -27,6 +34,12 @@ export interface AlertFilters {
   violationType: string;
   /** Selected severities (empty = all) */
   severities: Severity[];
+  /**
+   * Selected confidence buckets (empty = all). Applied to each violation
+   * before grouping, like every other filter, so an incident holds only the
+   * members that match.
+   */
+  confidences: ConfidenceLevel[];
   /** Selected camera area / manway (null = all) */
   area: string | null;
 }
@@ -47,6 +60,7 @@ export const DEFAULT_FILTERS: AlertFilters = {
   cameraId: null,
   violationType: '',
   severities: [],
+  confidences: [],
   area: null,
 };
 
@@ -54,6 +68,8 @@ export const PAGE_SIZE_OPTIONS = [10, 25, 50];
 export const DEFAULT_PAGE_SIZE = 10;
 
 const STATUSES: ViolationStatus[] = ['open', 'reviewed', 'dismissed', 'resolved'];
+/** Most to least confident, as the sidebar lists them. */
+export const CONFIDENCE_LEVELS: ConfidenceLevel[] = ['high', 'medium', 'low'];
 const RANGES: DateRange[] = ['today', '7d', '30d', 'all', 'custom'];
 const DAY_MS = 24 * 60 * 60 * 1000;
 
@@ -116,11 +132,43 @@ export function alertFiltersToParams(
     since,
     until,
     severity: filters.severities.length ? [...filters.severities] : undefined,
+    confidence: filters.confidences.length ? [...filters.confidences] : undefined,
     area: filters.area || undefined,
     ...typeFilterToParams(filters.violationType),
     offset: (page - 1) * pageSize,
     limit: pageSize,
   };
+}
+
+/**
+ * "Select all matching", frozen at `now`.
+ *
+ * The range is closed at `now` (or the custom end, if earlier) so the
+ * count the operator confirms cannot drift while the dialog is open: new
+ * repeats land after `until` and are neither counted nor changed. Status
+ * is always open — the bulk endpoint forces it too — whatever the page
+ * shows, so `countParams` asks the incidents endpoint for exactly the set
+ * `filter` will change.
+ */
+export function frozenOpenSelection(
+  filters: AlertFilters,
+  now: Date = new Date()
+): { filter: ViolationBulkFilter; countParams: ViolationsQueryParams } {
+  const params = alertFiltersToParams(filters, 1, 1, now);
+  const nowIso = now.toISOString();
+  // Both are toISOString() output (UTC, same width), so they sort as strings.
+  const until = params.until && params.until < nowIso ? params.until : nowIso;
+  const filter: ViolationBulkFilter = {
+    camera_id: params.camera_id ?? null,
+    since: params.since ?? null,
+    until,
+    violation_type: params.type ?? null,
+    type_detail: params.type_detail ?? null,
+    severities: params.severity ?? null,
+    confidences: params.confidence ?? null,
+    area: params.area ?? null,
+  };
+  return { filter, countParams: { ...params, status: ['open'], until, offset: 0, limit: 1 } };
 }
 
 /** Distinct camera areas (manways), sorted, for the Area filter. */
@@ -140,7 +188,7 @@ export function cameraAreas(cameras: Pick<Device, 'manway'>[]): string[] {
 // query string, so Back from a violation, a refresh and a shared link all
 // restore it. Defaults are left out to keep URLs short:
 //
-//   ?status=open&status=reviewed&range=30d&severity=critical&area=REFORMER1
+//   ?status=open&status=reviewed&range=30d&severity=critical&confidence=low&area=REFORMER1
 //    &type=ppe_violation:missing_gloves&camera=<id>&page=3&per_page=25&open=<incident>
 //
 // status=any means "no status filter" (an empty selection), since an absent
@@ -174,6 +222,7 @@ export function listStateFromSearch(search: URLSearchParams, defaultPageSize = D
       cameraId: search.get('camera') || null,
       violationType: search.get('type') ?? '',
       severities: SEVERITY_LEVELS.filter((level) => search.getAll('severity').includes(level)) as Severity[],
+      confidences: CONFIDENCE_LEVELS.filter((level) => search.getAll('confidence').includes(level)),
       area: search.get('area') || null,
     },
     page: page >= 1 ? page : 1,
@@ -202,6 +251,7 @@ export function listStateToSearch(state: AlertsListState, defaultPageSize = DEFA
   if (filters.cameraId) search.set('camera', filters.cameraId);
   if (filters.violationType) search.set('type', filters.violationType);
   filters.severities.forEach((level) => search.append('severity', level));
+  filters.confidences.forEach((level) => search.append('confidence', level));
   if (filters.area) search.set('area', filters.area);
   if (state.page > 1) search.set('page', String(state.page));
   if (state.pageSize !== defaultPageSize) search.set('per_page', String(state.pageSize));
