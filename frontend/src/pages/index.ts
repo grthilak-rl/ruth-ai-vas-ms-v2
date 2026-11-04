@@ -15,6 +15,7 @@ export { ExportDataPage } from './ExportDataPage';
 export { SettingsLayout } from './settings/SettingsLayout';
 export { SettingsModelsTab } from './settings/SettingsModelsTab';
 export { SettingsProjectTab } from './settings/SettingsProjectTab';
+export { SettingsBrandingTab } from './settings/SettingsBrandingTab';
 export { SettingsSystemTab } from './settings/SettingsSystemTab';
 
 // Error pages (E11)

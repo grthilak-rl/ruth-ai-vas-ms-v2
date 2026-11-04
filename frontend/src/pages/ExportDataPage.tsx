@@ -9,12 +9,20 @@
  * - Format-specific options
  * - Export generation and download
  *
+ * Two kinds of export, chosen at the top:
+ * - Customer report: the customer-facing PDF, built as a background job
+ *   (CustomerReportPanel). Admin-only.
+ * - Raw data: the CSV/XLSX/PDF table exports below, unchanged.
+ *
  * Layout: Single viewport design with horizontal format cards
  * and two-column configuration layout.
  */
 
+type ExportKind = 'report' | 'raw';
+
 import { useState } from 'react';
-import { Link } from 'react-router-dom';
+import { Link, useSearchParams } from 'react-router-dom';
+import { CustomerReportPanel } from '../components/analytics/CustomerReportPanel';
 import { TimeRangeSelector } from '../components/analytics/TimeRangeSelector';
 import {
   exportAnalytics,
@@ -31,6 +39,10 @@ import type {
 import './ExportDataPage.css';
 
 export function ExportDataPage() {
+  const [searchParams, setSearchParams] = useSearchParams();
+  const kind: ExportKind = searchParams.get('type') === 'raw' ? 'raw' : 'report';
+  const setKind = (next: ExportKind) =>
+    setSearchParams(next === 'raw' ? { type: 'raw' } : {}, { replace: true });
   const [format, setFormat] = useState<ExportFormat>('csv');
   const [preset, setPreset] = useState<TimeRangePreset>('24h');
   const [customFrom, setCustomFrom] = useState<Date | undefined>();
@@ -136,9 +148,42 @@ export function ExportDataPage() {
       <div className="export-page__header">
         <h1 className="export-page__title">Export Data</h1>
         <p className="export-page__subtitle">
-          Configure your export settings and download analytics data.
+          A customer-ready report, or the raw data for your own analysis.
         </p>
       </div>
+
+      <div className="export-kind" role="tablist" aria-label="What to export">
+        <button
+          type="button"
+          role="tab"
+          aria-selected={kind === 'report'}
+          className={`export-kind__option ${kind === 'report' ? 'export-kind__option--selected' : ''}`}
+          onClick={() => setKind('report')}
+          disabled={isExporting}
+        >
+          <span className="export-kind__name">Customer report (PDF)</span>
+          <span className="export-kind__description">
+            Summary, trends, areas, evidence and recommendations, ready to send
+          </span>
+        </button>
+        <button
+          type="button"
+          role="tab"
+          aria-selected={kind === 'raw'}
+          className={`export-kind__option ${kind === 'raw' ? 'export-kind__option--selected' : ''}`}
+          onClick={() => setKind('raw')}
+        >
+          <span className="export-kind__name">Raw data</span>
+          <span className="export-kind__description">
+            Every detection as CSV, Excel or a PDF table
+          </span>
+        </button>
+      </div>
+
+      {kind === 'report' && <CustomerReportPanel />}
+
+      {kind === 'raw' && (
+      <>
 
       {/* Status Messages */}
       {exportSuccess && (
@@ -192,7 +237,7 @@ export function ExportDataPage() {
             <span className="export-format-card__icon">📕</span>
             <span className="export-format-card__name">PDF</span>
             <span className="export-format-card__description">
-              Presentation-ready report
+              Data table as PDF
             </span>
           </button>
         </div>
@@ -339,6 +384,8 @@ export function ExportDataPage() {
           {isExporting ? 'Generating...' : 'Generate Export'}
         </button>
       </div>
+      </>
+      )}
     </div>
   );
 }

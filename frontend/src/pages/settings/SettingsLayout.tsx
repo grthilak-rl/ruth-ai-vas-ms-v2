@@ -5,7 +5,7 @@ import { notifyAdminSessionChanged, useAdminSession } from '../admin/useAdminSes
 import './SettingsLayout.css';
 
 /**
- * Settings — one page, three tabs.
+ * Settings — one page, four tabs.
  *
  * Replaces the two-card Settings hub AND the separate Model Management
  * area, which between them showed uploaded models twice (each view holding
@@ -26,6 +26,7 @@ import './SettingsLayout.css';
 const TABS = [
   { to: '/settings/models', label: 'AI Models' },
   { to: '/settings/project', label: 'Project' },
+  { to: '/settings/branding', label: 'Report branding' },
   { to: '/settings/system', label: 'System' },
 ] as const;
 
@@ -57,7 +58,7 @@ export function SettingsLayout() {
         <div>
           <h1 className="settings-layout__title">Settings</h1>
           <p className="settings-layout__subtitle">
-            AI models, project lifecycle and system diagnostics
+            AI models, project lifecycle, report branding and system diagnostics
           </p>
         </div>
         {isSignedIn && (

@@ -1,0 +1,241 @@
+/* Analytics → Export Data → Customer report. Same tokens as ExportDataPage. */
+
+.customer-report {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.customer-report__intro {
+  margin: 0;
+  color: var(--color-text-secondary, #6b7280);
+  font-size: 14px;
+  line-height: 1.5;
+}
+
+.customer-report__grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(320px, 1fr));
+  gap: 16px;
+}
+
+.customer-report__card,
+.customer-report__recent {
+  background: var(--color-surface, #fff);
+  border: 1px solid var(--color-border, #e5e7eb);
+  border-radius: 8px;
+  padding: 16px 20px;
+}
+
+.customer-report__card-title {
+  margin: 0 0 12px;
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--color-text-primary, #111827);
+}
+
+.customer-report__segments {
+  display: inline-flex;
+  border: 1px solid var(--color-border, #d1d5db);
+  border-radius: 6px;
+  overflow: hidden;
+  margin-bottom: 14px;
+}
+
+.customer-report__segment {
+  padding: 7px 16px;
+  border: none;
+  background: var(--color-surface, #fff);
+  color: var(--color-text-primary, #374151);
+  font-size: 13px;
+  cursor: pointer;
+}
+
+.customer-report__segment + .customer-report__segment {
+  border-left: 1px solid var(--color-border, #d1d5db);
+}
+
+.customer-report__segment--active {
+  background: var(--color-primary, #3b82f6);
+  color: #fff;
+}
+
+.customer-report__segment:disabled {
+  cursor: not-allowed;
+}
+
+.customer-report__field {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  font-size: 13px;
+  color: var(--color-text-secondary, #6b7280);
+}
+
+.customer-report__field input,
+.customer-report__field select {
+  padding: 7px 10px;
+  border: 1px solid var(--color-border, #d1d5db);
+  border-radius: 6px;
+  font-size: 14px;
+  color: var(--color-text-primary, #111827);
+  background: var(--color-surface, #fff);
+  max-width: 220px;
+}
+
+.customer-report__field--inline {
+  flex-direction: row;
+  align-items: center;
+  gap: 10px;
+  margin: 8px 0 0 26px;
+}
+
+.customer-report__range {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+}
+
+.customer-report__window {
+  margin: 12px 0 4px;
+  font-size: 14px;
+  font-weight: 500;
+  color: var(--color-text-primary, #111827);
+}
+
+.customer-report__hint {
+  margin: 4px 0 0;
+  font-size: 12px;
+  line-height: 1.5;
+  color: var(--color-text-secondary, #6b7280);
+}
+
+.customer-report__muted {
+  color: var(--color-text-secondary, #6b7280);
+  font-weight: 400;
+}
+
+.customer-report__fieldset {
+  border: none;
+  margin: 0 0 12px;
+  padding: 0;
+}
+
+.customer-report__fieldset legend {
+  font-size: 12px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+  color: var(--color-text-secondary, #6b7280);
+  margin-bottom: 6px;
+}
+
+.customer-report__choice {
+  display: flex;
+  gap: 10px;
+  align-items: flex-start;
+  padding: 5px 0;
+  font-size: 14px;
+  color: var(--color-text-primary, #111827);
+  cursor: pointer;
+}
+
+.customer-report__choice input {
+  margin-top: 3px;
+}
+
+.customer-report__choice small {
+  display: block;
+  font-size: 12px;
+  color: var(--color-text-secondary, #6b7280);
+}
+
+.customer-report__message {
+  padding: 12px 16px;
+  border-radius: 6px;
+  font-size: 14px;
+}
+
+.customer-report__message--success {
+  background: var(--color-success-bg, #d1fae5);
+  border: 1px solid var(--color-success, #10b981);
+  color: var(--color-success-dark, #065f46);
+}
+
+.customer-report__message--error {
+  background: var(--color-error-bg, #fee2e2);
+  border: 1px solid var(--color-error, #ef4444);
+  color: var(--color-error-dark, #991b1b);
+}
+
+.customer-report__progress {
+  padding: 12px 16px;
+  border: 1px solid var(--color-border, #e5e7eb);
+  border-radius: 6px;
+  background: var(--color-surface, #fff);
+}
+
+.customer-report__progress-label {
+  font-size: 14px;
+  margin-bottom: 8px;
+  color: var(--color-text-primary, #111827);
+}
+
+.customer-report__bar {
+  height: 6px;
+  border-radius: 3px;
+  background: var(--color-border, #e5e7eb);
+  overflow: hidden;
+}
+
+.customer-report__bar-fill {
+  height: 100%;
+  background: var(--color-primary, #3b82f6);
+  transition: width 0.4s ease;
+}
+
+.customer-report__actions {
+  display: flex;
+  justify-content: flex-end;
+}
+
+.customer-report__link {
+  background: none;
+  border: none;
+  padding: 0;
+  color: var(--color-primary, #0066cc);
+  font: inherit;
+  text-decoration: underline;
+  cursor: pointer;
+}
+
+.customer-report__failed {
+  color: var(--color-error-dark, #991b1b);
+}
+
+.customer-report__table-wrap {
+  overflow-x: auto;
+}
+
+.customer-report__table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 13px;
+}
+
+.customer-report__table th,
+.customer-report__table td {
+  text-align: left;
+  padding: 8px 10px;
+  border-bottom: 1px solid var(--color-border, #e5e7eb);
+  white-space: nowrap;
+}
+
+.customer-report__table th {
+  font-weight: 600;
+  color: var(--color-text-secondary, #6b7280);
+}
+
+.customer-report__num {
+  text-align: right !important;
+}

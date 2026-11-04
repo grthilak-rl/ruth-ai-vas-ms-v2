@@ -16,6 +16,7 @@ import {
   SettingsLayout,
   SettingsModelsTab,
   SettingsProjectTab,
+  SettingsBrandingTab,
   SettingsSystemTab,
   ForbiddenPage,
 } from './pages';
@@ -149,6 +150,7 @@ export const router = createBrowserRouter([
             ),
           },
           { path: 'project', element: <SettingsProjectTab /> },
+          { path: 'branding', element: <SettingsBrandingTab /> },
           { path: 'system', element: <SettingsSystemTab /> },
           // Old sub-page path.
           { path: 'health', element: <Navigate to="/settings/system" replace /> },

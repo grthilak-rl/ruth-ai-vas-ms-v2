@@ -49,6 +49,48 @@
 }
 
 /* ============================================
+   Export kind: customer report or raw data
+   ============================================ */
+.export-kind {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
+  gap: 12px;
+  margin-bottom: 20px;
+}
+
+.export-kind__option {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 14px 18px;
+  text-align: left;
+  background: var(--color-surface, #fff);
+  border: 1px solid var(--color-border, #E5E7EB);
+  border-radius: 8px;
+  cursor: pointer;
+}
+
+.export-kind__option--selected {
+  border-color: var(--color-primary, #3B82F6);
+  box-shadow: 0 0 0 1px var(--color-primary, #3B82F6);
+}
+
+.export-kind__option:disabled {
+  cursor: not-allowed;
+}
+
+.export-kind__name {
+  font-size: 15px;
+  font-weight: 600;
+  color: var(--color-text-primary, #111827);
+}
+
+.export-kind__description {
+  font-size: 13px;
+  color: var(--color-text-secondary, #6B7280);
+}
+
+/* ============================================
    Status Messages
    ============================================ */
 .export-page__message {
