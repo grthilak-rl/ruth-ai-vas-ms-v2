@@ -52,11 +52,11 @@ def _trend(r: ReportData) -> Insight | None:
     change = r.change(r.current.incidents, r.prev.incidents)
     if change is None or abs(change) < 0.10:
         return None
-    if r.is_daily:
+    if r.single_period:
         text = (
-            f"{fmt_int(r.current.incidents)} incidents this day: {fmt_pct(abs(change))} "
+            f"{fmt_int(r.current.incidents)} incidents this {r.unit}: {fmt_pct(abs(change))} "
             f"{'above' if change > 0 else 'below'} {r.baseline_label} of "
-            f"{fmt_rate(r.prev_incidents_per_day)} a day."
+            f"{fmt_rate(r.prev_incidents_per_day)} a {r.unit}."
         )
     else:
         word = "rose" if change > 0 else "fell"
@@ -66,8 +66,8 @@ def _trend(r: ReportData) -> Insight | None:
         )
     if r.comparison_partial:
         text += (
-            f" Only {r.previous.covered_days:.0f} of the {r.previous.days:.0f} comparison "
-            f"days have data."
+            f" Only {r.previous.covered_days:.0f} of the {r.previous.expected:.0f} comparison "
+            f"{r.unit}s have data."
         )
     return Insight(text, 0.5 + min(abs(change), 1.0))
 

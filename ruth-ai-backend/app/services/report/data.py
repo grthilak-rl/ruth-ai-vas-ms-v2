@@ -74,7 +74,10 @@ MODE_LABELS = {
 PRESET_DAILY = "daily"
 PRESET_WEEKLY = "weekly"
 PRESET_CUSTOM = "custom"
-PRESETS = (PRESET_DAILY, PRESET_WEEKLY, PRESET_CUSTOM)
+PRESET_SHIFT = "shift"
+PRESETS = (PRESET_DAILY, PRESET_WEEKLY, PRESET_CUSTOM, PRESET_SHIFT)
+#: One period compared with the average of the 7 before it.
+SINGLE_PERIOD_PRESETS = (PRESET_DAILY, PRESET_SHIFT)
 
 #: Daily reports compare with the average of this many days before.
 DAILY_BASELINE_DAYS = 7
@@ -132,12 +135,20 @@ class ReportIncident:
 class Window:
     start: datetime
     end: datetime
-    #: Days of [start, end) that have data: inside the project, before now.
+    #: Units of [start, end) that have data (inside the project, before
+    #: now): days, or for shift reports, shift occurrences.
     covered_days: float
+    #: How many units a complete window holds, when not its length in days
+    #: (shift reports: 1 for the shift, 7 for its baseline).
+    units: float | None = None
 
     @property
     def days(self) -> float:
         return (self.end - self.start).total_seconds() / 86400
+
+    @property
+    def expected(self) -> float:
+        return self.units if self.units is not None else self.days
 
 
 @dataclass(frozen=True)
@@ -151,6 +162,10 @@ class Windows:
     #: Minutes after local midnight that a report day starts.
     day_offset: int
     project_to_date: bool
+    #: Shift reports: the same shift on the 7 days before, and on the last
+    #: 30 days (report day last). None for the other presets.
+    baseline_windows: tuple[tuple[datetime, datetime], ...] | None = None
+    trend_windows: tuple[tuple[datetime, datetime], ...] | None = None
 
     def fetch_from(self, data_from: datetime | None) -> datetime:
         lo = min(self.start, self.baseline_start, self.trend_start)
@@ -250,6 +265,10 @@ class ReportData:
     project_to_date: ProjectToDate | None
     #: Filled by ``load_gallery``; empty when the gallery is off.
     gallery: list[GalleryItem] = field(default_factory=list)
+    #: Shift reports: the shift (name, "HH:MM" start, "HH:MM" end).
+    shift: tuple[str, str, str] | None = None
+    #: Shift reports: incident starts per hour of the shift, in shift order.
+    by_hour: list[tuple[int, int]] = field(default_factory=list)
 
     @property
     def tz(self) -> ZoneInfo:
@@ -264,12 +283,28 @@ class ReportData:
         return self.preset == PRESET_DAILY
 
     @property
+    def is_shift(self) -> bool:
+        return self.preset == PRESET_SHIFT
+
+    @property
+    def single_period(self) -> bool:
+        """One day or one shift, compared with the average of the 7 before."""
+        return self.preset in SINGLE_PERIOD_PRESETS
+
+    @property
+    def unit(self) -> str:
+        """What a rate is per: "shift" for shift reports, else "day"."""
+        return "shift" if self.is_shift else "day"
+
+    @property
     def report_day(self) -> date:
         return report_day_of(self.period.start.astimezone(self.tz), self.day_offset)
 
     @property
     def baseline_label(self) -> str:
         """How the comparison is named in sentences: 'the previous period'."""
+        if self.is_shift:
+            return f"this shift's {DAILY_BASELINE_DAYS}-day average"
         if self.is_daily:
             return f"the {DAILY_BASELINE_DAYS}-day average"
         return "the previous period"
@@ -280,11 +315,11 @@ class ReportData:
 
     @property
     def comparison_partial(self) -> bool:
-        return self.has_comparison and self.previous.covered_days < self.previous.days - 0.01
+        return self.has_comparison and self.previous.covered_days < self.previous.expected - 0.01
 
     @property
     def period_incomplete(self) -> bool:
-        return self.period.covered_days < self.period.days - 0.01
+        return self.period.covered_days < self.period.expected - 0.01
 
     def per_day(self, count: int, window: Window) -> float:
         return count / window.covered_days if window.covered_days else 0.0
@@ -342,8 +377,35 @@ def day_start(day: date, schedule: ShiftSchedule) -> datetime:
     return local.astimezone(timezone.utc)
 
 
-def preset_range(preset: str, day: date, schedule: ShiftSchedule) -> tuple[datetime, datetime]:
-    """[start, end) of a daily report for ``day``, or a weekly one ending on it."""
+def find_shift(schedule: ShiftSchedule, name: str | None):
+    for s in schedule.shifts if schedule.mode == "shifts" else []:
+        if s.name == name:
+            return s
+    raise ValueError(f"No shift named {name!r} in the schedule")
+
+
+def shift_occurrence(day: date, schedule: ShiftSchedule, name: str) -> tuple[datetime, datetime]:
+    """[start, end) UTC of shift ``name`` within report day ``day``.
+
+    A report day starts with the first shift, so a shift that starts earlier
+    on the clock (19:00 -> 07:00 with days starting 07:00 is not one; a
+    03:00 shift with days starting 07:00 is) falls on the next calendar day.
+    """
+    shift = find_shift(schedule, name)
+    offset = day_offset_minutes(schedule)
+    on = day if shift.start_minute >= offset else day + timedelta(days=1)
+    local = datetime.combine(on, time(shift.start_minute // 60, shift.start_minute % 60), tzinfo=schedule.tzinfo)
+    start = local.astimezone(timezone.utc)
+    return start, start + timedelta(minutes=shift.duration_minutes)
+
+
+def preset_range(
+    preset: str, day: date, schedule: ShiftSchedule, shift: str | None = None
+) -> tuple[datetime, datetime]:
+    """[start, end) of a daily report for ``day``, a weekly one ending on
+    it, or one shift of it."""
+    if preset == PRESET_SHIFT:
+        return shift_occurrence(day, schedule, shift)
     if preset == PRESET_DAILY:
         return day_start(day, schedule), day_start(day + timedelta(days=1), schedule)
     if preset == PRESET_WEEKLY:
@@ -351,9 +413,27 @@ def preset_range(preset: str, day: date, schedule: ShiftSchedule) -> tuple[datet
     raise ValueError(f"No preset range for {preset!r}")
 
 
-def report_windows(preset: str, start: datetime, end: datetime, schedule: ShiftSchedule) -> Windows:
+def report_windows(
+    preset: str, start: datetime, end: datetime, schedule: ShiftSchedule, shift: str | None = None
+) -> Windows:
     if preset not in PRESETS:
         raise ValueError(f"Unknown report preset: {preset!r}")
+    if preset == PRESET_SHIFT:
+        offset = day_offset_minutes(schedule)
+        day = report_day_of(start.astimezone(schedule.tzinfo), offset)
+        occ = lambda k: shift_occurrence(day - timedelta(days=k), schedule, shift)  # noqa: E731
+        baseline = tuple(occ(k) for k in range(DAILY_BASELINE_DAYS, 0, -1))
+        trend = tuple(occ(k) for k in range(DAILY_TREND_DAYS - 1, -1, -1))
+        return Windows(
+            start=start,
+            end=end,
+            baseline_start=baseline[0][0],
+            trend_start=trend[0][0],
+            day_offset=offset,
+            project_to_date=True,
+            baseline_windows=baseline,
+            trend_windows=trend,
+        )
     if preset == PRESET_DAILY:
         return Windows(
             start=start,
@@ -448,17 +528,33 @@ def build_report(
     gap_minutes: int = 5,
     max_span_minutes: int = 60,
     type_seen: dict[str, tuple[datetime, datetime]] | None = None,
+    shift: str | None = None,
 ) -> ReportData:
     """``rows`` cover ``report_windows(...).fetch_from(data_from)`` to ``end``."""
     if mode not in MODE_LABELS:
         raise ValueError(f"Unknown report mode: {mode!r}")
     now = now or datetime.now(timezone.utc)
     tz = schedule.tzinfo
-    win = report_windows(preset, start, end, schedule)
-    period = Window(start, end, covered_days(start, end, data_from, now))
-    previous = Window(
-        win.baseline_start, start, covered_days(win.baseline_start, start, data_from, now)
-    )
+    win = report_windows(preset, start, end, schedule, shift)
+
+    def occurrences_covered(windows) -> float:
+        """Shift occurrences with data, as fractions of a whole shift."""
+        return sum(
+            covered_days(a, b, data_from, now) / ((b - a).total_seconds() / 86400)
+            for a, b in windows
+        )
+
+    if win.baseline_windows is not None:
+        period = Window(start, end, occurrences_covered([(start, end)]), units=1)
+        previous = Window(
+            win.baseline_start, start, occurrences_covered(win.baseline_windows),
+            units=len(win.baseline_windows),
+        )
+    else:
+        period = Window(start, end, covered_days(start, end, data_from, now))
+        previous = Window(
+            win.baseline_start, start, covered_days(win.baseline_start, start, data_from, now)
+        )
     gap, span = timedelta(minutes=gap_minutes), timedelta(minutes=max_span_minutes)
 
     def camera(device_id: UUID) -> Camera:
@@ -523,7 +619,10 @@ def build_report(
         )
 
     current_groups = incidents_in(start, end)
-    prev_groups = incidents_in(win.baseline_start, start)
+    if win.baseline_windows is not None:
+        prev_groups = [i for a, b in win.baseline_windows for i in incidents_in(a, b)]
+    else:
+        prev_groups = incidents_in(win.baseline_start, start)
 
     incidents: list[ReportIncident] = []
     for inc in current_groups:
@@ -553,18 +652,28 @@ def build_report(
     current = totals(current_groups)
     prev = totals(prev_groups)
 
-    # Over-time chart: report days from trend_start, bucketed by day offset.
-    trend_groups = current_groups if win.trend_start == start else incidents_in(win.trend_start, end)
     offset = win.day_offset
-    # Days before the project started have no data, not zero incidents.
-    trend_from = max(win.trend_start, data_from) if data_from else win.trend_start
-    first_day = report_day_of(min(trend_from, start).astimezone(tz), offset)
-    last_day = report_day_of((end - timedelta(microseconds=1)).astimezone(tz), offset)
-    per_day = Counter(report_day_of(i.first_at.astimezone(tz), offset) for i in trend_groups)
-    by_day = [
-        (first_day + timedelta(days=n), per_day[first_day + timedelta(days=n)])
-        for n in range((last_day - first_day).days + 1)
-    ]
+    if win.trend_windows is not None:
+        # One bar per occurrence of this shift; occurrences that ended before
+        # the project started have no data, not zero incidents.
+        by_day = [
+            (report_day_of(a.astimezone(tz), offset),
+             current.incidents if (a, b) == (start, end) else len(incidents_in(a, b)))
+            for a, b in win.trend_windows
+            if not data_from or b > data_from
+        ]
+    else:
+        # Over-time chart: report days from trend_start, bucketed by day offset.
+        trend_groups = current_groups if win.trend_start == start else incidents_in(win.trend_start, end)
+        # Days before the project started have no data, not zero incidents.
+        trend_from = max(win.trend_start, data_from) if data_from else win.trend_start
+        first_day = report_day_of(min(trend_from, start).astimezone(tz), offset)
+        last_day = report_day_of((end - timedelta(microseconds=1)).astimezone(tz), offset)
+        per_day = Counter(report_day_of(i.first_at.astimezone(tz), offset) for i in trend_groups)
+        by_day = [
+            (first_day + timedelta(days=n), per_day[first_day + timedelta(days=n)])
+            for n in range((last_day - first_day).days + 1)
+        ]
 
     heatmap = [[0] * 24 for _ in range(7)]
     for i in incidents:
@@ -580,8 +689,16 @@ def build_report(
             incidents=current.by_shift[s.name],
             hours=shift_hours[s.name],
         )
-        for s in (schedule.shifts if schedule.mode == "shifts" else [])
+        for s in (schedule.shifts if schedule.mode == "shifts" and preset != PRESET_SHIFT else [])
     ]
+
+    shift_info, by_hour = None, []
+    if preset == PRESET_SHIFT:
+        s = find_shift(schedule, shift)
+        shift_info = (s.name, s.start, s.end)
+        hours = [(s.start_minute // 60 + k) % 24 for k in range(-(-s.duration_minutes // 60))]
+        counts = Counter(i.started_at.hour for i in incidents)
+        by_hour = [(h, counts[h]) for h in hours]
 
     areas: list[AreaSummary] = []
     for name, n in current.by_area.most_common():
@@ -630,6 +747,8 @@ def build_report(
         shifts=shifts,
         rollout=rollout_notes(type_seen or {}, win.baseline_start, end, data_from, tz),
         project_to_date=ptd,
+        shift=shift_info,
+        by_hour=by_hour,
     )
 
 
@@ -736,12 +855,13 @@ async def load_report(
     camera_ids: list[str] | None = None,
     violation_types: list[str] | None = None,
     now: datetime | None = None,
+    shift: str | None = None,
 ) -> ReportData:
     settings = get_settings()
     schedule = await ShiftService(db).get_schedule()
     project_name, data_from = await _project_for(db, start, end)
     labeler = ViolationLabeler.current()
-    win = report_windows(preset, start, end, schedule)
+    win = report_windows(preset, start, end, schedule, shift)
 
     filters = [Violation.timestamp >= win.fetch_from(data_from), Violation.timestamp < end]
     if camera_ids:
@@ -790,6 +910,7 @@ async def load_report(
         gap_minutes=settings.incident_gap_minutes,
         max_span_minutes=settings.incident_max_span_minutes,
         type_seen=await _type_seen(db, labeler),
+        shift=shift,
     )
 
 

@@ -257,3 +257,38 @@ def heatmap(matrix: Sequence[Sequence[int]], width: float, row_labels: Sequence[
     d.add(String(kx + len(swatches) * sw + 4, 6, more, fontName=FONT, fontSize=LABEL_SIZE,
                  fillColor=MUTED))
     return d
+
+
+def hour_bars(hours: Sequence[tuple[int, int]], width: float, height: float = 170) -> Drawing:
+    """Incidents per hour of a shift, in shift order (e.g. 07 .. 18)."""
+    d = Drawing(width, height)
+    values = [n for _, n in hours]
+    ticks = nice_ticks(max(values + [1]))
+    y_max = ticks[-1]
+    axis_w = max(stringWidth(_fmt(t), FONT, LABEL_SIZE) for t in ticks) + 6
+    left, right, bottom, top_pad = axis_w, 4, 18, 14
+    plot_w, plot_h = width - left - right, height - bottom - top_pad
+
+    def y_of(v: float) -> float:
+        return bottom + plot_h * v / y_max
+
+    for t in ticks:
+        y = y_of(t)
+        d.add(Line(left, y, width - right, y, strokeColor=GRID, strokeWidth=0.6 if t else 0.9))
+        d.add(String(left - 5, y - 2.5, _fmt(t), fontName=FONT, fontSize=LABEL_SIZE,
+                     fillColor=MUTED, textAnchor="end"))
+    n = max(len(hours), 1)
+    slot = plot_w / n
+    bar_w = min(slot * 0.68, 26)
+    peak = max(range(n), key=lambda i: values[i]) if values else None
+    for i, (hour, v) in enumerate(hours):
+        x = left + slot * i + (slot - bar_w) / 2
+        if v:
+            d.add(_bar_up(x, bottom, bar_w, y_of(v) - bottom, ACCENT))
+        cx = x + bar_w / 2
+        d.add(String(cx, bottom - 11, f"{hour:02d}", fontName=FONT, fontSize=LABEL_SIZE,
+                     fillColor=MUTED, textAnchor="middle"))
+        if i == peak and v:
+            d.add(String(cx, y_of(v) + 3, _fmt(v), fontName=FONT_BOLD, fontSize=VALUE_SIZE,
+                         fillColor=INK, textAnchor="middle"))
+    return d

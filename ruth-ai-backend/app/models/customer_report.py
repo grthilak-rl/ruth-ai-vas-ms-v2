@@ -13,12 +13,16 @@ current one for the progress bar.
 import uuid
 from datetime import datetime
 
-from sqlalchemy import DateTime, Index, Integer, String, Text
+from sqlalchemy import DateTime, Index, Integer, String, Text, text
 from sqlalchemy.dialects.postgresql import JSONB, UUID
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.models.base import Base, generate_uuid
 from app.models.violation_export import EXPORT_BUILDING
+
+TRIGGER_MANUAL = "manual"
+TRIGGER_AUTO = "auto"
+TRIGGER_REGENERATE = "regenerate"
 
 
 class CustomerReport(Base):
@@ -46,6 +50,14 @@ class CustomerReport(Base):
     period_label: Mapped[str] = mapped_column(String(64), nullable=False)
     #: The request as received (gallery, gallery size, ...).
     options: Mapped[dict] = mapped_column(JSONB, nullable=False, default=dict)
+    #: manual (an admin), auto (the shift scheduler) or regenerate.
+    trigger: Mapped[str] = mapped_column(String(16), nullable=False, default=TRIGGER_MANUAL)
+    #: Shift reports: the shift covered.
+    shift_name: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    #: Regenerate: the report this one re-built.
+    regenerated_from: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), nullable=True)
+    #: Builds started (auto reports are retried up to MAX_AUTO_ATTEMPTS).
+    attempts: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
 
     file_path: Mapped[str | None] = mapped_column(String(512), nullable=True)
     filename: Mapped[str | None] = mapped_column(String(200), nullable=True)
@@ -61,4 +73,11 @@ class CustomerReport(Base):
     __table_args__ = (
         Index("ix_customer_reports_status_expires", "status", "expires_at"),
         Index("ix_customer_reports_created_at", "created_at"),
+        # One auto report per shift occurrence (see 2026_11_05_auto_reports).
+        Index(
+            "uq_customer_reports_auto_period",
+            "preset", "period_start", "period_end",
+            unique=True,
+            postgresql_where=text("trigger = 'auto'"),
+        ),
     )

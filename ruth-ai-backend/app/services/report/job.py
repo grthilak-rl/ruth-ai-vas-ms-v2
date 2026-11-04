@@ -32,6 +32,7 @@ from app.models.violation_export import (
 from app.services.report.data import (
     PRESET_CUSTOM,
     PRESET_DAILY,
+    PRESET_SHIFT,
     PRESET_WEEKLY,
     load_gallery,
     load_report,
@@ -61,15 +62,27 @@ def report_period(
     start: date | None = None,
     end: date | None = None,
     today: date | None = None,
+    shift: str | None = None,
+    now: datetime | None = None,
 ) -> tuple[datetime, datetime, str]:
     """(start UTC, end UTC exclusive, label) for a request.
 
-    Daily and weekly follow the shift day; custom runs midnight to midnight
-    over both dates inclusive.
+    Daily and weekly follow the shift day; a shift report is one shift of a
+    shift day; custom runs midnight to midnight over both dates inclusive.
     """
     tz = schedule.tzinfo
     today = today or datetime.now(tz).date()
     max_days = get_settings().customer_report_max_days
+    if preset == PRESET_SHIFT:
+        if day is None or not shift:
+            raise PeriodError("Pick a day and a shift.")
+        try:
+            lo, hi = preset_range(preset, day, schedule, shift)
+        except ValueError as e:
+            raise PeriodError(str(e)) from e
+        if lo > (now or datetime.now(timezone.utc)):
+            raise PeriodError("That shift has not started yet.")
+        return lo, hi, f"{shift}, {day_range_text(day, day, long=False)}"
     if preset in (PRESET_DAILY, PRESET_WEEKLY):
         if day is None:
             raise PeriodError("Pick a day.")
@@ -97,9 +110,13 @@ def _slug(text: str) -> str:
     return re.sub(r"[^A-Za-z0-9]+", "-", text).strip("-")
 
 
-def report_filename(customer: str | None, preset: str, first: date, last: date) -> str:
-    """'HPCL-daily-safety-report-2026-11-03.pdf'."""
+def report_filename(
+    customer: str | None, preset: str, first: date, last: date, shift: str | None = None
+) -> str:
+    """'HPCL-daily-safety-report-2026-11-03.pdf', '...-shift-...-2026-11-03-Shift-1.pdf'."""
     span = f"{first:%Y-%m-%d}" if first == last else f"{first:%Y-%m-%d}_to_{last:%Y-%m-%d}"
+    if shift and _slug(shift):
+        span += f"-{_slug(shift)}"
     prefix = f"{_slug(customer)}-" if customer and _slug(customer) else ""
     return f"{prefix}{preset}-safety-report-{span}.pdf"
 
@@ -138,6 +155,7 @@ async def run_report_job(report_id: uuid.UUID, session_factory) -> None:
                 end=row.period_end,
                 preset=row.preset,
                 mode=row.mode,
+                shift=row.shift_name,
             )
 
             await _stage(db, report_id, 1)
@@ -154,7 +172,9 @@ async def run_report_job(report_id: uuid.UUID, session_factory) -> None:
 
             await _stage(db, report_id, 3)
             first, last = period_days(report)
-            filename = report_filename(report.branding.customer_name, row.preset, first, last)
+            filename = report_filename(
+                report.branding.customer_name, row.preset, first, last, row.shift_name
+            )
             path = out_dir / f"{report_id}.pdf"
             size = await run_in_threadpool(_write, path, pdf)
             await _touch(

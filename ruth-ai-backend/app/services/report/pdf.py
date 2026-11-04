@@ -37,6 +37,7 @@ from app.services.report.branding import VENDOR_LOGO
 from app.services.report.data import (
     DAILY_BASELINE_DAYS,
     PRESET_DAILY,
+    PRESET_SHIFT,
     PRESET_WEEKLY,
     WEEKDAYS,
     AreaSummary,
@@ -71,6 +72,7 @@ CONTENT_W = PAGE_W - 2 * MARGIN_X
 REPORT_TITLE = "Safety Compliance Report"
 TITLES = {
     PRESET_DAILY: "Daily Safety Compliance Report",
+    PRESET_SHIFT: "Shift Safety Compliance Report",
     PRESET_WEEKLY: "Weekly Safety Compliance Report",
 }
 
@@ -127,6 +129,10 @@ def period_days(r: ReportData) -> tuple[date, date]:
 
 def _period(r: ReportData, long: bool = True) -> str:
     first, last = _days(r, r.period)
+    if r.is_shift:
+        name, start, end = r.shift
+        when = first.strftime("%A %-d %B %Y" if long else "%-d %b %Y")
+        return f"{name} ({start}–{end}), {when}" if long else f"{when}, {name}"
     if r.is_daily and long:
         return first.strftime("%A %-d %B %Y")
     return day_range_text(first, last, long)
@@ -138,6 +144,8 @@ def _prev_period(r: ReportData) -> str:
 
 def _day_hours(r: ReportData) -> str:
     """'shift day 07:00 to 07:00' when days do not start at midnight."""
+    if r.is_shift:
+        return f"shift {r.shift[1]} to {r.shift[2]}"
     if not r.day_offset:
         return ""
     hhmm = f"{r.day_offset // 60:02d}:{r.day_offset % 60:02d}"
@@ -165,7 +173,7 @@ def _type_heading(r: ReportData) -> str:
 
 def _vs(r: ReportData) -> str:
     """Short comparison label for tiles and cards."""
-    if r.is_daily:
+    if r.single_period:
         return f"vs {DAILY_BASELINE_DAYS}-day avg"
     return "per day vs previous" if r.comparison_partial else "vs previous"
 
@@ -477,8 +485,8 @@ def _tiles(r: ReportData) -> list[dict]:
             "label": "Incidents",
             "value": fmt_int(total),
             "context": (
-                f"{DAILY_BASELINE_DAYS}-day average: {fmt_rate(r.prev_incidents_per_day)} a day"
-                if r.is_daily and r.has_comparison
+                f"{DAILY_BASELINE_DAYS}-day average: {fmt_rate(r.prev_incidents_per_day)} a {r.unit}"
+                if r.single_period and r.has_comparison
                 else f"{fmt_rate(r.incidents_per_day)} a day on average"
             ),
             "change": r.change(total, r.prev.incidents),
@@ -529,7 +537,13 @@ def _counting_note(r: ReportData) -> str:
         f"are shown for reference only. Detections an operator dismissed (false alarms, "
         f"duplicates, or people and places the PPE rule does not apply to) are not counted."
     )
-    if r.day_offset:
+    if r.is_shift:
+        name, start, end = r.shift
+        text += (
+            f" The period is one shift, {name} ({start} to {end}); it is compared with the same "
+            f"shift on the {DAILY_BASELINE_DAYS} days before."
+        )
+    elif r.day_offset:
         text += f" Days are shift days: each runs from the first shift's start ({_day_hours(r)})."
     return text
 
@@ -585,7 +599,12 @@ def summary_section(r: ReportData, st: dict) -> list:
         f"across {areas} area{'s' * (areas != 1)} and {cameras} camera{'s' * (cameras != 1)}"
     )
     if not r.current.incidents:
-        lead = f"No safety incidents were recorded {'on' if r.is_daily else 'from'} {_period(r)}."
+        lead = f"No safety incidents were recorded {'in' if r.is_shift else 'on' if r.is_daily else 'from'} {_period(r)}."
+    elif r.is_shift:
+        lead = (
+            f"In {_period(r)}, AI recorded <b>{fmt_int(r.current.incidents)} safety incidents</b> "
+            f"{where}."
+        )
     elif r.is_daily:
         lead = (
             f"On {_period(r)} ({_day_hours(r) or 'midnight to midnight'}), AI recorded "
@@ -598,12 +617,12 @@ def summary_section(r: ReportData, st: dict) -> list:
         )
     out += [Paragraph(lead, st["lead"]), Spacer(1, 14), KpiTiles(_tiles(r), CONTENT_W), Spacer(1, 8)]
 
-    baseline = f"{DAILY_BASELINE_DAYS}-day average" if r.is_daily else "previous period"
+    baseline = f"{DAILY_BASELINE_DAYS}-day average" if r.single_period else "previous period"
     secondary = f"Raw detections: <b>{fmt_int(r.current.detections)}</b>"
     if r.has_comparison:
         prev = (
-            fmt_rate(r.per_day(r.prev.detections, r.previous)) + " a day"
-            if r.is_daily
+            fmt_rate(r.per_day(r.prev.detections, r.previous)) + f" a {r.unit}"
+            if r.single_period
             else fmt_int(r.prev.detections)
         )
         secondary += f" ({baseline}: {prev})"
@@ -624,8 +643,8 @@ def summary_section(r: ReportData, st: dict) -> list:
         notes.append(f"No comparison: there is no data for the {baseline} ({_prev_period(r)}).")
     elif r.comparison_partial:
         notes.append(
-            f"Changes compare incidents per day: the {baseline} ({_prev_period(r)}) has data for "
-            f"{r.previous.covered_days:.0f} of {r.previous.days:.0f} days, because monitoring "
+            f"Changes compare incidents per {r.unit}: the {baseline} ({_prev_period(r)}) has data for "
+            f"{r.previous.covered_days:.0f} of {r.previous.expected:.0f} {r.unit}s, because monitoring "
             f"for this project started during it."
         )
     if rollout := _rollout_text(r):
@@ -694,7 +713,19 @@ def trend_section(r: ReportData, st: dict) -> list:
     out: list = [Paragraph("Over time and by type", st["h1"]), Spacer(1, 4)]
 
     ref = r.prev_incidents_per_day
-    if r.is_daily:
+    if r.is_shift:
+        name, s_start, s_end = r.shift
+        first = r.by_day[0][0] if r.by_day else r.report_day
+        since = f" (since monitoring started on {first:%-d %b})" if len(r.by_day) < 30 else ""
+        heading = f"Incidents in {name}, last {len(r.by_day)} shifts{since}"
+        caption = (
+            f"One bar per {name} ({s_start}–{s_end}, {r.timezone}); the report's shift is "
+            f"highlighted."
+            + (f" Dashed line: this shift's {DAILY_BASELINE_DAYS}-day average before it."
+               if ref is not None else "")
+        )
+        ref_label = f"{DAILY_BASELINE_DAYS}-day average"
+    elif r.is_daily:
         first = r.by_day[0][0] if r.by_day else r.report_day
         since = (
             f" (since monitoring started on {first:%-d %b})"
@@ -722,7 +753,7 @@ def trend_section(r: ReportData, st: dict) -> list:
         charts.daily_bars(
             r.by_day, CONTENT_W, 190, reference=ref,
             reference_label=ref_label if ref is not None else None,
-            highlight=r.report_day if r.is_daily else None,
+            highlight=r.report_day if r.single_period else None,
         ),
     ]
 
@@ -809,14 +840,26 @@ def where_when_section(r: ReportData, st: dict) -> list:
         charts.hbars(areas, CONTENT_W, total=r.current.incidents)
         if areas
         else Paragraph("No incidents in this period.", st["body"]),
-        Paragraph("When incidents start", st["h2"]),
-        Paragraph(
-            f"Incidents by the weekday and hour they started, local time ({r.timezone}). "
-            f"Darker cells had more incidents.",
-            st["caption"],
-        ),
-        charts.heatmap(r.heatmap, CONTENT_W, WEEKDAYS),
     ]
+    if r.is_shift:
+        out += [
+            Paragraph("When incidents start, hour by hour", st["h2"]),
+            Paragraph(
+                f"Incidents by the hour of the shift they started in, local time ({r.timezone}).",
+                st["caption"],
+            ),
+            charts.hour_bars(r.by_hour, CONTENT_W, 170),
+        ]
+    else:
+        out += [
+            Paragraph("When incidents start", st["h2"]),
+            Paragraph(
+                f"Incidents by the weekday and hour they started, local time ({r.timezone}). "
+                f"Darker cells had more incidents.",
+                st["caption"],
+            ),
+            charts.heatmap(r.heatmap, CONTENT_W, WEEKDAYS),
+        ]
     out += _shifts_block(r, st)
     return out
 

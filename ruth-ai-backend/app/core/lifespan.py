@@ -348,6 +348,14 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     except Exception as e:
         logger.error("Failed to start export sweeper", error=str(e))
 
+    # Automatic per-shift customer reports. Off until an admin switches it
+    # on; idle while the project is not active.
+    try:
+        from app.services.report.auto import auto_report_scheduler
+        auto_report_scheduler.start()
+    except Exception as e:
+        logger.error("Failed to start auto shift report scheduler", error=str(e))
+
     logger.info("Ruth AI Backend startup complete")
 
     yield  # Application runs here
@@ -383,6 +391,12 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
         await export_sweeper.stop()
     except Exception as e:
         logger.error("Error stopping export sweeper", error=str(e))
+
+    try:
+        from app.services.report.auto import auto_report_scheduler
+        await auto_report_scheduler.stop()
+    except Exception as e:
+        logger.error("Error stopping auto shift report scheduler", error=str(e))
 
     # Stop VAS event consumer
     try:

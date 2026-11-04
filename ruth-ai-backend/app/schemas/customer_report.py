@@ -13,9 +13,11 @@ class CustomerReportRequest(BaseModel):
     """POST /admin/customer-reports."""
 
     format: Literal["pdf"] = "pdf"
-    preset: Literal["daily", "weekly", "custom"]
-    #: Daily: the shift day. Weekly: the last of its 7 shift days.
+    preset: Literal["daily", "weekly", "custom", "shift"]
+    #: Daily and shift: the shift day. Weekly: the last of its 7 shift days.
     day: date | None = None
+    #: Shift: the shift's name, from the schedule.
+    shift: str | None = Field(default=None, max_length=64)
     #: Custom: local dates, both included.
     start: date | None = None
     end: date | None = None
@@ -61,6 +63,14 @@ class CustomerReportJob(BaseModel):
     period_end: datetime
     period_label: str
     options: dict
+    #: manual, auto or regenerate.
+    trigger: str = "manual"
+    shift_name: str | None = None
+    regenerated_from: uuid.UUID | None = None
+    attempts: int = 0
+    #: Violations in the period dismissed after this report was built: the
+    #: report counts them, so it is stale and Regenerate would change it.
+    dismissed_since: int = 0
     filename: str | None = None
     size_bytes: int | None = None
     incidents: int | None = None
@@ -90,6 +100,32 @@ class CustomerReportDefaults(BaseModel):
     retention_days: int
     gallery_sizes: list[int]
     default_gallery_size: int
+    #: The shift schedule's shifts, for the Shift preset ([] without shifts).
+    shifts: list["ShiftOption"] = Field(default_factory=list)
+    #: The most recent shift that has ended: (shift day, shift name).
+    last_complete_shift_day: date | None = None
+    last_complete_shift: str | None = None
+
+
+class ShiftOption(BaseModel):
+    name: str
+    start: str
+    end: str
+
+
+class AutoReportSettingsOut(BaseModel):
+    enabled: bool
+    settle_minutes: int
+    enabled_at: datetime | None = None
+    updated_by: str | None = None
+    #: Why the scheduler is doing nothing right now, if it is.
+    idle_reason: str | None = None
+    last_tick_at: datetime | None = None
+
+
+class AutoReportSettingsIn(BaseModel):
+    enabled: bool
+    settle_minutes: int = Field(default=15, ge=0, le=240)
 
 
 class ReportBrandingOut(BaseModel):
@@ -101,3 +137,4 @@ class ReportBrandingOut(BaseModel):
 
 class ReportBrandingIn(BaseModel):
     customer_name: str | None = Field(default=None, max_length=120)
+CustomerReportDefaults.model_rebuild()

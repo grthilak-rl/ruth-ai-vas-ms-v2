@@ -27,6 +27,9 @@ SHIFT_SCHEDULE_KEY = "shift_schedule"
 #: Key under which the customer report branding (name, logo) is stored.
 REPORT_BRANDING_KEY = "report_branding"
 
+#: Key for automatic per-shift customer reports (on/off, settle delay).
+AUTO_REPORTS_KEY = "auto_reports"
+
 
 class AppSetting(Base, TimestampMixin):
     """One site-global setting.

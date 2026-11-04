@@ -13,7 +13,7 @@ from __future__ import annotations
 from collections import Counter
 from dataclasses import dataclass
 
-from app.services.report.data import PRESET_DAILY, ReportData
+from app.services.report.data import ReportData
 from app.services.report.insights import fmt_hhmm, fmt_int, fmt_pct
 
 MAX_RECOMMENDATIONS = 4
@@ -87,7 +87,7 @@ def _r1_area_type(r: ReportData, areas: dict[str, list]) -> list[Recommendation]
 
 
 def _r2_time_window(r: ReportData, areas: dict[str, list]) -> list[Recommendation]:
-    floor = 10 if r.preset == PRESET_DAILY else 20
+    floor = 10 if r.single_period else 20
     out = []
     for area, incs in areas.items():
         if len(incs) < floor:
