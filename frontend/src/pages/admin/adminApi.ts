@@ -424,7 +424,7 @@ export interface ProjectSummary {
   id: string;
   name: string;
   slug: string;
-  state: 'active' | 'archived';
+  state: 'active' | 'stopping' | 'stopped' | 'resuming' | 'ended' | 'archived';
   started_at: string;
   started_by: string;
   ended_at: string | null;
@@ -432,6 +432,44 @@ export interface ProjectSummary {
   archive_batch_id: string | null;
   archived_counts: Record<string, number> | null;
   backup_path: string | null;
+  stopped_at?: string | null;
+  stopped_by?: string | null;
+  resumed_at?: string | null;
+  resumed_by?: string | null;
+  lifecycle_error?: string | null;
+}
+
+export type LifecycleAction = 'stop' | 'resume' | 'end';
+
+/** One camera in a Stop/Resume/End plan: as it is now, and what will change. */
+export interface LifecycleCamera {
+  name: string;
+  vas_device_id: string;
+  device_id: string | null;
+  vas_enabled_now: boolean;
+  intent: string | null;
+  intent_models: number;
+  live_session: boolean;
+  actions: string[];
+  vas_change: boolean;
+}
+
+export interface LifecyclePreflight {
+  action: LifecycleAction;
+  project: ProjectSummary | null;
+  allowed: boolean;
+  blocked_reason: string | null;
+  cameras: LifecycleCamera[];
+  effects: string[];
+}
+
+export interface LifecycleResult {
+  action: LifecycleAction;
+  project: ProjectSummary;
+  complete: boolean;
+  errors: string[];
+  cameras: LifecycleCamera[];
+  retention_paused: boolean | null;
 }
 
 export interface LiveCameraInfo {
@@ -483,6 +521,17 @@ export function listProjects(): Promise<{
  * `stopInference` previews the result assuming live inference is stopped
  * first, so ticking the checkbox re-measures rather than guessing.
  */
+export function fetchLifecyclePreflight(action: LifecycleAction): Promise<LifecyclePreflight> {
+  return adminFetch(`${PROJECTS}/lifecycle/preflight?action=${action}`);
+}
+
+export function runLifecycle(action: LifecycleAction, confirmName?: string): Promise<LifecycleResult> {
+  return adminFetch(`${PROJECTS}/lifecycle/${action}`, {
+    method: 'POST',
+    body: action === 'end' ? JSON.stringify({ confirm_name: confirmName ?? '' }) : undefined,
+  });
+}
+
 export function fetchProjectPreflight(stopInference = false): Promise<ProjectPreflight> {
   const query = stopInference ? '?stop_inference=true' : '';
   return adminFetch(`${PROJECTS}/preflight${query}`);

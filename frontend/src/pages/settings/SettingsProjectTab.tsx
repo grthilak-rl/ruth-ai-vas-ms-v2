@@ -13,6 +13,7 @@ import {
 import { useAdminSession } from '../admin/useAdminSession';
 import { formatDateTime } from '../admin/format';
 import { InlineAdminSignIn } from './InlineAdminSignIn';
+import { ProjectLifecyclePanel } from './ProjectLifecyclePanel';
 import type { SettingsOutletContext } from './SettingsLayout';
 import '../admin/AdminPages.css';
 import './SettingsProjectTab.css';
@@ -297,6 +298,8 @@ function ProjectTabContent() {
 
   return (
     <div className="start-project">
+      <ProjectLifecyclePanel project={projects.data?.active ?? null} />
+
       <section className="admin-card start-project__explainer">
         <h2 className="start-project__section-title">What this does</h2>
         <ul>

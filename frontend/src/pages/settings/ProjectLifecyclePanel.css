@@ -1,0 +1,80 @@
+/* Stop / Resume / End (Settings -> Project). Builds on AdminPages.css. */
+
+.lifecycle {
+  border-left: 4px solid #1e7e34;
+}
+.lifecycle--stopped,
+.lifecycle--stopping,
+.lifecycle--resuming { border-left-color: #1a73e8; }
+.lifecycle--ended { border-left-color: #6b6b6b; }
+
+.lifecycle__header {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.75rem;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.lifecycle__state { font-weight: 600; }
+
+.lifecycle__buttons {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+}
+
+.lifecycle__preflight {
+  margin-top: 1rem;
+  padding-top: 1rem;
+  border-top: 1px solid #e0e0e0;
+}
+
+.lifecycle__preflight h3 {
+  margin: 0 0 0.5rem;
+  font-size: 1rem;
+}
+
+.lifecycle__effects {
+  margin: 0 0 0.75rem;
+  padding-left: 1.25rem;
+  font-size: 0.875rem;
+}
+
+.lifecycle__table-wrap { overflow-x: auto; margin-bottom: 0.75rem; }
+
+.lifecycle__table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.8125rem;
+}
+
+.lifecycle__table th,
+.lifecycle__table td {
+  text-align: left;
+  vertical-align: top;
+  padding: 0.4rem 0.6rem;
+  border-bottom: 1px solid #ececec;
+}
+
+.lifecycle__table th { color: #555; font-weight: 600; }
+
+.lifecycle__row--change { background: #fff8e6; }
+
+.lifecycle__actions {
+  margin: 0;
+  padding-left: 1rem;
+}
+
+.lifecycle__confirm { margin: 0.75rem 0; max-width: 520px; }
+
+.lifecycle__result {
+  margin-top: 0.75rem;
+  padding: 0.6rem 0.8rem;
+  border-radius: 6px;
+  background: #eef7f0;
+  font-size: 0.875rem;
+}
+
+.lifecycle__result--incomplete { background: #fff4f2; }
+.lifecycle__result p { margin: 0; }
