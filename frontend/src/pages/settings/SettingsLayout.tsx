@@ -26,7 +26,7 @@ import './SettingsLayout.css';
 const TABS = [
   { to: '/settings/models', label: 'AI Models' },
   { to: '/settings/project', label: 'Project' },
-  { to: '/settings/branding', label: 'Report branding' },
+  { to: '/settings/branding', label: 'Reports' },
   { to: '/settings/system', label: 'System' },
 ] as const;
 
@@ -58,7 +58,7 @@ export function SettingsLayout() {
         <div>
           <h1 className="settings-layout__title">Settings</h1>
           <p className="settings-layout__subtitle">
-            AI models, project lifecycle, report branding and system diagnostics
+            AI models, project lifecycle, reports and system diagnostics
           </p>
         </div>
         {isSignedIn && (

@@ -313,3 +313,19 @@
   font-size: 12px;
   color: var(--color-text-primary, #111827);
 }
+
+.customer-report__auto {
+  display: inline-block;
+  padding: 1px 8px;
+  border-radius: 10px;
+  background: var(--color-surface-hover, #eef2f7);
+  color: var(--color-text-secondary, #4b5563);
+  font-size: 12px;
+}
+
+.customer-report__stale {
+  display: block;
+  margin-top: 2px;
+  font-size: 12px;
+  color: #8a6d00;
+}

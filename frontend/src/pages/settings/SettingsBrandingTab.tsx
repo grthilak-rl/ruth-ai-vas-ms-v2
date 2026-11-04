@@ -11,6 +11,7 @@ import {
   setCustomerName,
   uploadLogo,
 } from '../../state/api/customerReports';
+import { AutoReportsCard } from './AutoReportsCard';
 import { InlineAdminSignIn } from './InlineAdminSignIn';
 import type { SettingsOutletContext } from './SettingsLayout';
 import '../admin/AdminPages.css';
@@ -46,7 +47,12 @@ export function SettingsBrandingTab() {
       </section>
     );
   }
-  return <BrandingForm />;
+  return (
+    <>
+      <BrandingForm />
+      <AutoReportsCard />
+    </>
+  );
 }
 
 function BrandingForm() {

@@ -10,6 +10,7 @@ import {
   getCustomerReport,
   getReportDefaults,
   listCustomerReports,
+  regenerateCustomerReport,
   type CustomerReportDefaults,
   type CustomerReportJob,
   type CustomerReportRequest,
@@ -40,6 +41,7 @@ const MODE_LABELS: Record<ReportMode, string> = {
 };
 const PRESET_LABELS: Record<ReportPreset, string> = {
   daily: 'Daily',
+  shift: 'Shift',
   weekly: 'Weekly',
   custom: 'Custom',
 };
@@ -135,6 +137,10 @@ function ReportForm({ defaults }: { defaults: CustomerReportDefaults }) {
   const [weekEnd, setWeekEnd] = useState(lastDay);
   const [start, setStart] = useState(addDays(lastDay, -29));
   const [end, setEnd] = useState(lastDay);
+  const shifts = defaults.shifts;
+  const [shiftDay, setShiftDay] = useState(defaults.last_complete_shift_day ?? lastDay);
+  const [shiftName, setShiftName] = useState(defaults.last_complete_shift ?? shifts[0]?.name ?? '');
+  const shiftDef = shifts.find((s) => s.name === shiftName);
   const [mode, setMode] = useState<ReportMode>('all');
   const [gallery, setGallery] = useState(true);
   const [gallerySize, setGallerySize] = useState(defaults.default_gallery_size);
@@ -147,6 +153,15 @@ function ReportForm({ defaults }: { defaults: CustomerReportDefaults }) {
 
   const ds = defaults.day_start;
   const periodWindow = useMemo(() => {
+    if (preset === 'shift') {
+      if (!shiftDef) return '';
+      // A shift that starts before the first shift's start on the clock
+      // falls on the next calendar day of the shift day.
+      const startsNextDay = shiftDef.start < ds;
+      const startDay = startsNextDay ? addDays(shiftDay, 1) : shiftDay;
+      const endDay = shiftDef.end <= shiftDef.start ? addDays(startDay, 1) : startDay;
+      return `${shiftName}: ${formatDay(startDay)} ${shiftDef.start} → ${formatDay(endDay)} ${shiftDef.end}`;
+    }
     if (preset === 'daily') {
       return `${formatDay(day)} ${ds} → ${formatDay(addDays(day, 1))} ${ds}`;
     }
@@ -154,7 +169,7 @@ function ReportForm({ defaults }: { defaults: CustomerReportDefaults }) {
       return `${formatDay(addDays(weekEnd, -6))} ${ds} → ${formatDay(addDays(weekEnd, 1))} ${ds}`;
     }
     return `${formatDay(start)} 00:00 → ${formatDay(addDays(end, 1))} 00:00`;
-  }, [preset, day, weekEnd, start, end, ds]);
+  }, [preset, day, weekEnd, start, end, ds, shiftDay, shiftName, shiftDef]);
 
   const periodProblem = useMemo(() => {
     if (preset === 'custom') {
@@ -163,25 +178,28 @@ function ReportForm({ defaults }: { defaults: CustomerReportDefaults }) {
       if (daySpan(start, end) > defaults.max_custom_days) {
         return `A custom period can be at most ${defaults.max_custom_days} days.`;
       }
+    } else if (preset === 'shift') {
+      if (!shiftDay || !shiftDef) return 'Pick a day and a shift.';
     } else if (!(preset === 'daily' ? day : weekEnd)) {
       return 'Pick a day.';
     }
     return null;
-  }, [preset, day, weekEnd, start, end, defaults.max_custom_days]);
+  }, [preset, day, weekEnd, start, end, defaults.max_custom_days, shiftDay, shiftDef]);
 
   // Everything but the removed images; the preview and the build share it.
   const request: CustomerReportRequest = useMemo(
     () => ({
       format: 'pdf',
       preset,
-      day: preset === 'daily' ? day : preset === 'weekly' ? weekEnd : null,
+      day: preset === 'daily' ? day : preset === 'weekly' ? weekEnd : preset === 'shift' ? shiftDay : null,
+      shift: preset === 'shift' ? shiftName : null,
       start: preset === 'custom' ? start : null,
       end: preset === 'custom' ? end : null,
       mode,
       gallery,
       gallery_size: gallerySize,
     }),
-    [preset, day, weekEnd, start, end, mode, gallery, gallerySize]
+    [preset, day, weekEnd, start, end, mode, gallery, gallerySize, shiftDay, shiftName]
   );
 
   // Removed images belong to one selection: a different period, counting or
@@ -196,6 +214,7 @@ function ReportForm({ defaults }: { defaults: CustomerReportDefaults }) {
   const inProgress =
     (preset === 'daily' && day === maxDay) ||
     (preset === 'weekly' && weekEnd === maxDay) ||
+    (preset === 'shift' && shiftDay > (defaults.last_complete_shift_day ?? lastDay)) ||
     (preset === 'custom' && end >= maxDay);
 
   const job = useQuery({
@@ -262,7 +281,9 @@ function ReportForm({ defaults }: { defaults: CustomerReportDefaults }) {
         <div className="customer-report__card">
           <h2 className="customer-report__card-title">Period</h2>
           <div className="customer-report__segments" role="radiogroup" aria-label="Period type">
-            {(Object.keys(PRESET_LABELS) as ReportPreset[]).map((p) => (
+            {(Object.keys(PRESET_LABELS) as ReportPreset[])
+              .filter((p) => p !== 'shift' || shifts.length > 0)
+              .map((p) => (
               <button
                 key={p}
                 type="button"
@@ -283,6 +304,25 @@ function ReportForm({ defaults }: { defaults: CustomerReportDefaults }) {
               <input type="date" value={day} min={minDay} max={maxDay}
                 onChange={(e) => setDay(e.target.value)} disabled={building} />
             </label>
+          )}
+          {preset === 'shift' && (
+            <div className="customer-report__range">
+              <label className="customer-report__field">
+                <span>Shift day</span>
+                <input type="date" value={shiftDay} min={minDay} max={maxDay}
+                  onChange={(e) => setShiftDay(e.target.value)} disabled={building} />
+              </label>
+              <label className="customer-report__field">
+                <span>Shift</span>
+                <select value={shiftName} onChange={(e) => setShiftName(e.target.value)} disabled={building}>
+                  {shifts.map((s) => (
+                    <option key={s.name} value={s.name}>
+                      {s.name} ({s.start}–{s.end})
+                    </option>
+                  ))}
+                </select>
+              </label>
+            </div>
           )}
           {preset === 'weekly' && (
             <label className="customer-report__field">
@@ -312,7 +352,11 @@ function ReportForm({ defaults }: { defaults: CustomerReportDefaults }) {
           {preset !== 'custom' && ds !== '00:00' && (
             <p className="customer-report__hint">
               Days are shift days: each starts with the first shift at {ds}.
-              {preset === 'daily' ? ' Compared with the 7-day average before it.' : ' Compared with the 7 days before.'}
+              {preset === 'daily'
+                ? ' Compared with the 7-day average before it.'
+                : preset === 'shift'
+                  ? " One shift, compared with the same shift's average over the 7 days before."
+                  : ' Compared with the 7 days before.'}
             </p>
           )}
           {preset === 'custom' && (
@@ -467,12 +511,30 @@ function RecentReports({
   error: string | null;
   retentionDays: number;
 }) {
+  const queryClient = useQueryClient();
   const [rowError, setRowError] = useState<string | null>(null);
+  const [regenerating, setRegenerating] = useState<string | null>(null);
+
+  const regenerate = async (r: CustomerReportJob) => {
+    setRowError(null);
+    setRegenerating(r.id);
+    try {
+      await regenerateCustomerReport(r.id);
+      await queryClient.invalidateQueries({ queryKey: ['customer-reports'] });
+    } catch (e: unknown) {
+      setRowError(errorText(e, 'Could not regenerate the report'));
+    } finally {
+      setRegenerating(null);
+    }
+  };
+
   return (
     <div className="customer-report__recent">
       <h2 className="customer-report__card-title">Recent reports</h2>
       <p className="customer-report__hint">
         Reports stay downloadable for {retentionDays} days, so the same report can be sent again.
+        Regenerate builds the same report from today's data, e.g. after false alarms were
+        dismissed; the original stays as it was.
       </p>
       {loading && <p className="customer-report__muted">Loading…</p>}
       {error && <div className="customer-report__message customer-report__message--error">{error}</div>}
@@ -492,16 +554,18 @@ function RecentReports({
                 <th className="customer-report__num">Incidents</th>
                 <th className="customer-report__num">Size</th>
                 <th>Status</th>
+                <th aria-label="Actions" />
               </tr>
             </thead>
             <tbody>
               {items.map((r) => (
                 <tr key={r.id}>
                   <td>{formatWhen(r.created_at)}</td>
-                  <td>{r.created_by ?? '—'}</td>
+                  <td>{r.trigger === 'auto' ? <span className="customer-report__auto">Auto</span> : r.created_by ?? '—'}</td>
                   <td>
                     {r.period_label}
                     <span className="customer-report__muted"> · {PRESET_LABELS[r.preset] ?? r.preset}</span>
+                    {r.regenerated_from && <span className="customer-report__muted"> · regenerated</span>}
                   </td>
                   <td>{MODE_LABELS[r.mode] ?? r.mode}</td>
                   <td className="customer-report__num">{r.incidents ?? '—'}</td>
@@ -521,6 +585,20 @@ function RecentReports({
                     {r.status === 'building' && <span className="customer-report__muted">{r.stage ?? 'Building'}…</span>}
                     {r.status === 'failed' && <span className="customer-report__failed" title={r.error ?? ''}>Failed</span>}
                     {r.status === 'expired' && <span className="customer-report__muted">Expired</span>}
+                    {r.status === 'ready' && r.dismissed_since > 0 && (
+                      <span className="customer-report__stale"
+                        title="These violations were dismissed after the report was built, so it still counts them. Regenerate to update it.">
+                        {r.dismissed_since} dismissed since built
+                      </span>
+                    )}
+                  </td>
+                  <td>
+                    {r.status !== 'building' && (
+                      <button type="button" className="customer-report__link"
+                        onClick={() => regenerate(r)} disabled={regenerating !== null}>
+                        {regenerating === r.id ? 'Starting…' : 'Regenerate'}
+                      </button>
+                    )}
                   </td>
                 </tr>
               ))}

@@ -9,14 +9,16 @@
 import { ADMIN_API_PREFIX, adminFetch, getAdminToken } from '../../pages/admin/adminApi';
 import { buildApiUrl } from '../../config/api';
 
-export type ReportPreset = 'daily' | 'weekly' | 'custom';
+export type ReportPreset = 'daily' | 'weekly' | 'custom' | 'shift';
 export type ReportMode = 'all' | 'verified';
 
 export interface CustomerReportRequest {
   format: 'pdf';
   preset: ReportPreset;
-  /** Daily: the shift day. Weekly: the last of its 7 shift days. */
+  /** Daily and shift: the shift day. Weekly: the last of its 7 shift days. */
   day?: string | null;
+  /** Shift: the shift's name, from the schedule. */
+  shift?: string | null;
   /** Custom: local dates, both included. */
   start?: string | null;
   end?: string | null;
@@ -60,6 +62,13 @@ export interface CustomerReportJob {
   period_end: string;
   period_label: string;
   options: Partial<CustomerReportRequest>;
+  /** manual, auto (the shift scheduler) or regenerate. */
+  trigger: 'manual' | 'auto' | 'regenerate';
+  shift_name: string | null;
+  regenerated_from: string | null;
+  attempts: number;
+  /** Violations in the period dismissed after this report was built. */
+  dismissed_since: number;
   filename: string | null;
   size_bytes: number | null;
   incidents: number | null;
@@ -80,6 +89,20 @@ export interface CustomerReportDefaults {
   retention_days: number;
   gallery_sizes: number[];
   default_gallery_size: number;
+  shifts: { name: string; start: string; end: string }[];
+  /** The most recent shift that has ended. */
+  last_complete_shift_day: string | null;
+  last_complete_shift: string | null;
+}
+
+export interface AutoReportSettings {
+  enabled: boolean;
+  settle_minutes: number;
+  enabled_at: string | null;
+  updated_by: string | null;
+  /** Why the scheduler is doing nothing right now, if it is. */
+  idle_reason: string | null;
+  last_tick_at: string | null;
 }
 
 export interface ReportBranding {
@@ -116,6 +139,21 @@ export function createCustomerReport(body: CustomerReportRequest): Promise<Custo
 
 export function getCustomerReport(id: string): Promise<CustomerReportJob> {
   return adminFetch<CustomerReportJob>(`${REPORTS}/${id}`);
+}
+
+export function regenerateCustomerReport(id: string): Promise<CustomerReportJob> {
+  return adminFetch<CustomerReportJob>(`${REPORTS}/${id}/regenerate`, { method: 'POST' });
+}
+
+export function getAutoReportSettings(): Promise<AutoReportSettings> {
+  return adminFetch<AutoReportSettings>(`${REPORTS}/auto-settings`);
+}
+
+export function setAutoReportSettings(enabled: boolean, settleMinutes: number): Promise<AutoReportSettings> {
+  return adminFetch<AutoReportSettings>(`${REPORTS}/auto-settings`, {
+    method: 'PUT',
+    body: JSON.stringify({ enabled, settle_minutes: settleMinutes }),
+  });
 }
 
 export function listCustomerReports(limit = 20): Promise<{ items: CustomerReportJob[]; total: number }> {
