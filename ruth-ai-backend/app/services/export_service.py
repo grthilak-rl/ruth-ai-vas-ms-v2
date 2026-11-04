@@ -28,6 +28,7 @@ from sqlalchemy import and_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.logging import get_logger
+from app.models.confidence_levels import confidence_label
 from app.models import Device, Violation
 from app.services.violation_labels import ViolationLabeler
 
@@ -212,12 +213,7 @@ class ExportService:
             if include_raw_confidence:
                 row.append(f"{v.confidence:.3f}")
             else:
-                if v.confidence >= 0.8:
-                    row.append("High")
-                elif v.confidence >= 0.6:
-                    row.append("Medium")
-                else:
-                    row.append("Low")
+                row.append(confidence_label(v.confidence))
 
             # Timestamps
             if include_timestamps:
@@ -318,12 +314,7 @@ class ExportService:
             if include_raw_confidence:
                 confidence_display = f"{v.confidence:.3f}"
             else:
-                if v.confidence >= 0.8:
-                    confidence_display = "High"
-                elif v.confidence >= 0.6:
-                    confidence_display = "Medium"
-                else:
-                    confidence_display = "Low"
+                confidence_display = confidence_label(v.confidence)
 
             ws_violations.append([
                 str(v.id)[:8] + "...",  # Truncated UUID
@@ -442,12 +433,7 @@ class ExportService:
         ]
 
         for v in violations[:100]:  # Limit to first 100 for PDF
-            if v.confidence >= 0.8:
-                confidence_display = "High"
-            elif v.confidence >= 0.6:
-                confidence_display = "Medium"
-            else:
-                confidence_display = "Low"
+            confidence_display = confidence_label(v.confidence)
 
             table_data.append([
                 # The specific label alone: the 1.5" column can't hold

@@ -60,12 +60,15 @@ from app.services.frame_thumbnails import render_thumbnail
 from app.services.incidents import group_incidents
 from app.services.violation_labels import ViolationLabeler
 from app.services.violation_severity import SEVERITY_LEVELS
+from app.models.confidence_levels import CONFIDENCE_LEVELS, confidence_condition
 from app.models.dismiss_reasons import DismissReason
 from app.schemas.violation import (
+    BULK_LIMIT,
     BulkSkipped,
     IncidentSummary,
     LabellingExport,
     SeverityCounts,
+    ViolationBulkFilter,
 )
 from app.services import (
     EvidenceVASError,
@@ -176,8 +179,12 @@ def apply_violation_filters(
     type_detail: str | None = None,
     severities: list[str] | None = None,
     area: str | None = None,
+    confidences: list[str] | None = None,
 ):
-    """The Violations page filters, shared by the list and incidents.
+    """The Violations page filters, shared by the list, incidents and bulk.
+
+    Every filter applies to each violation before incidents are grouped, so
+    an incident only ever contains members that match.
 
     Enums are parsed by FastAPI, so an unknown status or family is a 422
     rather than a database error from casting it.
@@ -205,6 +212,19 @@ def apply_violation_filters(
                 detail={"error": "invalid_severity", "message": f"severity must be one of {SEVERITY_LEVELS}"},
             )
         stmt = stmt.where(Violation.severity.in_(levels))
+    if confidences:
+        wanted = [c.strip().lower() for c in confidences]
+        if not all(c in CONFIDENCE_LEVELS for c in wanted):
+            raise HTTPException(
+                status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                detail={
+                    "error": "invalid_confidence",
+                    "message": f"confidence must be one of {CONFIDENCE_LEVELS}",
+                },
+            )
+        condition = confidence_condition(Violation.confidence, wanted)
+        if condition is not None:
+            stmt = stmt.where(condition)
     if area:
         stmt = stmt.where(
             Violation.device_id.in_(select(Device.id).where(Device.manway == area.strip()))
@@ -310,6 +330,9 @@ async def list_violations(
         None, description="Filter by severity (repeatable): critical, high, medium, low"
     ),
     area: str | None = Query(None, max_length=64, description="Filter by camera area (manway)"),
+    confidence: list[str] | None = Query(
+        None, description="Filter by confidence bucket (repeatable): high, medium, low"
+    ),
     limit: int = Query(100, ge=1, le=1000, description="Maximum results"),
     offset: int = Query(0, ge=0, description="Pagination offset"),
 ) -> ViolationListResponse:
@@ -351,6 +374,7 @@ async def list_violations(
         type_detail=type_detail,
         severities=severity,
         area=area,
+        confidences=confidence,
     )
 
     # Count total
@@ -495,6 +519,71 @@ async def summarize_incidents(db, rows, incidents, labeler: ViolationLabeler) ->
     )
 
 
+async def _open_violations_matching(
+    db, bulk_filter: ViolationBulkFilter, expected_count: int
+) -> dict:
+    """Every open violation matching ``bulk_filter``, locked, by id.
+
+    Status is forced to open whatever the page showed: reviewed and
+    dismissed rows are never part of 'select all'. The rows are locked
+    (FOR UPDATE) before they are counted, so the count checked here is the
+    set the transaction changes. Over BULK_LIMIT is a 422; any other count
+    than the operator confirmed is a 409 carrying the current count, so the
+    dialog can ask again.
+    """
+    try:
+        family = ViolationType(bulk_filter.violation_type) if bulk_filter.violation_type else None
+    except ValueError:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail={"error": "invalid_type", "message": f"Unknown violation type {bulk_filter.violation_type!r}"},
+        )
+    filters = {
+        "statuses": [ViolationStatus.OPEN],
+        "camera_id": bulk_filter.camera_id,
+        "since": bulk_filter.since,
+        "until": bulk_filter.until,
+        "violation_type": family,
+        "type_detail": bulk_filter.type_detail,
+        "severities": bulk_filter.severities,
+        "area": bulk_filter.area,
+        "confidences": bulk_filter.confidences,
+    }
+    stmt = (
+        apply_violation_filters(select(Violation), **filters)
+        .order_by(Violation.timestamp.desc(), Violation.id)
+        .limit(BULK_LIMIT + 1)
+        .with_for_update()
+    )
+    rows = list((await db.execute(stmt)).scalars().all())
+
+    if len(rows) > BULK_LIMIT:
+        count_stmt = select(func.count()).select_from(
+            apply_violation_filters(select(Violation.id), **filters).subquery()
+        )
+        current = (await db.execute(count_stmt)).scalar() or 0
+        await db.rollback()
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail={
+                "error": "too_many",
+                "message": f"{current} open violations match; at most {BULK_LIMIT} can be changed at once. Narrow the filter.",
+                "details": {"current_count": current, "limit": BULK_LIMIT},
+            },
+        )
+    if len(rows) != expected_count:
+        await db.rollback()
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail={
+                "error": "count_changed",
+                "message": f"{len(rows)} open violations match now, not {expected_count}. Nothing was changed.",
+                "details": {"expected_count": expected_count, "current_count": len(rows)},
+            },
+        )
+    return {v.id: v for v in rows}
+
+
 @router.post(
     "/violations/bulk",
     response_model=ViolationBulkResponse,
@@ -502,11 +591,16 @@ async def summarize_incidents(db, rows, incidents, labeler: ViolationLabeler) ->
     summary="Change many violations at once",
     description=(
         "Mark reviewed, or dismiss with a reason, up to 1000 violations in one "
-        "transaction. Each is validated like PATCH /violations/{id}; ones that "
-        "cannot make the transition are skipped and listed, not failed. "
-        "False-alarm dismissals export their inferred frames for labelling."
+        "transaction: listed by id, or every open violation matching a filter "
+        "(with the count the operator confirmed). Each is validated like "
+        "PATCH /violations/{id}; ones that cannot make the transition are "
+        "skipped and listed, not failed. False-alarm dismissals export their "
+        "inferred frames for labelling."
     ),
-    responses={422: {"model": ErrorResponse, "description": "Invalid request"}},
+    responses={
+        409: {"description": "Filter: the matching count is no longer expected_count"},
+        422: {"model": ErrorResponse, "description": "Invalid request, or over the limit"},
+    },
 )
 async def bulk_update_violations(
     request: ViolationBulkRequest,
@@ -515,10 +609,13 @@ async def bulk_update_violations(
 ) -> ViolationBulkResponse:
     new_status = ViolationStatus.REVIEWED if request.action == "review" else ViolationStatus.DISMISSED
     reason = request.dismiss_reason.value if request.dismiss_reason and request.action == "dismiss" else None
-    ids = list(dict.fromkeys(request.ids))  # de-duplicate, keep order
-
-    rows = await db.execute(select(Violation).where(Violation.id.in_(ids)))
-    by_id = {v.id: v for v in rows.scalars().all()}
+    if request.filter is not None:
+        by_id = await _open_violations_matching(db, request.filter, request.expected_count)
+        ids = list(by_id)
+    else:
+        ids = list(dict.fromkeys(request.ids))  # de-duplicate, keep order
+        rows = await db.execute(select(Violation).where(Violation.id.in_(ids)))
+        by_id = {v.id: v for v in rows.scalars().all()}
 
     updated: list[Violation] = []
     skipped: list[BulkSkipped] = []
@@ -549,6 +646,7 @@ async def bulk_update_violations(
     logger.info(
         "Bulk violation update",
         action=request.action,
+        by="filter" if request.filter is not None else "ids",
         reason=reason,
         requested=len(ids),
         updated=len(updated),
@@ -592,6 +690,9 @@ async def list_incidents(
     type_detail: str | None = Query(None, max_length=64, description="Filter by specific type"),
     severity: list[str] | None = Query(None, description="Filter by severity (repeatable)"),
     area: str | None = Query(None, max_length=64, description="Filter by camera area (manway)"),
+    confidence: list[str] | None = Query(
+        None, description="Filter by confidence bucket (repeatable): high, medium, low"
+    ),
     limit: int = Query(20, ge=1, le=200, description="Incidents per page"),
     offset: int = Query(0, ge=0, description="Pagination offset (incidents)"),
 ) -> IncidentListResponse:
@@ -623,6 +724,7 @@ async def list_incidents(
         type_detail=type_detail,
         severities=severity,
         area=area,
+        confidences=confidence,
     )
     rows = (await db.execute(light)).all()
     incidents = group_incidents(
@@ -708,6 +810,9 @@ async def list_incidents(
         items=items,
         total=len(incidents),
         violations_total=len(rows),
+        open_violations_total=sum(
+            1 for r in rows if getattr(r.status, "value", r.status) == ViolationStatus.OPEN.value
+        ),
         gap_minutes=settings.incident_gap_minutes,
         max_span_minutes=settings.incident_max_span_minutes,
         summary=await summarize_incidents(db, rows, incidents, labeler),

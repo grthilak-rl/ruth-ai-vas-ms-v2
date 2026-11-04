@@ -82,6 +82,7 @@ from app.schemas.evidence import (
     VideoEvidenceResponse,
 )
 from app.schemas.violation import (
+    ViolationBulkFilter,
     ViolationBulkRequest,
     ViolationBulkResponse,
     IncidentListResponse,
@@ -128,6 +129,7 @@ __all__ = [
     "ViolationDetailResponse",
     "IncidentResponse",
     "IncidentListResponse",
+    "ViolationBulkFilter",
     "ViolationBulkRequest",
     "ViolationBulkResponse",
     "ViolationEvidenceSummary",

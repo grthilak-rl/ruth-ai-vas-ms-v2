@@ -7,11 +7,12 @@ import uuid
 from datetime import datetime
 from typing import Literal
 
-from pydantic import BaseModel, Field, model_validator
+from pydantic import BaseModel, Field, computed_field, model_validator
 
 from app.models.dismiss_reasons import NOTE_REQUIRED_REASONS, DismissReason
 
 from app.schemas.evidence import EvidenceResponse
+from app.models.confidence_levels import CONFIDENCE_LEVELS, confidence_level
 
 
 class ViolationEvidenceSummary(BaseModel):
@@ -89,6 +90,11 @@ class ViolationResponse(BaseModel):
     created_at: datetime = Field(..., description="Record creation timestamp")
     updated_at: datetime = Field(..., description="Record update timestamp")
 
+    @computed_field(description="Confidence bucket (high, medium, low); the UI shows this, never the number")
+    @property
+    def confidence_level(self) -> str:
+        return confidence_level(self.confidence)
+
     model_config = {"from_attributes": True}
 
 
@@ -137,6 +143,11 @@ class ViolationDetailResponse(BaseModel):
     event_count: int = Field(default=0, description="Number of triggering events")
     created_at: datetime = Field(..., description="Record creation timestamp")
     updated_at: datetime = Field(..., description="Record update timestamp")
+
+    @computed_field(description="Confidence bucket (high, medium, low); the UI shows this, never the number")
+    @property
+    def confidence_level(self) -> str:
+        return confidence_level(self.confidence)
 
 
 class ViolationListResponse(BaseModel):
@@ -227,15 +238,62 @@ class IncidentListResponse(BaseModel):
     items: list[IncidentResponse] = Field(..., description="Incidents, most recently active first")
     total: int = Field(..., description="Total incidents matching the filters")
     violations_total: int = Field(..., description="Violations those incidents contain")
+    open_violations_total: int = Field(
+        ..., description="Of those, still open: what 'select all matching' would act on"
+    )
     gap_minutes: int = Field(..., description="Grouping window in force")
     max_span_minutes: int = Field(..., description="Longest incident span in force")
     summary: IncidentSummary = Field(..., description="Totals for the current filters (all pages)")
 
 
-class ViolationBulkRequest(BaseModel):
-    """Request schema for POST /api/v1/violations/bulk."""
+#: Most violations one bulk request may change, by ids or by filter.
+BULK_LIMIT = 1000
 
-    ids: list[uuid.UUID] = Field(..., min_length=1, max_length=1000, description="Violations to change")
+
+class ViolationBulkFilter(BaseModel):
+    """The Violations page filters, for 'select all matching'.
+
+    Only open violations are ever matched, whatever the page's status
+    filter. The range must be absolute and closed: ``until`` is required,
+    frozen when the confirmation opened, so repeats arriving while the
+    operator reads the dialog neither change the count nor get swept in.
+    """
+
+    camera_id: uuid.UUID | None = None
+    since: datetime | None = None
+    until: datetime = Field(..., description="Frozen end of the range (required)")
+    violation_type: str | None = Field(None, max_length=64, description="Family")
+    type_detail: str | None = Field(None, max_length=64)
+    severities: list[str] | None = None
+    confidences: list[str] | None = None
+    area: str | None = Field(None, max_length=64)
+
+    @model_validator(mode="after")
+    def _range(self) -> "ViolationBulkFilter":
+        if self.until.tzinfo is None or (self.since is not None and self.since.tzinfo is None):
+            raise ValueError("since/until must carry a time zone")
+        if self.since is not None and self.since > self.until:
+            raise ValueError("since must not be after until")
+        if self.confidences and not all(c.strip().lower() in CONFIDENCE_LEVELS for c in self.confidences):
+            raise ValueError(f"confidences must be among {CONFIDENCE_LEVELS}")
+        return self
+
+
+class ViolationBulkRequest(BaseModel):
+    """Request schema for POST /api/v1/violations/bulk.
+
+    Either ``ids`` (a selection), or ``filter`` with ``expected_count`` (the
+    open-violation count the operator confirmed). A filter request is
+    rejected with 409 if the count no longer matches.
+    """
+
+    ids: list[uuid.UUID] | None = Field(
+        None, min_length=1, max_length=BULK_LIMIT, description="Violations to change"
+    )
+    filter: ViolationBulkFilter | None = Field(None, description="Every open violation matching these")
+    expected_count: int | None = Field(
+        None, ge=1, le=BULK_LIMIT, description="With filter: the count the operator confirmed"
+    )
     action: Literal["review", "dismiss"] = Field(..., description="Mark reviewed, or dismiss")
     dismiss_reason: DismissReason | None = Field(None, description="Required to dismiss")
     note: str | None = Field(None, max_length=2000, description="Required for 'other_false_alarm'")
@@ -243,6 +301,12 @@ class ViolationBulkRequest(BaseModel):
 
     @model_validator(mode="after")
     def _reason_rules(self) -> "ViolationBulkRequest":
+        if (self.ids is None) == (self.filter is None):
+            raise ValueError("send either ids or filter, not both")
+        if self.filter is not None and self.expected_count is None:
+            raise ValueError("expected_count is required with filter")
+        if self.ids is not None and self.expected_count is not None:
+            raise ValueError("expected_count only applies to filter")
         if self.action == "dismiss" and self.dismiss_reason is None:
             raise ValueError("dismiss_reason is required to dismiss")
         if self.dismiss_reason in NOTE_REQUIRED_REASONS and not (self.note or "").strip():

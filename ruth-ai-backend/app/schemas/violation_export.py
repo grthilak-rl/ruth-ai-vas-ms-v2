@@ -25,6 +25,9 @@ class ExportFilters(BaseModel):
     type_detail: str | None = Field(default=None, max_length=64)
     severities: list[str] | None = None
     area: str | None = Field(default=None, max_length=64)
+    confidences: list[str] | None = Field(
+        default=None, description="Confidence buckets (high, medium, low)"
+    )
 
 
 class ExportRequest(BaseModel):

@@ -64,6 +64,7 @@ def _statement(request: ExportRequest):
         violation_type=f.violation_type,
         type_detail=f.type_detail,
         severities=f.severities,
+        confidences=f.confidences,
         area=f.area,
     )
 
