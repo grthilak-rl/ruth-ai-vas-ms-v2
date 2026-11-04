@@ -23,6 +23,11 @@ export const FALSE_ALARM_OPTIONS: DismissReasonOption[] = [
 
 export const NOT_FALSE_ALARM_OPTIONS: DismissReasonOption[] = [
   { value: 'duplicate', label: 'Duplicate / already handled', hint: 'Real, but dealt with elsewhere' },
+  {
+    value: 'exempt',
+    label: 'Exempt / not required',
+    hint: 'The PPE does not apply here, e.g. a turban instead of a hard hat',
+  },
 ];
 
 const LABELS = Object.fromEntries(

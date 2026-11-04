@@ -203,7 +203,13 @@ export type Severity = 'critical' | 'high' | 'medium' | 'low';
  * Why a violation was dismissed. The first four are false alarms and copy
  * the inferred frame to the labelling set; "duplicate" is not.
  */
-export type DismissReason = 'object' | 'wrong_person' | 'ppe_worn' | 'other_false_alarm' | 'duplicate';
+export type DismissReason =
+  | 'object'
+  | 'wrong_person'
+  | 'ppe_worn'
+  | 'other_false_alarm'
+  | 'duplicate'
+  | 'exempt';
 
 /**
  * Violation type (extensible)

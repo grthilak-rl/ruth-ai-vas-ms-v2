@@ -3,6 +3,7 @@ import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { setSessionExpiredHandler } from '../../pages/admin/adminApi';
 import { notifyAdminSessionChanged, useAdminSession } from '../../pages/admin/useAdminSession';
 import { InlineAdminSignIn } from '../../pages/settings/InlineAdminSignIn';
+import { GalleryPicker } from './GalleryPicker';
 import {
   createCustomerReport,
   downloadCustomerReport,
@@ -11,6 +12,7 @@ import {
   listCustomerReports,
   type CustomerReportDefaults,
   type CustomerReportJob,
+  type CustomerReportRequest,
   type ReportMode,
   type ReportPreset,
 } from '../../state/api/customerReports';
@@ -167,6 +169,30 @@ function ReportForm({ defaults }: { defaults: CustomerReportDefaults }) {
     return null;
   }, [preset, day, weekEnd, start, end, defaults.max_custom_days]);
 
+  // Everything but the removed images; the preview and the build share it.
+  const request: CustomerReportRequest = useMemo(
+    () => ({
+      format: 'pdf',
+      preset,
+      day: preset === 'daily' ? day : preset === 'weekly' ? weekEnd : null,
+      start: preset === 'custom' ? start : null,
+      end: preset === 'custom' ? end : null,
+      mode,
+      gallery,
+      gallery_size: gallerySize,
+    }),
+    [preset, day, weekEnd, start, end, mode, gallery, gallerySize]
+  );
+
+  // Removed images belong to one selection: a different period, counting or
+  // size is a different candidate set, so the removals no longer apply.
+  const selection = JSON.stringify(request);
+  const [removed, setRemoved] = useState<{ selection: string; keys: string[] }>({
+    selection,
+    keys: [],
+  });
+  const excluded = removed.selection === selection ? removed.keys : [];
+
   const inProgress =
     (preset === 'daily' && day === maxDay) ||
     (preset === 'weekly' && weekEnd === maxDay) ||
@@ -211,14 +237,8 @@ function ReportForm({ defaults }: { defaults: CustomerReportDefaults }) {
     setDownloadError(null);
     try {
       const created = await createCustomerReport({
-        format: 'pdf',
-        preset,
-        day: preset === 'daily' ? day : preset === 'weekly' ? weekEnd : null,
-        start: preset === 'custom' ? start : null,
-        end: preset === 'custom' ? end : null,
-        mode,
-        gallery,
-        gallery_size: gallerySize,
+        ...request,
+        gallery_exclude: gallery ? excluded : [],
       });
       queryClient.setQueryData(['customer-report', created.id], created);
       setJobId(created.id);
@@ -316,8 +336,8 @@ function ReportForm({ defaults }: { defaults: CustomerReportDefaults }) {
               <input type="radio" name="report-mode" checked={mode === 'all'}
                 onChange={() => setMode('all')} />
               <span>
-                <strong>All incidents</strong>, excluding those dismissed as false alarms
-                <small>Recommended: operators dismiss the obvious false alarms only.</small>
+                <strong>All incidents</strong>, excluding those an operator dismissed
+                <small>Recommended. Dismissed means a false alarm, duplicate or exemption.</small>
               </span>
             </label>
             <label className="customer-report__choice">
@@ -353,6 +373,16 @@ function ReportForm({ defaults }: { defaults: CustomerReportDefaults }) {
           <p className="customer-report__hint">Format: PDF.</p>
         </div>
       </div>
+
+      {gallery && !periodProblem && (
+        <GalleryPicker
+          request={request}
+          excluded={excluded}
+          onExclude={(key) => setRemoved({ selection, keys: [...excluded, key] })}
+          onReset={() => setRemoved({ selection, keys: [] })}
+          disabled={building}
+        />
+      )}
 
       {periodProblem && (
         <div className="customer-report__message customer-report__message--error">{periodProblem}</div>

@@ -23,6 +23,27 @@ export interface CustomerReportRequest {
   mode: ReportMode;
   gallery: boolean;
   gallery_size: number;
+  /** Incident keys removed from the gallery; the next candidates fill in. */
+  gallery_exclude?: string[];
+}
+
+export interface GalleryCandidate {
+  key: string;
+  /** Its saved frame's violation; thumbnail via galleryThumbUrl. */
+  violation_id: string | null;
+  area: string;
+  camera: string;
+  type_label: string;
+  severity: string;
+  /** Site time zone, e.g. "Wed 28 Oct, 07:05". */
+  started: string;
+  minutes: number;
+  detections: number;
+}
+
+export interface GalleryPreview {
+  items: GalleryCandidate[];
+  incidents: number;
 }
 
 export interface CustomerReportJob {
@@ -75,6 +96,18 @@ export const MAX_LOGO_BYTES = 1024 * 1024;
 
 export function getReportDefaults(): Promise<CustomerReportDefaults> {
   return adminFetch<CustomerReportDefaults>(`${REPORTS}/defaults`);
+}
+
+export function previewGallery(body: CustomerReportRequest): Promise<GalleryPreview> {
+  return adminFetch<GalleryPreview>(`${REPORTS}/gallery-preview`, {
+    method: 'POST',
+    body: JSON.stringify(body),
+  });
+}
+
+/** The cropped card thumbnail the Violations page uses (open endpoint). */
+export function galleryThumbUrl(violationId: string): string {
+  return buildApiUrl(`/api/v1/violations/${violationId}/frame/thumb`);
 }
 
 export function createCustomerReport(body: CustomerReportRequest): Promise<CustomerReportJob> {
