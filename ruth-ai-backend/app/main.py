@@ -26,6 +26,7 @@ from app.api.v1 import (
     device_models,
     devices,
     events,
+    footage_retention,
     hardware,
     health,
     models,
@@ -88,6 +89,7 @@ def create_application() -> FastAPI:
         bookmark_analyses.bookmark_subresource_router, prefix="/api/v1"
     )
     app.include_router(admin.router, prefix="/api/v1")
+    app.include_router(footage_retention.router, prefix="/api/v1")
     app.include_router(device_models.router, prefix="/api/v1")
 
     # Internal endpoints (no authentication for vertical slice)

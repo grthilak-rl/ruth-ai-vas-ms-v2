@@ -1,0 +1,107 @@
+/* Footage deletion (VAS storage config). Same card shape as AutoResumeCard;
+ * the left edge says the state at a glance: green off, blue paused, red on. */
+.footage-retention {
+  padding: 0.875rem 1.125rem;
+  margin-bottom: 1.25rem;
+  background-color: #fff;
+  border: 1px solid #e0e0e0;
+  border-left-width: 4px;
+  border-radius: 8px;
+}
+
+.footage-retention--off { border-left-color: #1e7e34; }
+.footage-retention--paused { border-left-color: #1a73e8; }
+.footage-retention--on {
+  background-color: #fff8f7;
+  border-color: #f5c6c2;
+  border-left-color: #d93025;
+}
+.footage-retention--unknown { border-left-color: #8a6d00; }
+
+.footage-retention__headline {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem 1rem;
+  align-items: baseline;
+  justify-content: space-between;
+}
+
+.footage-retention__label { font-size: 0.875rem; font-weight: 600; color: #1a1a1a; }
+.footage-retention__state { letter-spacing: 0.02em; }
+.footage-retention__stale { font-size: 0.8125rem; color: #8a6d00; }
+
+.footage-retention__summary {
+  margin: 0.375rem 0 0;
+  font-size: 0.875rem;
+  color: #444;
+}
+
+.footage-retention__disk {
+  margin: 0.375rem 0 0;
+  font-size: 0.8125rem;
+  color: #555;
+}
+.footage-retention__disk--warning { color: #8a6d00; font-weight: 600; }
+.footage-retention__disk--critical { color: #b3261e; font-weight: 600; }
+
+.footage-retention__link {
+  margin-top: 0.5rem;
+  padding: 0;
+  border: none;
+  background: none;
+  color: #1a73e8;
+  font-size: 0.8125rem;
+  cursor: pointer;
+  text-decoration: underline;
+}
+
+.footage-retention__controls { margin-top: 0.75rem; }
+
+.footage-retention__buttons {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+  margin-top: 0.5rem;
+}
+
+.footage-retention__buttons button {
+  padding: 0.375rem 0.875rem;
+  border: 1px solid #c8c8c8;
+  border-radius: 6px;
+  background: #fff;
+  font-size: 0.8125rem;
+  cursor: pointer;
+}
+
+.footage-retention__buttons button:disabled { opacity: 0.5; cursor: not-allowed; }
+
+.footage-retention__buttons .footage-retention__danger {
+  border-color: #d93025;
+  color: #b3261e;
+}
+
+.footage-retention__enable {
+  margin-top: 0.75rem;
+  padding: 0.75rem;
+  border: 1px solid #f5c6c2;
+  border-radius: 6px;
+  background: #fff8f7;
+  font-size: 0.8125rem;
+}
+
+.footage-retention__enable p { margin: 0 0 0.5rem; }
+
+.footage-retention__enable label {
+  display: block;
+  margin: 0.375rem 0;
+}
+
+.footage-retention__enable input {
+  margin-left: 0.25rem;
+  padding: 0.25rem 0.5rem;
+  border: 1px solid #c8c8c8;
+  border-radius: 4px;
+  width: 7rem;
+}
+
+.footage-retention__error { margin: 0 0 0.5rem; color: #b3261e; font-size: 0.8125rem; }

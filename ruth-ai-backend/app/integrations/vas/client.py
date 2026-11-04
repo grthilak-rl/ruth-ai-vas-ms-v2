@@ -898,6 +898,21 @@ class VASClient:
             yield response
 
     # -------------------------------------------------------------------------
+    # Storage / footage retention (VAS is the single source of truth)
+    # -------------------------------------------------------------------------
+
+    async def get_storage_config(self) -> dict:
+        """VAS's effective storage config, incl. the footage-deletion switch,
+        the pause, retention days and the disk status."""
+        response = await self._request("GET", "/v2/storage/config")
+        return response.json()
+
+    async def update_storage_config(self, updates: dict) -> dict:
+        """Change VAS storage config fields; only the keys given are written."""
+        response = await self._request("PUT", "/v2/storage/config", json=updates, retries=0)
+        return response.json()
+
+    # -------------------------------------------------------------------------
     # Bookmark APIs
     # -------------------------------------------------------------------------
 

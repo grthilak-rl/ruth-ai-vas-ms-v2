@@ -7,6 +7,7 @@ depends on this package.
 
 from fastapi import APIRouter, Depends
 
+from app.api.v1 import footage_retention
 from app.api.v1.admin import (
     auth,
     customer_reports,
@@ -31,6 +32,7 @@ protected_router.include_router(projects.router)
 protected_router.include_router(violation_exports.router)
 protected_router.include_router(customer_reports.router)
 protected_router.include_router(report_branding.router)
+protected_router.include_router(footage_retention.admin_router)
 router.include_router(protected_router)
 
 __all__ = ["router"]

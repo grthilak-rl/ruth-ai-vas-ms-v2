@@ -4,6 +4,7 @@ import { formatUptime } from '../../state';
 import { ServiceStatusCard, type ServiceHealthStatus } from './ServiceStatusCard';
 import { MonitoringCoverage } from './MonitoringCoverage';
 import { AutoResumeCard } from './AutoResumeCard';
+import { FootageRetentionCard } from './FootageRetentionCard';
 import { CameraFeeds } from './CameraFeeds';
 import {
   deriveStoreRuntimeStatus,
@@ -165,6 +166,7 @@ export function SystemHealthView({
       <CameraFeeds devices={devices} isLoading={devicesLoading} />
       <MonitoringCoverage devices={devices} isLoading={devicesLoading} />
       <AutoResumeCard />
+      <FootageRetentionCard />
 
       <section className="system-health-view__section">
         <h2 className="system-health-view__section-title">Service Health</h2>
