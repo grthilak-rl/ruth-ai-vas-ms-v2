@@ -45,7 +45,7 @@ from app.services.report.data import (
     Window,
     report_day_of,
 )
-from app.services.report.insights import build_insights, fmt_int, fmt_pct, fmt_rate
+from app.services.report.insights import build_insights, fmt_int, fmt_pct, fmt_per_hour, fmt_rate
 from app.services.report.recommendations import build_recommendations
 from app.services.report.theme import (
     ACCENT,
@@ -536,6 +536,11 @@ def _counting_note(r: ReportData) -> str:
         f"{r.max_span_minutes} minutes. Incidents are the unit of this report; raw detections "
         f"are shown for reference only. Detections an operator dismissed (false alarms, "
         f"duplicates, or people and places the PPE rule does not apply to) are not counted."
+        f" <b>Monitored camera-hours</b> are the hours cameras actually ran AI detection in the "
+        f"period. <b>Incidents per monitored camera-hour</b> divides incidents (not raw "
+        f"detections) by those hours, leaving out time a camera was off, disabled or had no "
+        f"models. The portal's Analytics page shows violations (raw detections) per monitored "
+        f"camera-hour, which is higher for the same period."
     )
     if r.is_shift:
         name, start, end = r.shift
@@ -614,6 +619,12 @@ def summary_section(r: ReportData, st: dict) -> list:
         lead = (
             f"From {_period(r)}, AI recorded <b>{fmt_int(r.current.incidents)} safety "
             f"incidents</b> {where}: on average {fmt_rate(r.incidents_per_day)} a day."
+        )
+    rate = r.incidents_per_camera_hour
+    if r.current.incidents and rate is not None:
+        lead += (
+            f" That is <b>{fmt_per_hour(rate)} incidents per monitored camera-hour</b> "
+            f"({fmt_int(r.monitored_camera_hours)} camera-hours monitored)."
         )
     out += [Paragraph(lead, st["lead"]), Spacer(1, 14), KpiTiles(_tiles(r), CONTENT_W), Spacer(1, 8)]
 

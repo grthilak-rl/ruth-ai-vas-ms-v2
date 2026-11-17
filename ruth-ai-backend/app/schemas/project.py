@@ -1,18 +1,9 @@
-"""Schemas for /api/v1/admin/projects (Start New Project)."""
+"""Schemas for projects: the admin lifecycle API and the read-only project list."""
 
 import uuid
 from datetime import datetime
 
 from pydantic import BaseModel, Field
-
-
-class LiveCameraInfo(BaseModel):
-    """A camera whose inference session is blocking the archive."""
-
-    device_id: uuid.UUID
-    camera_name: str
-    session_id: uuid.UUID
-    state: str
 
 
 class ProjectSummary(BaseModel):
@@ -34,8 +25,40 @@ class ProjectSummary(BaseModel):
     resumed_at: datetime | None = None
     resumed_by: str | None = None
     lifecycle_error: str | None = None
+    #: Rows tagged with this project, per table (list endpoint only).
+    counts: dict[str, int] | None = None
 
     model_config = {"from_attributes": True}
+
+
+class ProjectBrief(BaseModel):
+    """What any portal user needs to show and pick a project (no audit fields)."""
+
+    id: uuid.UUID
+    name: str
+    slug: str
+    state: str
+    started_at: datetime
+    ended_at: datetime | None = None
+    #: The project is current (active/stopping/stopped/resuming). False for
+    #: every project between End and the next Start.
+    is_current: bool = False
+
+    model_config = {"from_attributes": True}
+
+
+class ProjectBriefList(BaseModel):
+    items: list[ProjectBrief]
+    current: ProjectBrief | None = None
+
+
+class ProjectCameraInfo(BaseModel):
+    """A camera of a project, for past-project camera filters."""
+
+    id: uuid.UUID
+    name: str
+    display_name: str | None = None
+    enabled: bool
 
 
 class LifecycleCamera(BaseModel):
@@ -78,113 +101,110 @@ class EndProjectRequest(BaseModel):
 class ProjectListResponse(BaseModel):
     items: list[ProjectSummary]
     active: ProjectSummary | None = Field(
-        None, description="The project currently collecting data, if any"
+        None, description="The current project (active, stopping, stopped or resuming), if any"
     )
 
 
-class PreflightResponse(BaseModel):
-    """What starting a new project would do, measured now.
+class StartPreflightResponse(BaseModel):
+    """What starting the next project would do, per camera.
 
-    The confirmation screen renders these numbers verbatim; the archive
-    re-measures under a lock and refuses if anything changed in a way that
-    matters, so the figures shown are never merely indicative.
+    `cameras` is planned with the cameras enabled in VAS right now as the
+    default pick; the dialog re-plans as the operator ticks.
     """
 
     can_proceed: bool
+    blocked_reason: str | None = None
     blockers: list[str] = Field(
         default_factory=list,
-        description=(
-            "Machine-readable reasons the action is refused: "
-            "inference_active, too_much_data, backup_unavailable"
-        ),
+        description="project_current (end it first), backup_unavailable",
     )
     current_project: ProjectSummary | None = None
-    row_counts: dict[str, int] = Field(
-        description="Rows that would be archived, per live table"
-    )
-    total_rows: int
-    live_cameras: list[LiveCameraInfo] = Field(default_factory=list)
+    last_project: ProjectSummary | None = None
+    cameras: list[LifecycleCamera]
     backup_dir: str
-    evidence_with_vas_media: int = Field(
-        description=(
-            "Evidence rows holding a VAS snapshot/bookmark id. Their VAS "
-            "paths are captured into the archive; ids VAS has already reaped "
-            "resolve to nothing and are recorded as unresolved."
-        )
-    )
+    effects: list[str]
 
 
 class StartProjectRequest(BaseModel):
-    """Start a new project.
+    """Start the next project. `confirm_name` must equal `name` exactly."""
 
-    `confirm_name` must equal `name` byte for byte — it is the typed
-    confirmation, not a checkbox.
-    """
-
-    name: str = Field(
-        min_length=3,
-        max_length=200,
-        description="Name of the NEW project",
+    name: str = Field(min_length=3, max_length=200, description="Name of the NEW project")
+    confirm_name: str = Field(min_length=3, max_length=200, description="Retype the name exactly")
+    camera_ids: list[str] = Field(
+        default_factory=list,
+        description="VAS device ids of the cameras the new project runs; the rest are disabled",
     )
-    confirm_name: str = Field(
-        min_length=3,
-        max_length=200,
-        description="Retype the new project name exactly",
-    )
-    stop_inference: bool = Field(
-        default=False,
-        description=(
-            "Stop every live inference session first and wait for it to wind "
-            "down. Without this, live inference refuses the request: "
-            "archiving while the InferenceLoop is writing would race it."
-        ),
-    )
-    confirm_large: bool = Field(
-        default=False,
-        description=(
-            "Acknowledge an unusually large archive. Only consulted when the "
-            "row count exceeds the advisory threshold."
-        ),
+    allow_no_cameras: bool = Field(
+        False,
+        description="Start with no cameras at all. Without it an empty camera_ids is refused (422).",
     )
 
 
-class StartProjectResponse(BaseModel):
-    """The outcome, with enough detail to reassure that nothing was deleted."""
-
-    new_project: ProjectSummary
-    archived_project: ProjectSummary | None
-    archive_batch_id: uuid.UUID | None
-    archived_counts: dict[str, int]
-    backup_path: str | None
-    stopped_cameras: list[str] = Field(default_factory=list)
-    vas_paths_resolved: int = 0
-    vas_paths_missing: int = 0
-    message: str
+class ProjectJobStage(BaseModel):
+    key: str
+    label: str
+    #: pending / running / done / failed / interrupted
+    status: str
 
 
-class ArchivedViolation(BaseModel):
-    """One archived violation, for the read-only archived-project viewer."""
+class ProjectJobResponse(BaseModel):
+    """A Start/Stop/End/Resume running (or run) in the background."""
 
     id: uuid.UUID
+    action: str
+    #: queued / running / succeeded / failed / interrupted
+    state: str
+    stage: str | None
+    stage_detail: str | None
+    stages: list[ProjectJobStage]
+    error_code: str | None
+    error_message: str | None
+    #: Cameras VAS would not switch, one line each.
+    errors: list[str] = Field(default_factory=list)
+    cameras: list[LifecycleCamera] = Field(default_factory=list)
+    retention_paused: bool | None = None
+    project_id: uuid.UUID | None
+    project_name: str | None = None
+    backup_path: str | None
+    attempts: int
+    can_retry: bool
+    created_by: str
+    created_at: datetime
+    started_at: datetime | None
+    finished_at: datetime | None
+
+
+class ProjectJobsState(BaseModel):
+    """What the Project tab needs on load: the running job, and the last one."""
+
+    active: ProjectJobResponse | None
+    latest: ProjectJobResponse | None
+
+
+class ProjectMember(BaseModel):
+    """A camera in the current project (an open membership)."""
+
     device_id: uuid.UUID
-    camera_name: str
-    type: str
-    type_detail: str | None = None
-    status: str
-    confidence: float
-    timestamp: datetime
-    model_id: str
-    model_version: str
-    reviewed_by: str | None = None
-    reviewed_at: datetime | None = None
-    resolution_notes: str | None = None
-    #: Paths as VAS held them at archive time. Present only when VAS still
-    #: had the media then; null means the file had already been reaped.
-    snapshot_path: str | None = None
-    video_path: str | None = None
+    vas_device_id: str | None
+    name: str
+    joined_at: datetime
+    inferred: bool
+    source: str
 
 
-class ArchivedViolationListResponse(BaseModel):
-    project: ProjectSummary
-    items: list[ArchivedViolation]
-    total: int
+class ChangeCamerasPreflight(BaseModel):
+    """What "Change cameras" would do, per camera; members as they are now."""
+
+    project: ProjectSummary | None
+    allowed: bool
+    blocked_reason: str | None = None
+    members: list[ProjectMember]
+    cameras: list[LifecycleCamera]
+    effects: list[str]
+
+
+class ChangeCamerasRequest(BaseModel):
+    """Add and/or remove cameras (VAS ids) of the active project."""
+
+    add: list[str] = Field(default_factory=list)
+    remove: list[str] = Field(default_factory=list)

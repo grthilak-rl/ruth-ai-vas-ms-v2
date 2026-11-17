@@ -13,6 +13,7 @@
 import { useMemo } from 'react';
 import type { AnalyticsSummaryResponse, TimeRange } from '../../types/analytics';
 import './ExecutiveSummaryCards.css';
+import { VIOLATIONS_PER_CAMERA_HOUR, formatCameraHourRate, formatMonitoredHours } from '../../utils/cameraHours';
 
 interface ExecutiveSummaryCardsProps {
   /** Analytics summary data */
@@ -164,6 +165,11 @@ export function ExecutiveSummaryCards({
         </div>
         <div className="executive-card__meta">
           {summary?.totals.violations_total ?? 0} violations in period
+        </div>
+        <div className="executive-card__meta">
+          {summary && summary.totals.violations_per_camera_hour != null
+            ? `${formatCameraHourRate(summary.totals.violations_per_camera_hour)} ${VIOLATIONS_PER_CAMERA_HOUR} (${formatMonitoredHours(summary.totals.monitored_camera_hours)} monitored)`
+            : `No monitored camera-hours in period`}
         </div>
       </div>
 

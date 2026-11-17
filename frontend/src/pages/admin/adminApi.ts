@@ -417,9 +417,6 @@ export function putChunk(
 
 const PROJECTS = `${ADMIN_API_PREFIX}/projects`;
 
-/** Longer than the shared TIMEOUT_MS: pg_dump plus the archive transaction. */
-const START_PROJECT_TIMEOUT_MS = 20 * 60_000;
-
 export interface ProjectSummary {
   id: string;
   name: string;
@@ -429,19 +426,21 @@ export interface ProjectSummary {
   started_by: string;
   ended_at: string | null;
   ended_by: string | null;
+  /** Legacy: set only on the project the old Start flow archived. */
   archive_batch_id: string | null;
-  archived_counts: Record<string, number> | null;
   backup_path: string | null;
   stopped_at?: string | null;
   stopped_by?: string | null;
   resumed_at?: string | null;
   resumed_by?: string | null;
   lifecycle_error?: string | null;
+  /** Rows tagged with this project, per table (list endpoint only). */
+  counts?: Record<string, number> | null;
 }
 
 export type LifecycleAction = 'stop' | 'resume' | 'end';
 
-/** One camera in a Stop/Resume/End plan: as it is now, and what will change. */
+/** One camera in a Stop/Resume/End/Start plan: as it is now, and what will change. */
 export interface LifecycleCamera {
   name: string;
   vas_device_id: string;
@@ -463,49 +462,18 @@ export interface LifecyclePreflight {
   effects: string[];
 }
 
-export interface LifecycleResult {
-  action: LifecycleAction;
-  project: ProjectSummary;
-  complete: boolean;
-  errors: string[];
-  cameras: LifecycleCamera[];
-  retention_paused: boolean | null;
-}
+/** Why Start is refused: a project is still current (End it first), or no backup. */
+export type StartBlocker = 'project_current' | 'backup_unavailable';
 
-export interface LiveCameraInfo {
-  device_id: string;
-  camera_name: string;
-  session_id: string;
-  state: string;
-}
-
-/** Machine-readable preflight refusals; see PreflightResponse on the server. */
-export type ProjectBlocker =
-  | 'inference_active'
-  | 'too_much_data'
-  | 'backup_unavailable';
-
-export interface ProjectPreflight {
+export interface StartPreflight {
   can_proceed: boolean;
-  blockers: ProjectBlocker[];
+  blocked_reason: string | null;
+  blockers: StartBlocker[];
   current_project: ProjectSummary | null;
-  row_counts: Record<string, number>;
-  total_rows: number;
-  live_cameras: LiveCameraInfo[];
+  last_project: ProjectSummary | null;
+  cameras: LifecycleCamera[];
   backup_dir: string;
-  evidence_with_vas_media: number;
-}
-
-export interface StartProjectResult {
-  new_project: ProjectSummary;
-  archived_project: ProjectSummary | null;
-  archive_batch_id: string | null;
-  archived_counts: Record<string, number>;
-  backup_path: string | null;
-  stopped_cameras: string[];
-  vas_paths_resolved: number;
-  vas_paths_missing: number;
-  message: string;
+  effects: string[];
 }
 
 export function listProjects(): Promise<{
@@ -515,78 +483,116 @@ export function listProjects(): Promise<{
   return adminFetch(PROJECTS);
 }
 
-/**
- * What starting a new project would archive, and anything blocking it.
- *
- * `stopInference` previews the result assuming live inference is stopped
- * first, so ticking the checkbox re-measures rather than guessing.
- */
 export function fetchLifecyclePreflight(action: LifecycleAction): Promise<LifecyclePreflight> {
   return adminFetch(`${PROJECTS}/lifecycle/preflight?action=${action}`);
 }
 
-export function runLifecycle(action: LifecycleAction, confirmName?: string): Promise<LifecycleResult> {
+export function runLifecycle(action: LifecycleAction, confirmName?: string): Promise<ProjectJob> {
   return adminFetch(`${PROJECTS}/lifecycle/${action}`, {
     method: 'POST',
     body: action === 'end' ? JSON.stringify({ confirm_name: confirmName ?? '' }) : undefined,
   });
 }
 
-export function fetchProjectPreflight(stopInference = false): Promise<ProjectPreflight> {
-  const query = stopInference ? '?stop_inference=true' : '';
-  return adminFetch(`${PROJECTS}/preflight${query}`);
+// ---------------------------------------------------------------------------
+// Project actions run as background jobs: POST answers 202 with the job at
+// once; the Project tab polls it until it succeeds or fails.
+// ---------------------------------------------------------------------------
+
+export type ProjectJobState = 'queued' | 'running' | 'succeeded' | 'failed' | 'interrupted';
+export type ProjectJobStageStatus = 'pending' | 'running' | 'done' | 'failed' | 'interrupted';
+
+export interface ProjectJob {
+  id: string;
+  action: LifecycleAction | 'start' | 'cameras';
+  state: ProjectJobState;
+  stage: string | null;
+  stage_detail: string | null;
+  stages: { key: string; label: string; status: ProjectJobStageStatus }[];
+  error_code: string | null;
+  error_message: string | null;
+  errors: string[];
+  cameras: LifecycleCamera[];
+  retention_paused: boolean | null;
+  project_id: string | null;
+  project_name: string | null;
+  backup_path: string | null;
+  attempts: number;
+  can_retry: boolean;
+  created_by: string;
+  created_at: string;
+  started_at: string | null;
+  finished_at: string | null;
+}
+
+export const isJobActive = (job: ProjectJob | null | undefined): boolean =>
+  !!job && (job.state === 'queued' || job.state === 'running');
+
+export function fetchProjectJobs(): Promise<{ active: ProjectJob | null; latest: ProjectJob | null }> {
+  return adminFetch(`${PROJECTS}/jobs/state`);
+}
+
+export function fetchProjectJob(id: string): Promise<ProjectJob> {
+  return adminFetch(`${PROJECTS}/jobs/${encodeURIComponent(id)}`);
+}
+
+// ---------------------------------------------------------------------------
+// Cameras in the current project (add / remove mid-project, as a job)
+// ---------------------------------------------------------------------------
+
+export interface ProjectMember {
+  device_id: string;
+  vas_device_id: string | null;
+  name: string;
+  joined_at: string;
+  /** Dates reconstructed from data (projects that predate membership). */
+  inferred: boolean;
+  source: string;
+}
+
+export interface CamerasPreflight {
+  project: ProjectSummary | null;
+  allowed: boolean;
+  blocked_reason: string | null;
+  members: ProjectMember[];
+  cameras: LifecycleCamera[];
+  effects: string[];
+}
+
+export function fetchCamerasPreflight(add: string[], remove: string[]): Promise<CamerasPreflight> {
+  const q = new URLSearchParams();
+  add.forEach((id) => q.append('add', id));
+  remove.forEach((id) => q.append('remove', id));
+  const qs = q.toString();
+  return adminFetch(`${PROJECTS}/cameras/preflight${qs ? `?${qs}` : ''}`);
+}
+
+export function changeProjectCameras(body: { add: string[]; remove: string[] }): Promise<ProjectJob> {
+  return adminFetch(`${PROJECTS}/cameras`, { method: 'POST', body: JSON.stringify(body) });
+}
+
+export function retryProjectJob(id: string): Promise<ProjectJob> {
+  return adminFetch(`${PROJECTS}/jobs/${encodeURIComponent(id)}/retry`, { method: 'POST' });
+}
+
+/** What starting the next project with `cameraIds` would do, per camera (none picked by default). */
+export function fetchStartPreflight(cameraIds?: string[]): Promise<StartPreflight> {
+  const query = cameraIds
+    ? `?${cameraIds.map((id) => `camera_ids=${encodeURIComponent(id)}`).join('&')}`
+    : '';
+  return adminFetch(`${PROJECTS}/start/preflight${query}`);
 }
 
 /**
- * Archive the current project and start a new one.
- *
- * Not routed through adminFetch: the default 30s timeout is far too short
- * for a pg_dump of a 150 MB database followed by the archive transaction.
+ * Queue the Start of the next project with the chosen cameras (VAS ids).
+ * Answers at once with the job; the backup and camera switching run in the
+ * background (poll fetchProjectJob).
  */
-export async function startNewProject(body: {
+export function startNextProject(body: {
   name: string;
   confirm_name: string;
-  stop_inference: boolean;
-  confirm_large?: boolean;
-}): Promise<StartProjectResult> {
-  const token = getAdminToken();
-  if (!token) {
-    handleSessionExpired();
-    throw new AdminApiError(401, 'Not signed in');
-  }
-
-  const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), START_PROJECT_TIMEOUT_MS);
-  let response: Response;
-  try {
-    response = await fetch(buildApiUrl(`${PROJECTS}/start`), {
-      method: 'POST',
-      headers: {
-        Authorization: `Bearer ${token}`,
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify(body),
-      signal: controller.signal,
-    });
-  } catch {
-    // A timeout here does NOT mean the archive failed — it runs in one
-    // transaction server-side and may well have committed. Say so, rather
-    // than inviting a retry that would then be refused for a duplicate name.
-    throw new AdminApiError(
-      0,
-      'The request timed out. The archive may still have completed — reload ' +
-        'the project list before trying again.'
-    );
-  } finally {
-    clearTimeout(timer);
-  }
-
-  if (response.status === 401) {
-    handleSessionExpired();
-    throw await errorFromResponse(response);
-  }
-  if (!response.ok) {
-    throw await errorFromResponse(response);
-  }
-  return (await response.json()) as StartProjectResult;
+  camera_ids: string[];
+  allow_no_cameras?: boolean;
+}): Promise<ProjectJob> {
+  return adminFetch(`${PROJECTS}/start`, { method: 'POST', body: JSON.stringify(body) });
 }

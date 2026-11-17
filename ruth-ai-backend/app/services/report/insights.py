@@ -44,6 +44,13 @@ def fmt_rate(n: float) -> str:
     return f"{n:,.1f}" if n < 10 else fmt_int(n)
 
 
+def fmt_per_hour(n: float) -> str:
+    """A small rate (incidents per monitored camera-hour): two decimals below 1."""
+    if n >= 10:
+        return fmt_int(n)
+    return f"{n:,.1f}" if n >= 1 else f"{n:.2f}"
+
+
 def fmt_hhmm(hour: int) -> str:
     return f"{hour % 24:02d}:00"
 

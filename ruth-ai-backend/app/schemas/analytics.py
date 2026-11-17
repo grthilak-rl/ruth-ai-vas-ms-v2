@@ -44,6 +44,12 @@ class AnalyticsTotals(BaseModel):
         default=0, description="Dismissed violations count"
     )
     violations_resolved: int = Field(default=0, description="Resolved violations count")
+    monitored_camera_hours: float = Field(
+        default=0.0, description="Hours the project's cameras ran inference in the period (stream sessions)"
+    )
+    violations_per_camera_hour: float | None = Field(
+        default=None, description="Violations per monitored camera-hour; null when nothing was monitored"
+    )
     cameras_active: int = Field(default=0, description="Active cameras count")
     cameras_total: int = Field(default=0, description="Total cameras count")
 
@@ -180,6 +186,10 @@ class DeviceAnalytics(BaseModel):
     last_violation_at: datetime | None = Field(
         None, description="Timestamp of last violation"
     )
+    monitored_hours: float = Field(default=0.0, description="Hours this camera ran inference in the period")
+    violations_per_camera_hour: float | None = Field(
+        default=None, description="Violations per monitored camera-hour; null when not monitored"
+    )
 
 
 class DeviceStatusSummary(BaseModel):
@@ -188,6 +198,10 @@ class DeviceStatusSummary(BaseModel):
     total_violations: int = Field(default=0, description="Total violations")
     total_cameras: int = Field(default=0, description="Total cameras")
     active_cameras: int = Field(default=0, description="Active cameras")
+    monitored_camera_hours: float = Field(default=0.0, description="Monitored camera-hours in the period")
+    violations_per_camera_hour: float | None = Field(
+        default=None, description="Violations per monitored camera-hour; null when nothing was monitored"
+    )
 
 
 class DeviceStatusResponse(BaseModel):

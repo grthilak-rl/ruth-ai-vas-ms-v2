@@ -53,7 +53,7 @@ from app.core.logging import get_logger
 from app.models import Device, Violation
 from app.models.enums import EvidenceStatus, EvidenceType, ViolationStatus
 from app.models.evidence import Evidence
-from app.models.project import CURRENT_PROJECT_STATES, Project
+from app.models.project import Project
 from app.services.incidents import group_incidents
 from app.services.report.branding import ReportBranding, get_branding
 from app.services.shift_schedule import ShiftSchedule
@@ -269,6 +269,15 @@ class ReportData:
     shift: tuple[str, str, str] | None = None
     #: Shift reports: incident starts per hour of the shift, in shift order.
     by_hour: list[tuple[int, int]] = field(default_factory=list)
+    #: Hours the report's cameras ran AI inference in the period (stream
+    #: sessions; see app/services/coverage.py). Filled by ``load_report``.
+    monitored_camera_hours: float | None = None
+
+    @property
+    def incidents_per_camera_hour(self) -> float | None:
+        """Incidents per monitored camera-hour, or None when nothing was monitored."""
+        hours = self.monitored_camera_hours
+        return self.current.incidents / hours if hours else None
 
     @property
     def tz(self) -> ZoneInfo:
@@ -831,19 +840,22 @@ def camera_from_device(device: Device) -> Camera:
     return Camera(name=name, area=area)
 
 
-async def _project_for(db: AsyncSession, start: datetime, end: datetime) -> tuple[str | None, datetime | None]:
-    """Name of the project the period falls in, and when its data starts.
+async def _project_for(
+    db: AsyncSession, start: datetime, end: datetime, project: Project | None = None
+) -> tuple[str | None, datetime | None]:
+    """Name of the report's project, and when its data starts.
 
-    Rows from earlier projects are archived out of ``violations``, so the
-    active project's start is where the live data begins.
+    A report covers one project's data (the session is scoped to it), so
+    the project is known when given. Without one, the site's project: the
+    current one, or the last one between End and the next Start.
     """
-    projects = (await db.execute(select(Project).order_by(Project.started_at))).scalars().all()
-    active = next((p for p in projects if p.state in CURRENT_PROJECT_STATES), None)
-    overlapping = [
-        p for p in projects if p.started_at < end and (p.ended_at is None or p.ended_at > start)
-    ]
-    name = overlapping[-1].name if overlapping else (active.name if active else None)
-    return name, (active.started_at if active else None)
+    if project is None:
+        from app.core.project_scope import site_project
+
+        project = await site_project(db)
+    if project is None:
+        return None, None
+    return project.name, project.started_at
 
 
 async def _type_seen(db: AsyncSession, labeler: ViolationLabeler) -> dict[str, tuple[datetime, datetime]]:
@@ -879,10 +891,13 @@ async def load_report(
     violation_types: list[str] | None = None,
     now: datetime | None = None,
     shift: str | None = None,
+    project: Project | None = None,
 ) -> ReportData:
+    """One project's report. The caller's session must be scoped to `project`
+    (request sessions are; report jobs scope theirs to the row's project)."""
     settings = get_settings()
     schedule = await ShiftService(db).get_schedule()
-    project_name, data_from = await _project_for(db, start, end)
+    project_name, data_from = await _project_for(db, start, end, project)
     labeler = ViolationLabeler.current()
     win = report_windows(preset, start, end, schedule, shift)
 
@@ -921,7 +936,7 @@ async def load_report(
         else []
     )
 
-    return build_report(
+    report = build_report(
         rows=rows,
         cameras={d.id: camera_from_device(d) for d in devices},
         labeler=labeler,
@@ -939,6 +954,28 @@ async def load_report(
         type_seen=await _type_seen(db, labeler),
         shift=shift,
     )
+    report.monitored_camera_hours = await _monitored_hours(db, project, start, end, camera_ids)
+    return report
+
+
+async def _monitored_hours(
+    db: AsyncSession, project: Project | None, start: datetime, end: datetime,
+    camera_ids: list[str] | None,
+) -> float | None:
+    """Monitored camera-hours of the report's project (and camera filter) in the period."""
+    from app.services.coverage import monitored_hours
+
+    if project is None:
+        from app.core.project_scope import site_project
+
+        project = await site_project(db)
+    if project is None:
+        return None
+    hours = await monitored_hours(db, project.id, start, end)
+    if camera_ids:
+        wanted = {str(c) for c in camera_ids}
+        hours = {k: v for k, v in hours.items() if str(k) in wanted}
+    return round(sum(hours.values()), 2)
 
 
 #: Gallery crops, 4:3; printed at about 240 pt wide, so ~190 dpi.

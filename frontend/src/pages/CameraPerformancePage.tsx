@@ -15,15 +15,34 @@ import { ErrorState, LoadingState } from '../components/ui';
 import { TimeRangeSelector } from '../components/analytics';
 import { getDeviceStatus, calculateTimeRange } from '../services/analyticsApi';
 import type { DeviceStatusResponse, DeviceAnalytics, TimeRangePreset } from '../types/analytics';
+import { VIOLATIONS_PER_CAMERA_HOUR, formatCameraHourRate, formatMonitoredHours } from '../utils/cameraHours';
+import { useProjectView } from '../state/project/projectView';
 import './CameraPerformancePage.css';
 
-type SortField = 'camera_name' | 'violations_total' | 'open' | 'avg_confidence';
+type SortField = 'camera_name' | 'violations_total' | 'open' | 'avg_confidence' | 'rate';
 type SortOrder = 'asc' | 'desc';
 
+/**
+ * In the current project the page opens on the last 24 hours; a past
+ * project's data is all older, so there it opens on the project's whole
+ * period, like Analytics. The camera list is the project's cameras during
+ * the period (membership), including cameras removed mid-project.
+ */
 export function CameraPerformancePage() {
-  const [preset, setPreset] = useState<TimeRangePreset>('24h');
-  const [customFrom, setCustomFrom] = useState<Date | undefined>();
-  const [customTo, setCustomTo] = useState<Date | undefined>();
+  const { viewedSlug, viewed } = useProjectView();
+  if (viewedSlug && !viewed) {
+    return <div className="camera-performance-page" aria-busy="true" />;
+  }
+  const period = viewed
+    ? { from: new Date(viewed.started_at), to: viewed.ended_at ? new Date(viewed.ended_at) : new Date() }
+    : undefined;
+  return <CameraPerformanceContent period={period} />;
+}
+
+function CameraPerformanceContent({ period }: { period?: { from: Date; to: Date } }) {
+  const [preset, setPreset] = useState<TimeRangePreset>(period ? 'custom' : '24h');
+  const [customFrom, setCustomFrom] = useState<Date | undefined>(period?.from);
+  const [customTo, setCustomTo] = useState<Date | undefined>(period?.to);
   const [data, setData] = useState<DeviceStatusResponse | null>(null);
   const [isLoading, setIsLoading] = useState(true);
   const [isError, setIsError] = useState(false);
@@ -62,7 +81,7 @@ export function CameraPerformancePage() {
   };
 
   useEffect(() => {
-    if (preset !== 'custom') {
+    if (preset !== 'custom' || (customFrom && customTo)) {
       fetchData();
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -116,6 +135,10 @@ export function CameraPerformancePage() {
         case 'avg_confidence':
           aVal = a.avg_confidence;
           bVal = b.avg_confidence;
+          break;
+        case 'rate':
+          aVal = a.violations_per_camera_hour ?? -1;
+          bVal = b.violations_per_camera_hour ?? -1;
           break;
         default:
           return 0;
@@ -207,6 +230,18 @@ export function CameraPerformancePage() {
           </div>
           <div className="camera-performance-summary__label">Active Cameras</div>
         </div>
+        <div className="camera-performance-summary__card">
+          <div className="camera-performance-summary__value">
+            {formatCameraHourRate(data?.summary.violations_per_camera_hour)}
+          </div>
+          <div className="camera-performance-summary__label">
+            {VIOLATIONS_PER_CAMERA_HOUR}
+            <br />
+            <span className="camera-performance-summary__sub">
+              {formatMonitoredHours(data?.summary.monitored_camera_hours)} monitored
+            </span>
+          </div>
+        </div>
       </div>
 
       <div className="camera-performance-page__table">
@@ -240,6 +275,14 @@ export function CameraPerformancePage() {
                 onClick={() => handleSort('avg_confidence')}
               >
                 Avg Confidence {renderSortIcon('avg_confidence')}
+              </th>
+              <th>Monitored</th>
+              <th
+                className="camera-performance-th--sortable"
+                onClick={() => handleSort('rate')}
+                title="Violations per hour the camera actually ran AI detection in the period"
+              >
+                Violations per monitored camera-hour {renderSortIcon('rate')}
               </th>
             </tr>
           </thead>
@@ -299,11 +342,13 @@ function CameraRow({ device, isExpanded, onToggle }: CameraRowProps) {
         <td>{device.violations_by_status.reviewed ?? 0}</td>
         <td>{device.violations_by_status.dismissed ?? 0}</td>
         <td>{device.violations_by_status.resolved ?? 0}</td>
-        <td>{(device.avg_confidence * 100).toFixed(0)}%</td>
+        <td>{device.violations_total ? `${(device.avg_confidence * 100).toFixed(0)}%` : '—'}</td>
+        <td>{formatMonitoredHours(device.monitored_hours)}</td>
+        <td>{formatCameraHourRate(device.violations_per_camera_hour)}</td>
       </tr>
       {isExpanded && (
         <tr className="camera-performance-details-row">
-          <td colSpan={8}>
+          <td colSpan={10}>
             <CameraDetailsPanel device={device} />
           </td>
         </tr>

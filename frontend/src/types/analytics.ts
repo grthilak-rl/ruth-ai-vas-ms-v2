@@ -17,7 +17,12 @@ export interface AnalyticsTotals {
   violations_dismissed: number;
   violations_resolved: number;
   cameras_active: number;
+  /** Cameras that were members of the project at any point of the period. */
   cameras_total: number;
+  /** Hours the project's cameras ran AI detection in the period. */
+  monitored_camera_hours: number;
+  /** Violations per monitored camera-hour; null when nothing was monitored. */
+  violations_per_camera_hour: number | null;
 }
 
 export interface AnalyticsComparison {
@@ -99,12 +104,16 @@ export interface DeviceAnalytics {
   violations_by_type: Record<string, number>;
   avg_confidence: number;
   last_violation_at: string | null; // ISO 8601
+  monitored_hours: number;
+  violations_per_camera_hour: number | null;
 }
 
 export interface DeviceStatusSummary {
   total_violations: number;
   total_cameras: number;
   active_cameras: number;
+  monitored_camera_hours: number;
+  violations_per_camera_hour: number | null;
 }
 
 export interface DeviceStatusResponse {

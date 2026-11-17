@@ -18,8 +18,9 @@ from sqlalchemy import and_, case, func, select
 from fastapi.responses import Response
 
 from app.core.logging import get_logger
-from app.deps import DBSession
+from app.deps import DBSession, ProjectScopeDep
 from app.models import Device, StreamSession, StreamState, Violation, ViolationStatus
+from app.services.coverage import has_membership, member_device_ids, monitored_hours, per_camera_hour
 from app.schemas import (
     AnalyticsComparison,
     AnalyticsNotImplementedResponse,
@@ -45,6 +46,24 @@ router = APIRouter(tags=["Analytics"])
 logger = get_logger(__name__)
 
 
+async def _member_devices(db, scope, start: datetime, end: datetime) -> list[Device]:
+    """The project's cameras during [start, end) (see app/services/coverage.py).
+
+    A current project with no membership recorded at all (a fresh install
+    that never went through Start) falls back to the cameras enabled now.
+    """
+    ids = await member_device_ids(db, scope.project_id, start, end)
+    if ids:
+        return list(
+            (await db.execute(select(Device).where(Device.id.in_(ids)).order_by(Device.name))).scalars().all()
+        )
+    if scope.is_current and not await has_membership(db, scope.project_id):
+        return list((await db.execute(
+            select(Device).where(Device.is_active.is_(True), Device.enabled.is_(True)).order_by(Device.name)
+        )).scalars().all())
+    return []
+
+
 @router.get(
     "/analytics/summary",
     response_model=AnalyticsSummaryResponse,
@@ -58,6 +77,7 @@ logger = get_logger(__name__)
 )
 async def get_analytics_summary(
     db: DBSession,
+    scope: ProjectScopeDep,
     from_time: datetime | None = Query(
         None, alias="from", description="Start of time range (ISO 8601)"
     ),
@@ -120,29 +140,21 @@ async def get_analytics_summary(
         select(func.count(func.distinct(StreamSession.device_id)))
         .select_from(StreamSession)
         .where(StreamSession.state == StreamState.LIVE)
+        # Sessions are not auto-scoped (project_scope.SCOPED_MODELS): a past
+        # project has no live cameras, so filter explicitly.
+        .where(StreamSession.project_id == scope.project_id)
     )
     result = await db.execute(active_cameras_stmt)
     cameras_active = result.scalar() or 0
 
-    # Count total cameras.
-    #
-    # `enabled` is matched here as well as `is_active` so this denominator
-    # agrees with the one the Overview card derives from GET /api/v1/devices,
-    # which hides cameras an operator retired in VAS. Two screens quoting
-    # different camera totals is worse than either total on its own.
-    #
-    # Note this is a *current* count against a *historical* violation range:
-    # retiring a camera today changes the denominator for last month's
-    # report too. That is the same behaviour `is_active` already had, and
-    # the alternative — reconstructing which cameras were enabled during the
-    # window — needs history this schema does not keep.
-    total_cameras_stmt = (
-        select(func.count())
-        .select_from(Device)
-        .where(Device.is_active.is_(True), Device.enabled.is_(True))
-    )
-    result = await db.execute(total_cameras_stmt)
-    cameras_total = result.scalar() or 0
+    # Cameras: the project's members at any point of the period, so a
+    # camera removed mid-project still counts for the time it was in (and a
+    # past project is not measured against today's cameras). Rates are per
+    # monitored camera-hour: time cameras actually ran inference.
+    members = await _member_devices(db, scope, from_time, to_time)
+    cameras_total = len(members)
+    hours_by_camera = await monitored_hours(db, scope.project_id, from_time, to_time)
+    camera_hours = round(sum(hours_by_camera.values()), 2)
 
     # Build totals
     totals = AnalyticsTotals(
@@ -153,6 +165,8 @@ async def get_analytics_summary(
         violations_resolved=status_counts.get("resolved", 0),
         cameras_active=cameras_active,
         cameras_total=cameras_total,
+        monitored_camera_hours=camera_hours,
+        violations_per_camera_hour=per_camera_hour(violations_total, camera_hours),
     )
 
     # Comparison to previous period
@@ -525,6 +539,7 @@ async def get_violations_trends(
 )
 async def get_devices_status(
     db: DBSession,
+    scope: ProjectScopeDep,
     from_time: datetime | None = Query(
         None, alias="from", description="Start of time range (ISO 8601)"
     ),
@@ -558,24 +573,11 @@ async def get_devices_status(
     # For each device, get: violation counts by status, by type, avg confidence, last violation time
     devices_data = []
 
-    # Get all devices. Matches GET /api/v1/devices: cameras an operator
-    # retired in VAS are excluded, so `summary.total_cameras` here and the
-    # camera list elsewhere quote the same number.
-    #
-    # Consequence worth knowing: a retired camera drops out of `devices`
-    # AND out of `summary.total_violations`, which is summed from the rows
-    # below. /analytics/summary is deliberately NOT filtered this way — its
-    # `violations_total` counts the violations table directly and its
-    # `by_camera` breakdown joins devices without this predicate, so both
-    # still include retired cameras. That is intentional: a breakdown of
-    # what happened should not drop history, and its rows must keep summing
-    # to its own total. The two endpoints therefore report different
-    # violation totals once a camera is retired.
-    devices_stmt = select(Device).where(
-        Device.is_active.is_(True), Device.enabled.is_(True)
-    )
-    devices_result = await db.execute(devices_stmt)
-    all_devices = devices_result.scalars().all()
+    # The project's cameras during the period (membership), including
+    # cameras removed mid-project for the time they were in, and members
+    # with no violations (a quiet camera is information too).
+    all_devices = await _member_devices(db, scope, from_time, to_time)
+    hours_by_camera = await monitored_hours(db, scope.project_id, from_time, to_time)
 
     total_violations = 0
 
@@ -594,11 +596,17 @@ async def get_devices_status(
         violations_result = await db.execute(violations_stmt)
         violations = violations_result.scalars().all()
 
+        violations_total = len(violations)
+        hours = round(hours_by_camera.get(device.id, 0.0), 2)
         if not violations:
-            # Skip devices with no violations in range
+            devices_data.append(DeviceAnalytics(
+                camera_id=str(device.id),
+                camera_name=device.name,
+                monitored_hours=hours,
+                violations_per_camera_hour=per_camera_hour(0, hours),
+            ))
             continue
 
-        violations_total = len(violations)
         total_violations += violations_total
 
         # Build status breakdown
@@ -628,6 +636,8 @@ async def get_devices_status(
                 violations_by_type=violations_by_type,
                 avg_confidence=round(avg_confidence, 2),
                 last_violation_at=last_violation_at,
+                monitored_hours=hours,
+                violations_per_camera_hour=per_camera_hour(violations_total, hours),
             )
         )
 
@@ -639,14 +649,20 @@ async def get_devices_status(
         select(func.count(func.distinct(StreamSession.device_id)))
         .select_from(StreamSession)
         .where(StreamSession.state == StreamState.LIVE)
+        # Sessions are not auto-scoped (project_scope.SCOPED_MODELS): a past
+        # project has no live cameras, so filter explicitly.
+        .where(StreamSession.project_id == scope.project_id)
     )
     active_result = await db.execute(active_cameras_stmt)
     active_cameras = active_result.scalar() or 0
 
+    camera_hours = round(sum(hours_by_camera.get(d.id, 0.0) for d in all_devices), 2)
     summary = DeviceStatusSummary(
         total_violations=total_violations,
         total_cameras=len(all_devices),
         active_cameras=active_cameras,
+        monitored_camera_hours=camera_hours,
+        violations_per_camera_hour=per_camera_hour(total_violations, camera_hours),
     )
 
     return DeviceStatusResponse(

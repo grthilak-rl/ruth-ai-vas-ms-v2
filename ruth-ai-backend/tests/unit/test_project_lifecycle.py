@@ -1,11 +1,13 @@
-"""Project Stop / Resume / End: plans, allowed transitions, executor, guards.
+"""Project Stop / Resume / End / Start: plans, allowed transitions, executor, guards.
 
 End is covered here only (never run on the live project): from active, from
 stopped, the typed-name confirmation, and that an ended project cannot be
-resumed or stopped again.
+resumed or stopped again. Start (the next project, after End) and the rule
+that no lifecycle action ever un-pauses footage deletion are covered too.
 """
 
 import uuid
+from contextlib import asynccontextmanager
 from types import SimpleNamespace
 
 import pytest
@@ -18,9 +20,11 @@ from app.services.project_lifecycle import (
     ProjectLifecycleService,
     ProjectNotRunningError,
     check_allowed,
+    check_start,
     ensure_running,
     is_running,
     plan_resume,
+    plan_start,
     plan_stop,
     snapshot_of,
 )
@@ -112,12 +116,29 @@ def test_end_needs_the_exact_name(typed):
 # --------------------------------------------------------------------------
 
 
+class _NoRows:
+    def scalars(self):
+        return self
+
+    def first(self):
+        return None
+
+
 class FakeDB:
     def __init__(self):
         self.commits = 0
+        self.added: list = []
 
     async def execute(self, *_a, **_k):
-        return None
+        return _NoRows()
+
+    def add(self, obj):
+        self.added.append(obj)
+
+    async def flush(self):
+        for obj in self.added:
+            if getattr(obj, "id", None) is None and hasattr(obj, "slug"):
+                obj.id = uuid.uuid4()
 
     async def commit(self):
         self.commits += 1
@@ -138,6 +159,9 @@ class FakeVAS:
         self.storage_calls.append(updates)
         return {"retention_paused": updates.get("retention_paused")}
 
+    async def get_storage_config(self):
+        return {"retention_paused": True}
+
 
 class FakeStreams:
     def __init__(self):
@@ -149,23 +173,43 @@ class FakeStreams:
 
 def project(state="active"):
     return SimpleNamespace(
-        name="HPCL", state=state, stopped_at=None, stopped_by=None, resumed_at=None,
+        id=uuid.uuid4(), name="HPCL", state=state, stopped_at=None, stopped_by=None, resumed_at=None,
         resumed_by=None, ended_at=None, ended_by=None, lifecycle_snapshot=None, lifecycle_error=None,
     )
+
+
+class FreeLock:
+    """The real lock needs Postgres; see tests/projects/test_lifecycle_lock_db.py."""
+
+    def __init__(self):
+        self.taken = 0
+
+    @asynccontextmanager
+    async def held(self):
+        self.taken += 1
+        yield
+
+    async def is_held(self):
+        return False
 
 
 def service(monkeypatch, proj, cameras, vas=None):
     vas = vas or FakeVAS()
     streams = FakeStreams()
-    svc = ProjectLifecycleService(FakeDB(), vas, streams)
+    svc = ProjectLifecycleService(FakeDB(), vas, streams, lock=FreeLock())
 
     async def fake_current(_db):
+        # A past (ended) project is not current.
+        return proj if proj is not None and proj.state != "ended" else None
+
+    async def fake_site(_db):
         return proj
 
     async def fake_cameras():
         return cameras()
 
     monkeypatch.setattr(pl, "current_project", fake_current)
+    monkeypatch.setattr(pl, "site_project", fake_site)
     monkeypatch.setattr(svc, "cameras", fake_cameras)
     return svc, vas, streams
 
@@ -210,7 +254,9 @@ async def test_resume_reenables_only_snapshot_cameras(monkeypatch):
     result = await svc.resume("admin")
     assert result.complete and proj.state == "active" and proj.resumed_by == "admin"
     assert vas.enabled_calls == [("v1", True)]
-    assert vas.storage_calls == [{"retention_paused": False}]
+    # Resume never un-pauses footage deletion: only Settings -> System does.
+    assert vas.storage_calls == []
+    assert result.retention_paused is True
 
 
 async def test_end_from_active(monkeypatch):
@@ -347,14 +393,23 @@ def test_database_check_constraint_allows_every_state():
 
     from app.models.project import PROJECT_STATES
 
-    path = Path(__file__).resolve().parents[2] / "migrations" / "versions" / "2026_11_05_project_states_check.py"
-    spec = importlib.util.spec_from_file_location("project_states_check", path)
-    module = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(module)
+    versions = Path(__file__).resolve().parents[2] / "migrations" / "versions"
+
+    def load(name):
+        spec = importlib.util.spec_from_file_location(name, versions / f"{name}.py")
+        module = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(module)
+        return module
+
     from app.models.project import CURRENT_PROJECT_STATES
 
-    assert set(module.STATES) == set(PROJECT_STATES)
-    assert set(module.CURRENT_STATES) == set(CURRENT_PROJECT_STATES)
+    # The check constraint still comes from project_states_check; the
+    # one-current index was redefined by projects_as_tags (ended is past).
+    assert set(load("2026_11_05_project_states_check").STATES) == set(PROJECT_STATES)
+    tags = load("2026_11_17_projects_as_tags")
+    assert set(tags.ALL_STATES) == set(PROJECT_STATES)
+    assert set(tags.CURRENT_STATES) == set(CURRENT_PROJECT_STATES)
+    assert "ended" not in CURRENT_PROJECT_STATES
 
 
 async def test_reconciler_logs_the_skip_once_per_state_change(monkeypatch):
@@ -397,3 +452,154 @@ def test_stop_response_allows_no_session():
 
     r = InferenceStopResponse(session_id=None, device_id=uuid.uuid4(), state="stopped")
     assert r.session_id is None
+
+
+# --------------------------------------------------------------------------
+# Start the next project (after End)
+# --------------------------------------------------------------------------
+
+
+def site():
+    """After End: HPCL cameras disabled, the 3 demo cameras disabled too."""
+    return [
+        CameraState("vas-hp1", "75080", False, None, str(uuid.uuid4()), intent="suspended", intent_models=3),
+        CameraState("vas-hp2", "75081", False, None, str(uuid.uuid4()), intent="suspended", intent_models=2),
+        CameraState("vas-d1", "DEMO-CAMERA", False, None, str(uuid.uuid4()), intent="suspended", intent_models=1),
+        CameraState("vas-d2", "DEMO-CAMERA2", True, "live", str(uuid.uuid4())),
+        CameraState("vas-d3", "DEMO-CAMERA3", False, None, str(uuid.uuid4())),
+    ]
+
+
+DEMOS = ["vas-d1", "vas-d2", "vas-d3"]
+
+
+def test_plan_start_enables_picked_and_disables_the_rest():
+    plans = {p.vas_device_id: p for p in plan_start(site(), set(DEMOS))}
+    assert plans["vas-d1"].vas_change and "Enable in VAS" in plans["vas-d1"].actions[0]
+    assert "Inference starts" in plans["vas-d1"].actions[1]
+    assert not plans["vas-d2"].vas_change and "Already enabled" in plans["vas-d2"].actions[0]
+    assert "No inference until models" in plans["vas-d3"].actions[1]
+    assert not plans["vas-hp1"].vas_change and plans["vas-hp1"].actions == ["Stays disabled"]
+    off = {p.vas_device_id: p for p in plan_start(site(), set())}
+    assert off["vas-d2"].vas_change and "Disable in VAS" in off["vas-d2"].actions[0]
+
+
+@pytest.mark.parametrize("name, typed, code", [
+    ("Post HPCL Dev", "post hpcl dev", "confirmation_mismatch"),
+    ("   ", "   ", "bad_name"),
+])
+def test_check_start_refuses(name, typed, code):
+    with pytest.raises(LifecycleError) as e:
+        check_start(None, name=name, confirm_name=typed)
+    assert e.value.code == code
+
+
+def test_check_start_needs_the_current_project_ended():
+    for state in ("active", "stopping", "stopped", "resuming"):
+        with pytest.raises(LifecycleError) as e:
+            check_start(project(state), name="Post HPCL Dev", confirm_name="Post HPCL Dev")
+        assert e.value.code == "project_current" and "End it first" in e.value.message
+    check_start(None, name="Post HPCL Dev", confirm_name="Post HPCL Dev")
+
+
+async def test_start_after_end_switches_cameras_and_leaves_retention(monkeypatch):
+    from app.models import ProjectCamera
+
+    hpcl = project("ended")
+    svc, vas, streams = service(monkeypatch, hpcl, site)
+    result = await svc.start(
+        "admin", name="Post HPCL Dev", confirm_name="Post HPCL Dev",
+        camera_ids=DEMOS, backup_path="/var/backups/ruth-ai/x.dump",
+    )
+    assert result.complete
+    new = result.project
+    assert new.name == "Post HPCL Dev" and new.slug == "post-hpcl-dev" and new.state == "active"
+    assert new.started_by == "admin"
+    # Only the disabled demo cameras are enabled; HPCL cameras stay off.
+    assert sorted(vas.enabled_calls) == [("vas-d1", True), ("vas-d3", True)]
+    assert vas.storage_calls == []  # footage deletion untouched
+    assert streams.stopped == []
+    cams = [o for o in svc._db.added if isinstance(o, ProjectCamera)]
+    assert len(cams) == 3 and all(c.project_id == new.id for c in cams)
+    assert hpcl.backup_path == "/var/backups/ruth-ai/x.dump"
+
+
+async def test_start_disables_enabled_cameras_not_picked(monkeypatch):
+    svc, vas, _ = service(monkeypatch, project("ended"), site)
+    await svc.start("admin", name="BPCL", confirm_name="BPCL", camera_ids=["vas-hp1"])
+    assert sorted(vas.enabled_calls) == [("vas-d2", False), ("vas-hp1", True)]
+
+
+async def test_start_refused_while_a_project_is_current(monkeypatch):
+    for state in ("active", "stopped"):
+        svc, vas, _ = service(monkeypatch, project(state), site)
+        with pytest.raises(LifecycleError) as e:
+            await svc.start("admin", name="BPCL", confirm_name="BPCL", camera_ids=DEMOS)
+        assert e.value.code == "project_current"
+        assert vas.enabled_calls == [] and svc._db.added == []
+
+
+async def test_start_refuses_cameras_vas_or_ruth_do_not_know(monkeypatch):
+    svc, vas, _ = service(monkeypatch, project("ended"), site)
+    with pytest.raises(LifecycleError) as e:
+        await svc.start("admin", name="BPCL", confirm_name="BPCL", camera_ids=["nope"])
+    assert e.value.code == "unknown_camera"
+    unsynced = lambda: [CameraState("vas-x", "NEWCAM", False, None, None)]
+    svc, vas, _ = service(monkeypatch, project("ended"), unsynced)
+    with pytest.raises(LifecycleError) as e:
+        await svc.start("admin", name="BPCL", confirm_name="BPCL", camera_ids=["vas-x"])
+    assert e.value.code == "camera_not_synced" and vas.enabled_calls == []
+
+
+async def test_start_records_vas_failures_but_keeps_the_project(monkeypatch):
+    svc, vas, _ = service(monkeypatch, project("ended"), site, FakeVAS(fail_on={"vas-d1"}))
+    result = await svc.start("admin", name="Dev", confirm_name="Dev", camera_ids=DEMOS)
+    assert not result.complete and "DEMO-CAMERA" in result.project.lifecycle_error
+    assert result.project.state == "active"
+
+
+async def test_no_lifecycle_action_unpauses_footage_deletion(monkeypatch):
+    """Stop/End may pause; nothing (Resume, Start) ever sends paused=False."""
+    from datetime import datetime, timezone
+
+    vas = FakeVAS()
+    proj = project()
+    cams_on = lambda: [CameraState("v1", "cam1", True, None, None)]
+    svc, _, _ = service(monkeypatch, proj, cams_on, vas)
+    await svc.stop("admin")
+    proj.lifecycle_snapshot = snapshot_of(cams_on(), datetime.now(timezone.utc), "admin")
+    await svc.resume("admin")
+    await svc.stop("admin", end=True, confirm_name="HPCL")
+    svc2, _, _ = service(monkeypatch, proj, site, vas)
+    await svc2.start("admin", name="Dev", confirm_name="Dev", camera_ids=DEMOS)
+    assert {"retention_paused": False} not in vas.storage_calls
+    assert vas.storage_calls and all(c == {"retention_paused": True} for c in vas.storage_calls)
+
+
+async def test_site_stays_idle_between_end_and_start(monkeypatch):
+    async def last_is_ended(_db):
+        return project("ended")
+
+    monkeypatch.setattr(pl, "site_project", last_is_ended)
+    assert await pl.site_state(FakeDB()) == "ended"
+    with pytest.raises(ProjectNotRunningError):
+        await ensure_running(FakeDB())
+
+
+async def test_start_refuses_a_name_already_used(monkeypatch):
+    """Two projects must not share a slug (URL, backup filename)."""
+    from app.services.project_service import ProjectNameInUseError
+
+    class Taken(_NoRows):
+        def first(self):
+            return uuid.uuid4()
+
+    svc, vas, _ = service(monkeypatch, project("ended"), site)
+
+    async def taken(*_a, **_k):
+        return Taken()
+
+    svc._db.execute = taken
+    with pytest.raises(ProjectNameInUseError):
+        await svc.start("admin", name="HPCL", confirm_name="HPCL", camera_ids=DEMOS)
+    assert vas.enabled_calls == [] and svc._db.added == []

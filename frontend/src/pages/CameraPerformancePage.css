@@ -318,3 +318,8 @@
     grid-template-columns: 1fr;
   }
 }
+
+.camera-performance-summary__sub {
+  font-size: 0.75rem;
+  color: #888;
+}
