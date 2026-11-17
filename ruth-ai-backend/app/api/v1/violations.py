@@ -85,15 +85,16 @@ logger = get_logger(__name__)
 NO_TYPE_DETAIL = "none"
 
 
-def camera_fields(device: Device | None) -> dict:
-    """Display name, area and side of the violation's camera, when known."""
-    if device is None:
-        return {"camera_display_name": None, "camera_area": None, "camera_in_out": None}
-    return {
-        "camera_display_name": (device.display_name or "").strip() or None,
-        "camera_area": (device.manway or "").strip() or None,
-        "camera_in_out": (device.in_out or "").strip() or None,
-    }
+def camera_fields(device: Device | None, violation: Violation | None = None) -> dict:
+    """Display name, area and side of the violation's camera.
+
+    The values stored on the violation when it happened (camera reuse across
+    manways must not rewrite history); the device's current values only for
+    rows not stamped yet. See app/services/violation_location.py.
+    """
+    from app.services.violation_location import camera_fields as _fields
+
+    return _fields(device, violation)
 
 
 async def export_dismissed_false_alarms(
@@ -132,7 +133,7 @@ async def export_dismissed_false_alarms(
     labeler = ViolationLabeler.current()
     items = []
     for v in violations:
-        cam = camera_fields(devices.get(v.device_id))
+        cam = camera_fields(devices.get(v.device_id), v)
         items.append(
             ExportItem(
                 violation_id=v.id,
@@ -226,9 +227,10 @@ def apply_violation_filters(
         if condition is not None:
             stmt = stmt.where(condition)
     if area:
-        stmt = stmt.where(
-            Violation.device_id.in_(select(Device.id).where(Device.manway == area.strip()))
-        )
+        # Where the violation happened (stored), not where the camera is now.
+        from app.services.violation_location import area_filter
+
+        stmt = stmt.where(area_filter(area))
     return stmt
 
 
@@ -404,7 +406,7 @@ async def list_violations(
             ViolationResponse(
                 id=v.id,
                 **labeler.type_fields(v),
-                **camera_fields(v.device),
+                **camera_fields(v.device, v),
                 status=v.status.value,
                 camera_id=v.device_id,
                 camera_name=v.camera_name,
@@ -498,15 +500,23 @@ async def summarize_incidents(db, rows, incidents, labeler: ViolationLabeler) ->
     for incident in incidents:
         incident_severity[incident.severity(labeler.severity)] += 1
 
-    per_area: dict[str, int] = {}
-    if per_device:
+    # Area per violation: stored at write time; the device's current manway
+    # only for rows not stamped yet.
+    unstamped = {r.device_id for r in rows if getattr(r, "location_stamped_at", None) is None}
+    live_manway: dict = {}
+    if unstamped:
         manways = await db.execute(
-            select(Device.id, Device.manway).where(Device.id.in_(list(per_device)))
+            select(Device.id, Device.manway).where(Device.id.in_(list(unstamped)))
         )
-        for device_id, manway in manways.all():
-            area = (manway or "").strip()
-            if area:
-                per_area[area] = per_area.get(area, 0) + per_device[device_id]
+        live_manway = {device_id: manway for device_id, manway in manways.all()}
+    per_area: dict[str, int] = {}
+    for row in rows:
+        if getattr(row, "location_stamped_at", None) is not None:
+            area = (row.area or "").strip()
+        else:
+            area = (live_manway.get(row.device_id) or "").strip()
+        if area:
+            per_area[area] = per_area.get(area, 0) + 1
     top_area = max(per_area, key=lambda a: (per_area[a], a)) if per_area else None
 
     return IncidentSummary(
@@ -713,6 +723,8 @@ async def list_incidents(
         Violation.status,
         Violation.severity,
         Violation.model_id,
+        Violation.area,
+        Violation.location_stamped_at,
     )
     light = apply_violation_filters(
         light,
@@ -761,7 +773,7 @@ async def list_incidents(
         if rep_v is None:  # deleted between the two queries
             continue
         newest_first = list(reversed(incident.members))
-        cam = camera_fields(rep_v.device)
+        cam = camera_fields(rep_v.device, rep_v)
         items.append(
             IncidentResponse(
                 incident_id=incident.key,
@@ -890,7 +902,7 @@ async def get_violation(
     return ViolationDetailResponse(
         id=violation.id,
         **ViolationLabeler.current().type_fields(violation),
-        **camera_fields(await db.get(Device, violation.device_id)),
+        **camera_fields(await db.get(Device, violation.device_id), violation),
         status=violation.status.value,
         camera_id=violation.device_id,
         camera_name=violation.camera_name,
@@ -1020,7 +1032,7 @@ async def update_violation_status(
     return ViolationResponse(
         id=violation.id,
         **ViolationLabeler.current().type_fields(violation),
-        **camera_fields(await db.get(Device, violation.device_id)),
+        **camera_fields(await db.get(Device, violation.device_id), violation),
         status=violation.status.value,
         camera_id=violation.device_id,
         camera_name=violation.camera_name,

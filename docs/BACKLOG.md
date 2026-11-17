@@ -5,6 +5,43 @@ investigation. Newest first.
 
 ---
 
+## BL-16 · Archived violations are not location-stamped; chat does not know the area column
+
+**Status:** backlog · **Raised:** 2026-11-17 (location-history deploy)
+
+- **Archive.** `violations_archive` has no `area` / `in_out` /
+  `camera_display_name` / `location_stamped_at` columns. The migration
+  `violation_location_stamp` deliberately skipped it, as `severity` did.
+  Archived rows (e.g. "Initial data (before projects)", the COKEDRUM
+  cameras) still resolve their area from the device's current values, and
+  restoring them loses nothing. Fix: add the columns, copy them in
+  `project_service` archive and restore, and backfill archived rows from
+  VAS history. Most of those cameras are no longer in VAS, so they would
+  be stamped from Ruth's mirror with `location_source='mirror'`.
+- **NLP chat.** Its schema prompt (ruth-ai-nlp-chat/app/services/chat_service.py)
+  lists only `violations.camera_name`. Add `area` and `in_out` with one
+  line of meaning ("manway where the camera was when the violation
+  happened"). Then "violations by manway" becomes answerable and correct
+  for moved cameras.
+
+---
+
+## BL-15 · Camera editor: no field for when the camera was moved
+
+**Status:** backlog · **Raised:** 2026-11-17
+
+`PATCH /devices/{id}/naming` now records a Move camera in VAS and accepts
+`effective_at` and `note`. `CameraNamingEditor.tsx` sends neither, so every
+move is timed "now". A move entered the day after the reinstall files that
+day's violations under the old manway.
+
+Add an optional "Moved at" date-time (default now, no later than now) and a
+note field. Show VAS's 422 message, e.g. "must be after the current
+placement started". Optionally show the camera's location history
+(`GET /api/v1/devices/{vas_id}/placements` via the backend).
+
+---
+
 ## BL-13 · The clip extractor cannot read cold storage
 
 **Status:** open · **Found:** 2026-10-19 (building Request clip) ·

@@ -199,6 +199,8 @@ async def ingest_event(
             model_version=request.model_version,
             bounding_boxes=bounding_boxes,
         )
+        from app.services.violation_location import stamp_location
+        await stamp_location(violation, device, request.timestamp)
         db.add(violation)
         await db.flush()  # Get violation.id
 

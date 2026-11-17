@@ -266,6 +266,14 @@ class DeviceNamingUpdateRequest(BaseModel):
         None,
         description="Which side of the manway the camera watches. Null clears it.",
     )
+    effective_at: datetime | None = Field(
+        None,
+        description=(
+            "When the camera was moved (default: now). Violations and footage "
+            "before this time stay with the previous manway."
+        ),
+    )
+    note: str | None = Field(None, max_length=2000, description="Why / who moved it")
 
 
 class DeviceNamingUpdateResponse(BaseModel):

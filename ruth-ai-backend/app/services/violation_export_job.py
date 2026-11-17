@@ -56,7 +56,7 @@ from app.services.violation_labels import ViolationLabeler
 logger = get_logger(__name__)
 
 
-def _camera_fields(device: Device | None) -> dict:
+def _camera_fields(device: Device | None, violation=None) -> dict:
     """The violations API's own helper, so sidecars agree with the UI exactly.
 
     Imported inside the function: the API module imports this service, so a
@@ -66,7 +66,7 @@ def _camera_fields(device: Device | None) -> dict:
     """
     from app.api.v1.violations import camera_fields
 
-    return camera_fields(device)
+    return camera_fields(device, violation)
 
 
 async def resolve_plan(
@@ -114,7 +114,7 @@ async def resolve_plan(
     frame_root = Path(get_settings().evidence_frame_dir).resolve()
     plans: list[PlannedItem] = []
     for v in violations:
-        cam = _camera_fields(devices.get(v.device_id))
+        cam = _camera_fields(devices.get(v.device_id), v)
         family = getattr(v.type, "value", v.type)
 
         frame_path = None

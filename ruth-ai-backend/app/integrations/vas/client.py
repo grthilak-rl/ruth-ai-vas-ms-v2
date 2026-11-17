@@ -651,6 +651,72 @@ class VASClient:
         )
         return Device.model_validate(response.json())
 
+    async def move_device(
+        self,
+        device_id: str,
+        location: str | None,
+        in_out: str | None,
+        *,
+        effective_at: datetime | None = None,
+        note: str | None = None,
+    ) -> dict[str, Any]:
+        """Move camera in VAS: record where the camera is installed from now
+        (or ``effective_at``). VAS keeps the location history; past footage
+        and events stay with the old location.
+
+        Returns VAS's response: device_id, display_name, manway, in_out and
+        the new open ``placement`` (None when the camera was taken down).
+        """
+        body: dict[str, Any] = {"location": location, "in_out": in_out}
+        if effective_at is not None:
+            body["effective_at"] = effective_at.isoformat()
+        if note:
+            body["note"] = note
+        response = await self._request(
+            "POST",
+            f"/api/v1/devices/{device_id}/move",
+            json=body,
+            authenticated=False,  # /api/v1/devices: same as update_device
+        )
+        return response.json()
+
+    async def get_placement_at(
+        self,
+        device_id: str,
+        at: datetime,
+        *,
+        timeout: float | None = None,
+        retries: int | None = None,
+    ) -> dict[str, Any]:
+        """Where VAS says the camera was at ``at``.
+
+        Returns {"placement": {...} | None, "display_name": str, ...}.
+        ``placement`` None = not installed anywhere at that time.
+        ``timeout``/``retries`` let the violation write path fail fast.
+        """
+        kwargs: dict[str, Any] = {}
+        if timeout is not None:
+            kwargs["timeout"] = timeout
+        if retries is not None:
+            kwargs["retries"] = retries
+        response = await self._request(
+            "GET",
+            f"/api/v1/devices/{device_id}/placement",
+            params={"at": at.isoformat()},
+            authenticated=False,
+            **kwargs,
+        )
+        return response.json()
+
+    async def get_placements(self, device_id: str) -> list[dict[str, Any]]:
+        """The camera's full location history from VAS, oldest first."""
+        response = await self._request(
+            "GET",
+            f"/api/v1/devices/{device_id}/placements",
+            authenticated=False,
+        )
+        return list(response.json().get("placements", []))
+
     async def get_manways(self) -> list[str]:
         """List the distinct manway values currently in use in VAS.
 

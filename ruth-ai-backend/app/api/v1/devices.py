@@ -218,10 +218,10 @@ async def list_manways(vas_client: VASClientDep) -> ManwayListResponse:
     "/devices/{device_id}/naming",
     response_model=DeviceNamingUpdateResponse,
     status_code=status.HTTP_200_OK,
-    summary="Update device structured naming",
+    summary="Move camera (change manway / side)",
     description=(
-        "Write manway / in_out through to VAS, which owns these fields and "
-        "derives display_name from them."
+        "Records a Move camera in VAS's location history (VAS owns it). "
+        "Violations and footage before the move stay with the old manway."
     ),
     responses={
         404: {"model": ErrorResponse, "description": "Device not found"},
@@ -269,10 +269,9 @@ async def update_device_naming(
             },
         ) from e
 
-    # Only forward what the caller actually set. Sending the full model would
-    # turn "edit manway alone" into "clear in_out", because unset optional
-    # fields default to None.
-    fields = request.model_dump(include=request.model_fields_set)
+    # Only what the caller actually set: "edit manway alone" must keep the
+    # side, not clear it (unset optional fields default to None).
+    fields = request.model_dump(include=request.model_fields_set & {"manway", "in_out"})
     if not fields:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
@@ -283,14 +282,28 @@ async def update_device_naming(
         )
 
     logger.info(
-        "Updating device naming via VAS",
+        "Moving camera via VAS",
         device_id=str(device_id),
         vas_device_id=device.vas_device_id,
         fields=fields,
+        effective_at=request.effective_at.isoformat() if request.effective_at else None,
     )
 
+    # A manway change is a MOVE in VAS's location history, not an edit of the
+    # device: violations and footage before the move stay with the old
+    # manway. VAS is written FIRST; Ruth's mirror is only updated once VAS
+    # confirms, so Ruth never shows a location VAS does not have.
     try:
-        updated = await vas_client.update_device(device.vas_device_id, fields)
+        current = await vas_client.get_device(device.vas_device_id)
+        location = fields.get("manway", current.manway)
+        in_out = fields.get("in_out", current.in_out)
+        moved = await vas_client.move_device(
+            device.vas_device_id,
+            location,
+            in_out,
+            effective_at=request.effective_at,
+            note=request.note,
+        )
     except VASNotFoundError as e:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
@@ -302,10 +315,16 @@ async def update_device_naming(
     except VASError as e:
         # Ruth's mirrored row is deliberately NOT touched on this path.
         logger.warning(
-            "VAS rejected device naming update",
+            "VAS rejected camera move",
             device_id=str(device_id),
             error=str(e),
         )
+        if getattr(e, "status_code", None) == 422:
+            # e.g. effective_at earlier than the current placement's start
+            raise HTTPException(
+                status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                detail={"error": "invalid_move", "message": str(e)},
+            ) from e
         raise HTTPException(
             status_code=status.HTTP_502_BAD_GATEWAY,
             detail={
@@ -314,15 +333,18 @@ async def update_device_naming(
             },
         ) from e
 
-    # VAS accepted it — mirror the values it actually stored (manway
-    # normalized, display_name derived) rather than what was requested.
-    display_name = updated.display_name or updated.name
+    # Mirror what VAS stored (location normalized, display_name derived).
+    display_name = moved.get("display_name") or current.name
     await device_service.apply_naming_from_vas(
         device_id,
-        manway=updated.manway,
-        in_out=updated.in_out,
+        manway=moved.get("manway"),
+        in_out=moved.get("in_out"),
         display_name=display_name,
     )
+    # New violations of this camera must pick up the new placement now.
+    from app.services.violation_location import invalidate
+
+    invalidate(device.vas_device_id)
 
     # The devices list is Redis-cached; without this the grid would keep
     # serving the old display_name for the whole TTL and the save would look
@@ -330,16 +352,16 @@ async def update_device_naming(
     await cache_delete(*DEVICES_LIST_CACHE_KEYS)
 
     logger.info(
-        "Device naming updated",
+        "Camera moved",
         device_id=str(device_id),
         display_name=display_name,
     )
 
     return DeviceNamingUpdateResponse(
         device_id=device_id,
-        name=updated.name,
-        manway=updated.manway,
-        in_out=updated.in_out,
+        name=current.name,
+        manway=moved.get("manway"),
+        in_out=moved.get("in_out"),
         display_name=display_name,
     )
 

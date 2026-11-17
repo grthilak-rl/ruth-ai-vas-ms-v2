@@ -230,6 +230,10 @@ class ViolationService:
                 bounding_boxes=event.bounding_boxes,
             )
 
+            # Where the camera was at the event's time (VAS placement).
+            from app.services.violation_location import stamp_location
+            await stamp_location(violation, device, event.timestamp)
+
             self._db.add(violation)
             await self._db.flush()
 

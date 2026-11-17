@@ -557,8 +557,14 @@ def build_report(
         )
     gap, span = timedelta(minutes=gap_minutes), timedelta(minutes=max_span_minutes)
 
-    def camera(device_id: UUID) -> Camera:
-        return cameras.get(device_id) or Camera(name="Unknown camera", area=UNASSIGNED_AREA)
+    def camera_of(inc) -> Camera:
+        """Camera name and area where the incident HAPPENED.
+
+        Taken from the location stored on the incident's first violation
+        (a camera reinstalled at another manway must not move its past
+        incidents); the device's current values only for unstamped rows.
+        """
+        return camera_from_row(inc.members[0], cameras.get(inc.device_id))
 
     def label(row) -> str:
         return labeler.short_label(row.type, row.type_detail, row.model_id)
@@ -603,7 +609,7 @@ def build_report(
     def totals(grouped: list) -> PeriodTotals:
         by_area, by_type, by_shift, by_area_type = Counter(), Counter(), Counter(), Counter()
         for inc in grouped:
-            area, kind = camera(inc.device_id).area, label(inc.members[0])
+            area, kind = camera_of(inc).area, label(inc.members[0])
             by_area[area] += 1
             by_type[kind] += 1
             by_area_type[(area, kind)] += 1
@@ -627,7 +633,7 @@ def build_report(
     incidents: list[ReportIncident] = []
     for inc in current_groups:
         first = inc.members[0]
-        cam = camera(inc.device_id)
+        cam = camera_of(inc)
         local_start = inc.first_at.astimezone(tz)
         incidents.append(
             ReportIncident(
@@ -801,6 +807,23 @@ def rank_for_gallery(
 # ---------------------------------------------------------------------------
 
 
+def camera_from_row(row, current: Camera | None) -> Camera:
+    """Camera for one violation row: its stored location when stamped.
+
+    A stamped row with no area means the camera was not placed at a manway
+    then: UNASSIGNED_AREA, never the camera's current manway.
+    """
+    if getattr(row, "location_stamped_at", None) is None:
+        return current or Camera(name="Unknown camera", area=UNASSIGNED_AREA)
+    name = (
+        (getattr(row, "camera_display_name", None) or "").strip()
+        or (getattr(row, "camera_name", None) or "").strip()
+        or (current.name if current else "Unknown camera")
+    )
+    area = (getattr(row, "area", None) or "").strip() or UNASSIGNED_AREA
+    return Camera(name=name, area=area)
+
+
 def camera_from_device(device: Device) -> Camera:
     """Area is the manway; without one, the location, then the camera itself."""
     name = (device.display_name or "").strip() or device.name
@@ -883,6 +906,10 @@ async def load_report(
                 Violation.status,
                 Violation.severity,
                 Violation.confidence,
+                Violation.camera_name,
+                Violation.area,
+                Violation.camera_display_name,
+                Violation.location_stamped_at,
             ).where(and_(*filters))
         )
     ).all()

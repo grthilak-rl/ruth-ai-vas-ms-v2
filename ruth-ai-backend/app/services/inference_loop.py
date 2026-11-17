@@ -1741,6 +1741,10 @@ class InferenceLoopService:
                     model_version=model_version,
                     bounding_boxes=bounding_boxes,
                 )
+                # Where the camera is now (VAS placement), stored so the
+                # violation stays with this manway if the camera moves.
+                from app.services.violation_location import stamp_location
+                await stamp_location(violation, device, violation.timestamp)
 
                 db.add(violation)
                 await db.commit()

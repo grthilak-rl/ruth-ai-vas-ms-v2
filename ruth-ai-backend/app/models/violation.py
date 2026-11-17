@@ -155,6 +155,21 @@ class Violation(Base, TimestampMixin):
         nullable=False,
     )
 
+    # Where the camera was when this violation happened, from VAS's placement
+    # history at creation time (app/services/placement_resolver.py). Readers
+    # use these whenever location_stamped_at is set — even when area is NULL
+    # (the camera was not placed anywhere) — and fall back to the device's
+    # current values only for rows not stamped yet. See
+    # app/services/violation_location.py.
+    area: Mapped[str | None] = mapped_column(String(64), nullable=True, index=True)
+    in_out: Mapped[str | None] = mapped_column(String(8), nullable=True)
+    camera_display_name: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    location_stamped_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+    # vas | mirror (VAS unreachable; Ruth's device copy) | backfill
+    location_source: Mapped[str | None] = mapped_column(String(16), nullable=True)
+
     # AI model information
     model_id: Mapped[str] = mapped_column(
         String(100),
