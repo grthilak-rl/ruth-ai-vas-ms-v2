@@ -18,7 +18,8 @@ import { EMPTY_FAN_OUT, fanOutDetections } from '../detectionFanOut';
 import { FALL_DETECTIONS, FIXED_NOW, FRAME_HEIGHT, FRAME_WIDTH, PPE_RAW } from './overlaySupport';
 
 beforeEach(() => {
-  vi.useFakeTimers();
+  // Only the clock is fixed; faking timers too breaks vitest 4's hook timeout.
+  vi.useFakeTimers({ toFake: ['Date'] });
   vi.setSystemTime(FIXED_NOW);
 });
 afterEach(() => {

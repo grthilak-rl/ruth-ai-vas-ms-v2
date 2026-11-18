@@ -26,7 +26,8 @@ import {
 } from './overlaySupport';
 
 beforeEach(() => {
-  vi.useFakeTimers();
+  // Only the clock is fixed; faking timers too breaks vitest 4's hook timeout.
+  vi.useFakeTimers({ toFake: ['Date'] });
   vi.setSystemTime(FIXED_NOW);
 });
 afterEach(() => {
