@@ -22,7 +22,7 @@ FAILED=0
 SUMMARY=()
 
 cleanup() {
-  docker rm -f "$PG" >/dev/null 2>&1
+  docker rm -fv "$PG" >/dev/null 2>&1   # -v: also its anonymous data volume
   docker network rm "$NET" >/dev/null 2>&1
   if [ "${KEEP_LOGS:-0}" = 1 ] || [ "$FAILED" != 0 ]; then
     echo "Logs: $LOGS"
