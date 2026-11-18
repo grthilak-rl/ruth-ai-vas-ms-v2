@@ -8,5 +8,3 @@
 export { LiveVideoPlayer } from './LiveVideoPlayer';
 export { VideoOverlay } from './VideoOverlay';
 export { VideoErrorBoundary } from './VideoErrorBoundary';
-export { useVideoStream } from './useVideoStream';
-export type { VideoStreamState, VideoError } from './useVideoStream';

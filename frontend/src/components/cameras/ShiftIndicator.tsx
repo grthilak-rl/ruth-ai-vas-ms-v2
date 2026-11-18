@@ -48,6 +48,7 @@ const ShiftTimeRemaining = memo(function ShiftTimeRemaining({
   const [remainingMs, setRemainingMs] = useState(() => millisUntilShiftEnd(endsAt));
 
   useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- resyncs with the clock when endsAt changes, then ticks on the minute
     setRemainingMs(millisUntilShiftEnd(endsAt));
 
     let intervalId: number | undefined;

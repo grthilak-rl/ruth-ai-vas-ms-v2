@@ -152,6 +152,7 @@ export function LiveVideoPlayer({
   // (player controls live) until the operator clicks "Re-select ROI".
   useEffect(() => {
     if (isChaneTankEnabled && !!onChaneRoiConfirm && !chaneTankRoiCircle) {
+      // eslint-disable-next-line react-hooks/set-state-in-effect -- enters or leaves ROI selection only when chane or its ROI changes; a render-time check would undo Cancel
       setRoiSelecting(true);
     } else if (!isChaneTankEnabled) {
       setRoiSelecting(false);
@@ -531,6 +532,7 @@ export function LiveVideoPlayer({
   useEffect(() => {
     if (!isAvailable) {
       cleanup();
+      // eslint-disable-next-line react-hooks/set-state-in-effect -- availability change tears down the external player and updates its state
       setPlayerState('offline');
     } else if (playerState === 'offline') {
       setPlayerState('idle');
@@ -560,6 +562,7 @@ export function LiveVideoPlayer({
     if (playerState !== 'idle') return;
 
     if (autoConnectDelayMs <= 0) {
+      // eslint-disable-next-line react-hooks/set-state-in-effect -- auto-connect drives the external WebRTC player
       handleConnect();
       return;
     }

@@ -55,6 +55,7 @@ export function GeofenceSetupModal({
     if (initialConfig) {
       // Tank model config
       if (initialConfig.tank_corners) {
+        // eslint-disable-next-line react-hooks/set-state-in-effect -- seeds the editor from the saved config when the modal opens or the config changes
         setCorners(initialConfig.tank_corners.map(([x, y]) => ({ x, y })));
       }
       if (initialConfig.capacity_liters !== undefined) {

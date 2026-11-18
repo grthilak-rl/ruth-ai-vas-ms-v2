@@ -1,4 +1,5 @@
-import { Navigate, createBrowserRouter, useParams } from 'react-router-dom';
+import { Navigate, createBrowserRouter } from 'react-router-dom';
+import { RedirectModelDetail } from './RedirectModelDetail';
 import { AppShell } from './components/AppShell';
 import { RequireSupervisor } from './components/guards';
 import {
@@ -21,18 +22,6 @@ import {
   ForbiddenPage,
 } from './pages';
 import { AdminLogin, ModelDetailPage, RequireAdminToken } from './pages/admin';
-
-/**
- * /admin/models/:modelPk -> /settings/models/:modelPk
- *
- * A component rather than a static redirect because the param has to be
- * carried across; a plain <Navigate to="/settings/models"> would silently
- * drop which model the link pointed at.
- */
-function RedirectModelDetail() {
-  const { modelPk = '' } = useParams();
-  return <Navigate to={`/settings/models/${modelPk}`} replace />;
-}
 
 /**
  * Application Router (E11 Role-Protected)

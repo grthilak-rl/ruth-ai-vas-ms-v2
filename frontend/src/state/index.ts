@@ -237,14 +237,14 @@ export type { GlobalStatus, CapacityStatus } from './hooks';
 // Auth Context
 // ============================================================================
 
+export { AuthProvider } from './context/AuthContext';
 export {
-  AuthProvider,
   useAuth,
   useHasRole,
   useIsAdmin,
   useIsSupervisor,
   type UserRole,
-} from './context/AuthContext';
+} from './context/auth';
 
 // ============================================================================
 // Error Handling Utilities

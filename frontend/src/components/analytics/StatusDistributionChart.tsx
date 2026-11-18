@@ -97,17 +97,15 @@ export function StatusDistributionChart({
   const { total, segments } = useMemo(() => {
     const totalCount = byStatus.reduce((sum, s) => sum + s.count, 0);
 
-    let currentAngle = 0;
-    const segs = byStatus.map((status) => {
-      const angle = totalCount > 0 ? (status.count / totalCount) * 360 : 0;
-      const segment = {
+    const angles = byStatus.map((s) => (totalCount > 0 ? (s.count / totalCount) * 360 : 0));
+    const segs = byStatus.map((status, i) => {
+      const startAngle = angles.slice(0, i).reduce((sum, a) => sum + a, 0);
+      return {
         ...status,
-        startAngle: currentAngle,
-        endAngle: currentAngle + angle,
+        startAngle,
+        endAngle: startAngle + angles[i],
         color: getStatusColor(status.status),
       };
-      currentAngle += angle;
-      return segment;
     });
 
     return { total: totalCount, segments: segs };

@@ -48,7 +48,7 @@ export interface ModelConfig {
   roi_circle?: { cx: number; cy: number; r: number };
 
   // Allow additional fields for future models
-  [key: string]: any;
+  [key: string]: unknown;
 }
 
 export interface GeofencingConfig {

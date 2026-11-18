@@ -1,4 +1,4 @@
-import { useMemo } from 'react';
+import { useEffect, useState } from 'react';
 import {
   useHardwareQuery,
   getUsageLevel,
@@ -13,6 +13,10 @@ import {
   type CapacityMetrics,
 } from '../../state';
 import './HardwareCapacityCard.css';
+
+/** Data older than this shows the card as stale. */
+const STALE_AFTER_MS = 10_000;
+const STALE_CHECK_MS = 5_000;
 
 /**
  * Hardware Capacity Card
@@ -29,18 +33,18 @@ import './HardwareCapacityCard.css';
 export function HardwareCapacityCard() {
   const { data, isLoading, isError, dataUpdatedAt } = useHardwareQuery();
 
-  // Calculate time since last update
-  const lastUpdateDisplay = useMemo(() => {
-    if (!data?.timestamp) return 'Unknown';
-    return getTimeSinceUpdate(data.timestamp);
-  }, [data?.timestamp]);
-
   // Determine if data is stale (>10 seconds old)
-  const isStale = useMemo(() => {
-    if (!dataUpdatedAt) return false;
-    const now = Date.now();
-    return now - dataUpdatedAt > 10000;
-  }, [dataUpdatedAt]);
+  // Needs a ticking clock: a memo keyed on dataUpdatedAt only re-ran when
+  // fresh data arrived, so the card could never turn stale.
+  const [now, setNow] = useState(() => Date.now());
+  useEffect(() => {
+    const id = window.setInterval(() => setNow(Date.now()), STALE_CHECK_MS);
+    return () => window.clearInterval(id);
+  }, []);
+  const isStale = !!dataUpdatedAt && now - dataUpdatedAt > STALE_AFTER_MS;
+
+  // Time since last update, on the same clock so "Xs ago" keeps counting.
+  const lastUpdateDisplay = getTimeSinceUpdate(data?.timestamp, now);
 
   // Error state - show error card
   if (isError && !data) {

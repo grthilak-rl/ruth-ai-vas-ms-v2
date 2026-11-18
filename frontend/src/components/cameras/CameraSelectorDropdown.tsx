@@ -55,6 +55,15 @@ export function CameraSelectorDropdown({
     setTempSelection(pruneSelection(selectedCameraIds, cameras));
   }, [selectedCameraIds, cameras]);
 
+  const handleClose = () => {
+    // Apply changes on close
+    const pruned = pruneSelection(tempSelection, cameras);
+    if (JSON.stringify(pruned) !== JSON.stringify(selectedCameraIds)) {
+      onSelectionChange(pruned);
+    }
+    setIsOpen(false);
+  };
+
   // Close dropdown when clicking outside
   useEffect(() => {
     function handleClickOutside(event: MouseEvent) {
@@ -114,14 +123,6 @@ export function CameraSelectorDropdown({
     setIsOpen(false);
   };
 
-  const handleClose = () => {
-    // Apply changes on close
-    const pruned = pruneSelection(tempSelection, cameras);
-    if (JSON.stringify(pruned) !== JSON.stringify(selectedCameraIds)) {
-      onSelectionChange(pruned);
-    }
-    setIsOpen(false);
-  };
 
   const handleClearAll = () => {
     setTempSelection([]);

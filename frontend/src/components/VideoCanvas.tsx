@@ -32,19 +32,28 @@ export function VideoCanvas({
   const imageRef = useRef<HTMLImageElement>(null);
   const [dimensions, setDimensions] = useState({ width: 0, height: 0 });
   const [currentPoint, setCurrentPoint] = useState<Point | undefined>();
+  // Natural-image px -> displayed px. Measured with the container size (on
+  // load and resize) instead of reading the image ref during render.
+  const [displayScale, setDisplayScale] = useState<{ x: number; y: number } | null>(null);
+
+  const measure = () => {
+    if (containerRef.current) {
+      const { clientWidth, clientHeight } = containerRef.current;
+      setDimensions({ width: clientWidth, height: clientHeight });
+    }
+    const img = imageRef.current;
+    if (img && img.naturalWidth && img.naturalHeight) {
+      const rect = img.getBoundingClientRect();
+      setDisplayScale({ x: rect.width / img.naturalWidth, y: rect.height / img.naturalHeight });
+    }
+  };
 
   useEffect(() => {
-    const updateDimensions = () => {
-      if (containerRef.current) {
-        const { clientWidth, clientHeight } = containerRef.current;
-        setDimensions({ width: clientWidth, height: clientHeight });
-      }
-    };
+    measure();
+    window.addEventListener('resize', measure);
 
-    updateDimensions();
-    window.addEventListener('resize', updateDimensions);
-
-    return () => window.removeEventListener('resize', updateDimensions);
+    return () => window.removeEventListener('resize', measure);
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- measure reads refs only; bind once
   }, []);
 
   const getCanvasCoordinates = (e: React.MouseEvent<HTMLDivElement>): Point => {
@@ -65,19 +74,6 @@ export function VideoCanvas({
     return {
       x: Math.round(x * scaleX),
       y: Math.round(y * scaleY)
-    };
-  };
-
-  const getDisplayCoordinates = (point: Point): Point => {
-    if (!imageRef.current) return point;
-
-    const imageRect = imageRef.current.getBoundingClientRect();
-    const scaleX = imageRect.width / imageRef.current.naturalWidth;
-    const scaleY = imageRect.height / imageRef.current.naturalHeight;
-
-    return {
-      x: point.x * scaleX,
-      y: point.y * scaleY
     };
   };
 
@@ -115,7 +111,9 @@ export function VideoCanvas({
   };
 
   // Convert corners from video coordinates to display coordinates for canvas
-  const displayCorners = corners.map(getDisplayCoordinates);
+  const displayCorners = displayScale
+    ? corners.map((p) => ({ x: p.x * displayScale.x, y: p.y * displayScale.y }))
+    : corners;
 
   return (
     <div
@@ -135,12 +133,7 @@ export function VideoCanvas({
         className="video-canvas__video"
         draggable={false}
         onDragStart={(e) => e.preventDefault()}
-        onLoad={() => {
-          if (imageRef.current && containerRef.current) {
-            const { clientWidth, clientHeight } = containerRef.current;
-            setDimensions({ width: clientWidth, height: clientHeight });
-          }
-        }}
+        onLoad={measure}
       />
 
       {dimensions.width > 0 && dimensions.height > 0 && (

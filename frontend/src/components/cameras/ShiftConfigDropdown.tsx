@@ -86,6 +86,7 @@ export function ShiftConfigDropdown() {
   useEffect(() => {
     if (!isOpen || !schedule) return;
 
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- reseeds the form from the server each time the panel opens
     setMode(schedule.mode);
     setTimezone(schedule.timezone);
     setShifts(

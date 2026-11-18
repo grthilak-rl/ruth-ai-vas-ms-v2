@@ -9,7 +9,7 @@
  * existing analysis from the detail page.
  */
 
-import { useEffect, useMemo, useState } from 'react';
+import { useMemo, useState } from 'react';
 
 import { VideoCanvas } from '../VideoCanvas';
 import type { Point } from '../../types/geofencing';
@@ -94,12 +94,10 @@ export function NewAnalysisForm({
   const [formError, setFormError] = useState<string | null>(null);
 
   // Default-select the first bookmark when none is pre-set and the
-  // list arrives.
-  useEffect(() => {
-    if (!bookmarkId && bookmarks && bookmarks.length > 0) {
-      setBookmarkId(bookmarks[0].id);
-    }
-  }, [bookmarks, bookmarkId]);
+  // list arrives. Adjusted during render rather than in an effect.
+  if (!bookmarkId && bookmarks && bookmarks.length > 0) {
+    setBookmarkId(bookmarks[0].id);
+  }
 
   const healthyModels = useMemo(
     () =>

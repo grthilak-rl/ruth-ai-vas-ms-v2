@@ -8,7 +8,6 @@ import {
   getConfidenceCategory,
   getConfidenceDisplay,
   useIsSupervisor,
-  useIsAdmin,
 } from '../../state';
 import { EvidenceViewer } from './EvidenceViewer';
 import { ViolationMetadata } from './ViolationMetadata';
@@ -45,7 +44,8 @@ export function ViolationDetailView({
   onRefetch,
 }: ViolationDetailViewProps) {
   const navigate = useNavigate();
-  const isSupervisorOrAdmin = useIsSupervisor() || useIsAdmin();
+  // useIsSupervisor is 'supervisor or higher', so it already includes admins.
+  const isSupervisorOrAdmin = useIsSupervisor();
 
   // Action mutations
   const acknowledgeMutation = useAcknowledgeViolation();

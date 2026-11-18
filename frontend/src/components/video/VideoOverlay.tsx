@@ -135,15 +135,18 @@ export const VideoOverlay = memo(function VideoOverlay({
 
   // Throttled draw function
   const throttledDraw = useCallback(() => {
-    const now = performance.now();
-    if (now - lastDrawRef.current < REDRAW_THROTTLE_MS) {
-      // Schedule next frame
-      animationFrameRef.current = requestAnimationFrame(throttledDraw);
-      return;
-    }
+    const tick = () => {
+      const now = performance.now();
+      if (now - lastDrawRef.current < REDRAW_THROTTLE_MS) {
+        // Schedule next frame
+        animationFrameRef.current = requestAnimationFrame(tick);
+        return;
+      }
 
-    lastDrawRef.current = now;
-    drawDetections();
+      lastDrawRef.current = now;
+      drawDetections();
+    };
+    tick();
   }, [drawDetections]);
 
   // Update canvas size when video dimensions change

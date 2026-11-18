@@ -68,13 +68,12 @@ export function formatPercent(percent: number | null | undefined): string {
 /**
  * Get time since last update in human-readable format
  */
-export function getTimeSinceUpdate(timestamp: string | undefined): string {
+export function getTimeSinceUpdate(timestamp: string | undefined, nowMs: number = Date.now()): string {
   if (!timestamp) return 'Unknown';
 
   try {
     const lastUpdate = new Date(timestamp);
-    const now = new Date();
-    const diffMs = now.getTime() - lastUpdate.getTime();
+    const diffMs = nowMs - lastUpdate.getTime();
     const diffSeconds = Math.floor(diffMs / 1000);
 
     if (diffSeconds < 0) return 'just now';

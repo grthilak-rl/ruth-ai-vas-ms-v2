@@ -233,6 +233,7 @@ export function BookmarkMonitoringView({
   // video is currently playing, start the new one. If paused, the
   // play handler below will start it on next play.
   useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- restarts the external detection manager when the model or config changes
     stopManager();
     const video = videoRef.current;
     if (video && !video.paused && !video.ended && video.readyState >= 2) {
@@ -451,6 +452,7 @@ export function BookmarkMonitoringView({
   // switching model) always exits selection mode.
   useEffect(() => {
     if (isChaneSelected && !hasConfirmedRoi) {
+      // eslint-disable-next-line react-hooks/set-state-in-effect -- enters or leaves ROI selection only when the model or ROI changes; a render-time check would undo Cancel
       setRoiSelecting(true);
     } else if (!isChaneSelected) {
       setRoiSelecting(false);

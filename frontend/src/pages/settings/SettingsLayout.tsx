@@ -47,10 +47,9 @@ export function SettingsLayout() {
   }, []);
 
   // Clear the expiry notice once a session exists again, so it does not
-  // linger above a section that is now working.
-  useEffect(() => {
-    if (isSignedIn) setSessionExpired(false);
-  }, [isSignedIn]);
+  // linger above a section that is now working. Adjusted during render
+  // (React's pattern for state derived from a prop) rather than in an effect.
+  if (isSignedIn && sessionExpired) setSessionExpired(false);
 
   return (
     <div className="settings-layout">
