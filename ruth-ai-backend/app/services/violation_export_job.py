@@ -110,6 +110,15 @@ async def resolve_plan(
         ).scalars()
     }
 
+    from app.models import Project
+
+    project_names = dict(
+        (
+            await db.execute(
+                select(Project.id, Project.name).where(Project.id.in_({v.project_id for v in violations}))
+            )
+        ).all()
+    )
     labeler = ViolationLabeler.current()
     frame_root = Path(get_settings().evidence_frame_dir).resolve()
     plans: list[PlannedItem] = []
@@ -128,6 +137,8 @@ async def resolve_plan(
         plans.append(
             PlannedItem(
                 item=ExportItem(
+                    project_id=v.project_id,
+                    project_name=project_names.get(v.project_id),
                     violation_id=v.id,
                     model_id=v.model_id,
                     model_version=v.model_version,
@@ -261,6 +272,8 @@ async def run_job(
 
     try:
         async with session_factory() as db:
+            row = await db.get(ViolationExport, export_id)
+            project_id = row.project_id if row else None
             plan = await resolve_plan(db, base_stmt, options)
             await _touch(db, export_id, total=plan.total)
 
@@ -310,6 +323,12 @@ async def run_job(
 
                 manifest = {
                     "export_id": str(export_id),
+                    "project": {
+                        "id": str(project_id) if project_id else None,
+                        "name": next(
+                            (p.item.project_name for p in plan.items if p.item.project_name), None
+                        ),
+                    },
                     "built_at": datetime.now(timezone.utc).isoformat(),
                     "request": options.as_dict(),
                     "violations_matching_filters": plan.matched,

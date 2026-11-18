@@ -17,6 +17,7 @@ from sqlalchemy.dialects.postgresql import ENUM, JSONB, UUID
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.models.base import Base, TimestampMixin, generate_uuid
+from app.models.project_tag import ProjectTagMixin
 from app.models.enums import StreamState
 
 if TYPE_CHECKING:
@@ -25,7 +26,7 @@ if TYPE_CHECKING:
     from app.models.violation import Violation
 
 
-class StreamSession(Base, TimestampMixin):
+class StreamSession(ProjectTagMixin, Base, TimestampMixin):
     """Streaming session entity.
 
     A StreamSession represents a period during which AI inference is

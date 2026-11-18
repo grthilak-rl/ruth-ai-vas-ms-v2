@@ -1,0 +1,111 @@
+/* A project action running in the background (Settings -> Project). */
+
+.project-job {
+  border-left-width: 4px;
+}
+
+.project-job--queued,
+.project-job--running {
+  border-left-color: #1a73e8;
+}
+
+.project-job--succeeded {
+  border-left-color: #1e7e34;
+  background: #f4faf5;
+}
+
+.project-job--failed,
+.project-job--interrupted {
+  border-left-color: #c62828;
+  background: #fff8f7;
+}
+
+.project-job__title {
+  margin: 0 0 0.75rem;
+  font-size: 1.0625rem;
+  font-weight: 600;
+}
+
+.project-job__stages {
+  display: flex;
+  flex-direction: column;
+  gap: 0.375rem;
+  margin: 0 0 0.75rem;
+  padding: 0;
+  list-style: none;
+}
+
+.project-job__stage {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+  align-items: baseline;
+  font-size: 0.9375rem;
+  color: #555;
+}
+
+.project-job__mark {
+  display: inline-block;
+  width: 1.25rem;
+  text-align: center;
+  font-weight: 700;
+}
+
+.project-job__stage--done { color: #1e7e34; }
+.project-job__stage--running { color: #1a73e8; font-weight: 600; }
+.project-job__stage--failed,
+.project-job__stage--interrupted { color: #c62828; font-weight: 600; }
+.project-job__stage--pending { color: #888; }
+
+.project-job__stage--running .project-job__mark {
+  animation: project-job-pulse 1.2s ease-in-out infinite;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .project-job__stage--running .project-job__mark { animation: none; }
+}
+
+@keyframes project-job-pulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.3; }
+}
+
+.project-job__detail {
+  font-weight: 400;
+  color: #555;
+  font-size: 0.875rem;
+}
+
+.project-job__errors {
+  margin: 0.25rem 0 0.75rem;
+  padding-left: 1.25rem;
+  font-size: 0.875rem;
+}
+
+.project-job__buttons {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+  margin-top: 0.75rem;
+}
+
+.project-job__attempts {
+  margin: 0.5rem 0 0;
+  font-size: 0.8125rem;
+}
+
+.project-job p {
+  margin: 0 0 0.5rem;
+}
+
+.visually-hidden {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0 0 0 0);
+  white-space: nowrap;
+  border: 0;
+}

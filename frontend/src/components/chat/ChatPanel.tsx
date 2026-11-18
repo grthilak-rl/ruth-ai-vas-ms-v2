@@ -16,6 +16,7 @@ import {
   type ChatMessage as ChatMessageType,
 } from '../../state';
 import { ChatMessage } from './ChatMessage';
+import { useBrand } from '../../state/brand/brand';
 import './ChatPanel.css';
 
 interface ChatPanelProps {
@@ -45,8 +46,10 @@ interface ChatPanelProps {
 export function ChatPanel({
   showSql = false,
   placeholder = 'Ask about violations, cameras, events...',
-  title = 'Ask Visi',
+  title,
 }: ChatPanelProps) {
+  const { assistantName } = useBrand();
+  const heading = title ?? `Ask ${assistantName}`;
   const [messages, setMessages] = useState<ChatMessageType[]>([]);
   const [input, setInput] = useState('');
   const messagesEndRef = useRef<HTMLDivElement>(null);
@@ -145,7 +148,7 @@ export function ChatPanel({
   return (
     <div className="chat-panel">
       <header className="chat-panel__header">
-        <h3 className="chat-panel__title">{title}</h3>
+        <h3 className="chat-panel__title">{heading}</h3>
         {messages.length > 0 && (
           <button
             type="button"

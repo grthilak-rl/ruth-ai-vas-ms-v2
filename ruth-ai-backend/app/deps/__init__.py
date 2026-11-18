@@ -1,6 +1,6 @@
 """Dependency injection modules for Ruth AI Backend."""
 
-from app.deps.db import DBSession, get_db
+from app.deps.db import DBSession, ProjectScopeDep, get_db, get_project_scope
 from app.deps.services import (
     DeviceServiceDep,
     EvidenceServiceDep,
@@ -24,6 +24,8 @@ from app.deps.services import (
 __all__ = [
     # Database
     "DBSession",
+    "ProjectScopeDep",
+    "get_project_scope",
     "get_db",
     # VAS Client
     "get_vas_client",

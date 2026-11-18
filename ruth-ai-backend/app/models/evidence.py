@@ -18,13 +18,14 @@ from sqlalchemy.dialects.postgresql import ENUM, UUID
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.models.base import Base, TimestampMixin, generate_uuid
+from app.models.project_tag import ProjectTagMixin
 from app.models.enums import EvidenceStatus, EvidenceType
 
 if TYPE_CHECKING:
     from app.models.violation import Violation
 
 
-class Evidence(Base, TimestampMixin):
+class Evidence(ProjectTagMixin, Base, TimestampMixin):
     """Evidence entity for violations.
 
     Evidence contains references to snapshots and video bookmarks

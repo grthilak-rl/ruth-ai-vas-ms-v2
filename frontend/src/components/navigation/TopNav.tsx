@@ -1,5 +1,6 @@
 import { NavLink } from 'react-router-dom';
 import { useIsSupervisor } from '../../state';
+import { useBrand } from '../../state/brand/brand';
 import { SystemStatusIndicator } from './SystemStatusIndicator';
 import { AlertsBadge } from './AlertsBadge';
 import './TopNav.css';
@@ -41,11 +42,16 @@ import './TopNav.css';
 export function TopNav() {
   // Per F2: Analytics visible for Supervisor+ role
   const canAccessAnalytics = useIsSupervisor();
+  const brand = useBrand();
 
   return (
     <header className="top-nav">
       <div className="top-nav__brand">
-        <img src="/visics_logo.jpeg" alt="Visics" className="top-nav__logo" />
+        {brand.logoLight ? (
+          <img src={brand.logoLight} alt={brand.productName} className="top-nav__logo" />
+        ) : (
+          brand.ready && <span className="top-nav__product-name">{brand.productName}</span>
+        )}
       </div>
 
       <nav className="top-nav__links" role="navigation" aria-label="Main navigation">

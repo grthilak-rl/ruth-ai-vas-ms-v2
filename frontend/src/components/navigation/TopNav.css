@@ -55,7 +55,16 @@
 
 .top-nav__link--active {
   background-color: #e8f0fe;
-  color: #1a73e8;
+  color: var(--brand-accent, #1a73e8);
+}
+
+/* A brand without a logo: its name, in the logo's place. */
+.top-nav__product-name {
+  font-size: 1.125rem;
+  font-weight: 700;
+  color: #1f2937;
+  line-height: 48px;
+  white-space: nowrap;
 }
 
 .top-nav__link--with-badge {

@@ -3,6 +3,7 @@ import { LiveVideoPlayer } from '../components/video/LiveVideoPlayer';
 import { modelDisplayName } from '../components/cameras/pickerState';
 import { activeModelIds } from '../state/api/devices.api';
 import type { Device } from '../state';
+import { useBrand } from '../state/brand/brand';
 import './CameraFullscreenPage.css';
 
 /**
@@ -11,7 +12,7 @@ import './CameraFullscreenPage.css';
  * Fullscreen camera view that opens in a new browser tab.
  * Per F7 §7:
  * - Single camera view with all controls
- * - Tab title: "{Camera Name} - Ruth AI Live"
+ * - Tab title: "{Camera Name} - {product name} Live" (the active brand)
  * - Full viewport video with detection overlays
  * - Camera info, AI detection controls, and today's violations
  * - Close button closes the tab
@@ -44,15 +45,17 @@ export function CameraFullscreenPage({
     [device]
   );
 
+  const { productName } = useBrand();
+
   // Update document title
   useEffect(() => {
     if (device) {
-      document.title = `${device.name} - Ruth AI Live`;
+      document.title = `${device.name} - ${productName} Live`;
     }
     return () => {
-      document.title = 'Ruth AI'; // Reset on unmount
+      document.title = productName; // Reset on unmount
     };
-  }, [device]);
+  }, [device, productName]);
 
   // Handle close
   const handleClose = useCallback(() => {
@@ -69,7 +72,7 @@ export function CameraFullscreenPage({
       <div className="camera-fullscreen-page">
         <div className="camera-fullscreen-page__header">
           <div className="camera-fullscreen-page__brand">
-            <span className="camera-fullscreen-page__logo">●</span> Ruth AI
+            <span className="camera-fullscreen-page__logo">●</span> {productName}
           </div>
           <div className="camera-fullscreen-page__loading">Loading...</div>
           <button
@@ -94,7 +97,7 @@ export function CameraFullscreenPage({
       <div className="camera-fullscreen-page">
         <div className="camera-fullscreen-page__header">
           <div className="camera-fullscreen-page__brand">
-            <span className="camera-fullscreen-page__logo">●</span> Ruth AI
+            <span className="camera-fullscreen-page__logo">●</span> {productName}
           </div>
           <div className="camera-fullscreen-page__error">⚠ Error</div>
           <button
@@ -131,7 +134,7 @@ export function CameraFullscreenPage({
       {/* Header */}
       <div className="camera-fullscreen-page__header">
         <div className="camera-fullscreen-page__brand">
-          <span className="camera-fullscreen-page__logo">●</span> Ruth AI — {device.name}
+          <span className="camera-fullscreen-page__logo">●</span> {productName} — {device.name}
         </div>
         <div className="camera-fullscreen-page__system-status">
           <span className="camera-fullscreen-page__system-status-icon">●</span> All Systems OK

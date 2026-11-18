@@ -425,3 +425,24 @@
   align-items: center;
   text-decoration: none;
 }
+
+/* Sign-in page: the active product brand above the form. */
+.admin-login__brand {
+  display: flex;
+  justify-content: center;
+  min-height: 72px;
+  margin-bottom: 0.75rem;
+}
+
+.admin-login__logo {
+  max-height: 72px;
+  max-width: 220px;
+  object-fit: contain;
+}
+
+.admin-login__product {
+  align-self: center;
+  font-size: 1.25rem;
+  font-weight: 700;
+  color: #1f2937;
+}

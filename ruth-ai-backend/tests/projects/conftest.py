@@ -24,7 +24,9 @@ import pytest
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 
 from app.models import (
+    PROJECT_STATE_ACTIVE,
     Base,
+    Project,
     Device,
     Event,
     EventType,
@@ -53,6 +55,15 @@ async def engine():
         # Drop first: enum types survive a dropped table and would collide.
         await conn.run_sync(Base.metadata.drop_all)
         await conn.run_sync(Base.metadata.create_all)
+        # Like every migrated database (projects_as_tags guarantees one):
+        # a current project for the project_id default to tag rows with.
+        from sqlalchemy import text
+
+        await conn.execute(text(
+            "INSERT INTO projects (id, name, slug, state, started_at, started_by) "
+            "VALUES (gen_random_uuid(), 'Initial project', 'initial-project', 'active', "
+            "now() - interval '30 days', 'system')"
+        ))
     yield engine
     await engine.dispose()
 
@@ -100,8 +111,29 @@ class Seeder:
         self.events: list[Event] = []
         self.evidence: list[Evidence] = []
 
+    async def ensure_project(self, name: str = "Test project") -> Project:
+        """A current project: tagged tables default project_id to it."""
+        from sqlalchemy import select
+
+        existing = (
+            await self._db.execute(select(Project).where(Project.state == PROJECT_STATE_ACTIVE))
+        ).scalars().first()
+        if existing is not None:
+            return existing
+        project = Project(
+            name=name,
+            slug=name.lower().replace(" ", "-"),
+            state=PROJECT_STATE_ACTIVE,
+            started_at=datetime.now(timezone.utc) - timedelta(days=1),
+            started_by="tester",
+        )
+        self._db.add(project)
+        await self._db.flush()
+        return project
+
     async def seed(self, *, violations: int = 3, live: bool = False) -> "Seeder":
         now = datetime.now(timezone.utc)
+        await self.ensure_project()
 
         self.device = Device(
             vas_device_id=f"vas-{uuid.uuid4()}",

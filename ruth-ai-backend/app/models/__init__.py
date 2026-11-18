@@ -43,8 +43,12 @@ from app.models.project import (
     PROJECT_STATE_STOPPING,
     PROJECT_STATES,
     CURRENT_PROJECT_STATES,
+    PAST_PROJECT_STATES,
     Project,
+    ProjectCamera,
 )
+from app.models.project_job import ProjectJob
+from app.models.project_tag import TAGGED_TABLES, ProjectTagMixin
 from app.models.stream_session import StreamSession
 from app.models.violation import Violation
 from app.models.customer_report import CustomerReport
@@ -57,6 +61,7 @@ from app.models.violation_export import (
 )
 
 __all__ = [
+    "ProjectJob",
     # Base
     "Base",
     "TimestampMixin",
@@ -98,6 +103,10 @@ __all__ = [
     "PROJECT_STATE_RESUMING",
     "PROJECT_STATE_ENDED",
     "CURRENT_PROJECT_STATES",
+    "PAST_PROJECT_STATES",
+    "ProjectCamera",
+    "ProjectTagMixin",
+    "TAGGED_TABLES",
     "PROJECT_STATE_ARCHIVED",
     "PROJECT_STATES",
     "PROJECT_START_LOCK_KEY",

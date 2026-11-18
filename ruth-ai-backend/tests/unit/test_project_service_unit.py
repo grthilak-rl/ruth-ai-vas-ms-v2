@@ -1,22 +1,15 @@
-"""Unit tests for the parts of project archiving that need no database.
+"""Unit tests for the parts of the project service that need no database:
+the slug (URL and backup filename) and the pre-start backup preconditions.
 
-The archive itself is Postgres-specific (INSERT ... SELECT with enum casts,
-advisory locks, temp tables) and is covered by tests/projects/, which needs a
-throwaway Postgres. What is tested here is the logic that decides *whether*
-to archive, and the naming that ends up in a filename — both of which are
-pure and both of which can refuse the operation.
+The archive flow these tests used to cover is retired (projects are tags);
+Start's rules are in tests/unit/test_project_lifecycle.py and the tagging
+and scoping in tests/projects/.
 """
-
-import uuid
 
 import pytest
 
 from app.core.config import Settings
 from app.services.project_service import (
-    MAX_UNBATCHED_ROWS,
-    ConfirmationMismatchError,
-    LiveCamera,
-    Preflight,
     ProjectService,
     slugify,
 )
@@ -65,75 +58,6 @@ def test_slugify_collisions_are_not_silently_resolved() -> None:
     of them.
     """
     assert slugify("Q4 2026") == slugify("Q4-2026") == "q4-2026"
-
-
-# -----------------------------------------------------------------------------
-# Preflight blocker logic
-# -----------------------------------------------------------------------------
-
-
-def _camera(name: str = "CAM-1", state: str = "live") -> LiveCamera:
-    return LiveCamera(
-        device_id=uuid.uuid4(),
-        camera_name=name,
-        session_id=uuid.uuid4(),
-        state=state,
-    )
-
-
-def test_preflight_can_proceed_when_no_blockers() -> None:
-    pre = Preflight(current_project=None, row_counts={}, total_rows=0)
-    assert pre.can_proceed is True
-
-
-def test_preflight_blocked_by_any_blocker() -> None:
-    pre = Preflight(
-        current_project=None,
-        row_counts={"violations": 1},
-        total_rows=1,
-        blockers=["inference_active"],
-    )
-    assert pre.can_proceed is False
-
-
-def test_live_camera_as_dict_is_json_safe() -> None:
-    """The API puts this straight into a 409 body, so no UUID objects."""
-    payload = _camera().as_dict()
-    assert set(payload) == {"device_id", "camera_name", "session_id", "state"}
-    assert all(isinstance(v, str) for v in payload.values())
-
-
-# -----------------------------------------------------------------------------
-# Confirmation
-# -----------------------------------------------------------------------------
-
-
-async def test_start_rejects_mismatched_confirmation() -> None:
-    """The typed confirmation is checked before anything touches the DB.
-
-    A None session is deliberate: if this check ever stopped coming first,
-    the test would fail with AttributeError instead of passing.
-    """
-    service = ProjectService(db=None, settings=Settings())  # type: ignore[arg-type]
-    with pytest.raises(ConfirmationMismatchError):
-        await service.start_new_project(
-            name="Campaign A",
-            confirm_name="Campaign B",
-            started_by="admin",
-            backup_path=None,
-        )
-
-
-async def test_start_confirmation_is_case_and_space_sensitive() -> None:
-    service = ProjectService(db=None, settings=Settings())  # type: ignore[arg-type]
-    for confirm in ("campaign a", "Campaign  A", "Campaign A "):
-        with pytest.raises(ConfirmationMismatchError):
-            await service.start_new_project(
-                name="Campaign A",
-                confirm_name=confirm,
-                started_by="admin",
-                backup_path=None,
-            )
 
 
 # -----------------------------------------------------------------------------
@@ -196,14 +120,61 @@ def test_backup_problem_none_when_usable(tmp_path) -> None:
 
 
 # -----------------------------------------------------------------------------
-# Guard rails
+# Keep the last N pre-start dumps; refuse a backup dir that is not a mount
 # -----------------------------------------------------------------------------
 
 
-def test_row_ceiling_is_far_above_observed_volume() -> None:
-    """The ceiling is a tripwire for unexpected growth, not a daily obstacle.
+def _dumps_service(tmp_path, keep=5):
+    settings = Settings(project_backup_dir=str(tmp_path), project_pg_dump_path="sh", project_backup_keep=keep)
+    return ProjectService(db=None, settings=settings)  # type: ignore[arg-type]
 
-    Measured 2026-10-16: 247,287 rows. If someone lowers this below the
-    observed working set, every archive starts refusing.
-    """
-    assert MAX_UNBATCHED_ROWS > 1_000_000
+
+def _touch(path, age_s):
+    import os
+    import time
+
+    path.write_bytes(b"x")
+    t = time.time() - age_s
+    os.utime(path, (t, t))
+    return path
+
+
+def test_prune_keeps_the_newest_five_project_dumps(tmp_path) -> None:
+    dumps = [_touch(tmp_path / f"project-p{i}-2026.dump", age_s=1000 - i) for i in range(8)]
+    newest = dumps[-1]
+    others = [
+        _touch(tmp_path / "pre-deploy-2026.dump", 5000),
+        _touch(tmp_path / "ruth_ai_pre-deploy.dump", 5000),
+        _touch(tmp_path / "project-notes.txt", 5000),
+    ]
+    removed = _dumps_service(tmp_path).prune_backups(keep=newest)
+    assert sorted(p.name for p in removed) == sorted(p.name for p in dumps[:3])
+    assert sorted(p.name for p in tmp_path.glob("project-*.dump")) == sorted(p.name for p in dumps[3:])
+    assert all(p.exists() for p in others), "pruning touched a file it does not own"
+
+
+def test_prune_never_deletes_the_dump_just_written(tmp_path) -> None:
+    # Clock skew: the new dump looks oldest. It still survives.
+    just_written = _touch(tmp_path / "project-new-2026.dump", age_s=99999)
+    for i in range(5):
+        _touch(tmp_path / f"project-p{i}.dump", age_s=10 + i)
+    _dumps_service(tmp_path).prune_backups(keep=just_written)
+    assert just_written.exists()
+
+
+def test_prune_with_fewer_than_keep_deletes_nothing(tmp_path) -> None:
+    for i in range(2):
+        _touch(tmp_path / f"project-p{i}.dump", age_s=i)
+    assert _dumps_service(tmp_path).prune_backups() == []
+
+
+def test_backup_dir_must_be_a_mount_when_required(tmp_path, monkeypatch) -> None:
+    import app.services.project_service as ps
+
+    settings = Settings(project_backup_dir=str(tmp_path), project_pg_dump_path="sh",
+                        project_backup_require_mount=True)
+    service = ProjectService(db=None, settings=settings)  # type: ignore[arg-type]
+    monkeypatch.setattr(ps.os.path, "ismount", lambda p: str(p) == "/")
+    assert "not a mounted volume" in service.backup_problem()
+    monkeypatch.setattr(ps.os.path, "ismount", lambda p: str(p) in ("/", str(tmp_path.resolve())))
+    assert service.backup_problem() is None

@@ -1,3 +1,10 @@
+/* The tab's cards (result banner, lifecycle, start, projects, sign-in). */
+.start-project {
+  display: flex;
+  flex-direction: column;
+  gap: var(--settings-card-gap, 1.5rem);
+}
+
 /* Start New Project.
  *
  * Extends AdminPages.css rather than restyling: the page must read as part
@@ -215,4 +222,75 @@
   font-variant-numeric: normal;
   color: #666;
   white-space: nowrap;
+}
+
+/* Projects list (projects as tags): every project, with Open. */
+.project-list td {
+  vertical-align: middle;
+}
+
+.project-list__row--viewed {
+  background: #fff8dc;
+}
+
+.project-list__state {
+  margin-left: 0.25rem;
+}
+
+.project-list__state--ended,
+.project-list__state--archived {
+  background: #eceff1;
+  color: #37474f;
+}
+
+.project-list__state--stopped,
+.project-list__state--stopping,
+.project-list__state--resuming {
+  background: #fff3e0;
+  color: #8a4b00;
+}
+
+.project-list__viewing {
+  margin-left: 0.25rem;
+  background: #fff4cc;
+  color: #3d2c00;
+}
+
+.project-list__action {
+  text-align: right;
+  white-space: nowrap;
+}
+
+/* Start the next project: camera picker. */
+.start-project__picker {
+  margin: 0 0 1rem;
+  padding: 0;
+  border: 0;
+  min-width: 0;
+}
+
+.start-project__picker legend {
+  margin-bottom: 0.5rem;
+}
+
+.project-list__no-current {
+  margin: 0 0 0.5rem;
+  padding: 8px 12px;
+  border-radius: 6px;
+  border: 1px solid #ffcc80;
+  background: #fff3e0;
+  color: #8a4b00;
+  font-weight: 600;
+}
+
+.start-project__no-cameras {
+  display: flex;
+  gap: 0.5rem;
+  align-items: flex-start;
+  margin: 0.25rem 0 0.75rem;
+  font-size: 0.875rem;
+}
+
+.start-project__no-cameras input {
+  margin-top: 0.2rem;
 }

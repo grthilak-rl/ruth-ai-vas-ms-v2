@@ -155,8 +155,14 @@ Table `evidence` has columns:
         self,
         question: str,
         include_raw_data: bool = False,
+        assistant_name: str | None = None,
+        product_name: str | None = None,
     ) -> dict[str, Any]:
-        """Process a natural language question."""
+        """Process a natural language question.
+
+        ``assistant_name`` / ``product_name`` come from the active product
+        brand (white-label), so the answer never names a different product.
+        """
         start_time = time.time()
 
         # 1. Preprocess question for date handling
@@ -198,7 +204,9 @@ Table `evidence` has columns:
             answer = self._direct_answer(question, safe_sql, results)
         else:
             try:
-                answer = await self._generate_answer(question, results)
+                answer = await self._generate_answer(
+                    question, results, assistant_name, product_name
+                )
             except OllamaError as e:
                 logger.warning("NLG failed, using fallback", error=str(e))
                 answer = self._fallback_answer(results)
@@ -391,7 +399,13 @@ A: """
         columns = result.keys()
         return [dict(zip(columns, row)) for row in rows]
 
-    async def _generate_answer(self, question: str, results: list[dict[str, Any]]) -> str:
+    async def _generate_answer(
+        self,
+        question: str,
+        results: list[dict[str, Any]],
+        assistant_name: str | None = None,
+        product_name: str | None = None,
+    ) -> str:
         """Generate natural language answer from SQL results."""
         if not results:
             return "I couldn't find any records matching your query."
@@ -403,7 +417,9 @@ A: """
         if len(results) > 20:
             rows_text += f"\n... and {len(results) - 20} more rows"
 
-        prompt = f"""You are Ruth, a helpful assistant for the Ruth AI Video Analytics Platform.
+        who = f"You are {assistant_name}, a helpful assistant" if assistant_name else "You are a helpful assistant"
+        platform = f"the {product_name} video analytics platform" if product_name else "a video analytics platform"
+        prompt = f"""{who} for {platform}.
 The user asked: "{question}"
 The SQL query returned these results:
 {rows_text}

@@ -76,6 +76,7 @@ class ExportPreview(BaseModel):
 
 class ExportJob(BaseModel):
     id: uuid.UUID
+    project_id: uuid.UUID | None = None
     status: str
     error: str | None = None
     total: int

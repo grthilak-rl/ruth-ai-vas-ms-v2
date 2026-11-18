@@ -12,6 +12,7 @@ from datetime import date, timedelta
 from io import BytesIO
 from typing import Callable
 
+from reportlab.lib.colors import HexColor
 from reportlab.lib.enums import TA_LEFT
 from reportlab.lib.pagesizes import A4
 from reportlab.lib.styles import ParagraphStyle
@@ -32,8 +33,8 @@ from reportlab.platypus import (
     TableStyle,
 )
 
+from app.core.logging import get_logger
 from app.services.report import charts
-from app.services.report.branding import VENDOR_LOGO
 from app.services.report.data import (
     DAILY_BASELINE_DAYS,
     PRESET_DAILY,
@@ -62,6 +63,8 @@ from app.services.report.theme import (
     WHITE,
     register_fonts,
 )
+
+logger = get_logger(__name__)
 
 PAGE_W, PAGE_H = A4
 MARGIN_X = 48
@@ -248,7 +251,7 @@ def _footer(c: pdfcanvas.Canvas, r: ReportData, number: int, total: int) -> None
     c.setFont(FONT, 7)
     c.setFillColor(MUTED)
     c.drawString(MARGIN_X, y, f"{_period(r, long=False)}  ·  Counting: {r.mode_label}")
-    c.drawRightString(PAGE_W - MARGIN_X, y, f"Page {number} of {total}")
+    c.drawRightString(PAGE_W - MARGIN_X, y, f"{r.product.product_name}  ·  Page {number} of {total}")
     c.restoreState()
 
 
@@ -264,10 +267,20 @@ def _draw_image(c, path, x, y, max_w, max_h, anchor="sw") -> float:
     return w
 
 
+def _brand_accent(r: ReportData):
+    """The product brand's accent for the cover, else the report's own.
+
+    Only the cover's band and rule follow the brand: the charts keep the
+    report's validated palette, which one accent colour cannot replace.
+    """
+    return HexColor(r.product.accent) if r.product.accent else ACCENT
+
+
 def _cover(c: pdfcanvas.Canvas, r: ReportData) -> None:
     c.saveState()
+    accent = _brand_accent(r)
     # A band down the left edge: the only large area of colour in the report.
-    c.setFillColor(ACCENT)
+    c.setFillColor(accent)
     c.rect(0, 0, 14, PAGE_H, stroke=0, fill=1)
 
     x = MARGIN_X + 10
@@ -285,7 +298,7 @@ def _cover(c: pdfcanvas.Canvas, r: ReportData) -> None:
     size = 32
     while c.stringWidth(title, FONT_BOLD, size) > PAGE_W - x - MARGIN_X:
         size -= 1
-    c.setFillColor(ACCENT)
+    c.setFillColor(accent)
     c.rect(x, y + 64, 36, 3, stroke=0, fill=1)
     c.setFont(FONT_BOLD, size)
     c.setFillColor(INK)
@@ -312,18 +325,32 @@ def _cover(c: pdfcanvas.Canvas, r: ReportData) -> None:
         c.drawString(x + 78, y, value)
         y -= 21
 
-    # Prepared by
+    # Prepared by: the product brand (white-label), not the customer.
     c.setStrokeColor(RULE)
     c.setLineWidth(0.6)
     c.line(x, 96, PAGE_W - MARGIN_X, 96)
     c.setFont(FONT, 7.5)
     c.setFillColor(MUTED)
     c.drawString(x, 74, "Prepared by")
-    if VENDOR_LOGO.is_file():
-        _draw_image(c, VENDOR_LOGO, x + 48, 58, 60, 34)
-    c.drawRightString(
-        PAGE_W - MARGIN_X, 74, "AI video analytics · Confidential: for the customer's internal use"
-    )
+    note_left = x + 48
+    drawn = 0.0
+    if r.product.logo is not None:
+        try:
+            drawn = _draw_image(c, r.product.logo, x + 48, 58, 60, 34)
+        except Exception as exc:  # noqa: BLE001 - a bad file must not stop the report
+            logger.warning("Product logo unreadable, cover shows the name", error=str(exc))
+    if drawn:
+        note_left += drawn
+    else:
+        c.setFont(FONT_BOLD, 9)
+        c.setFillColor(INK)
+        c.drawString(x + 48, 74, r.product.product_name)
+        note_left += c.stringWidth(r.product.product_name, FONT_BOLD, 9)
+        c.setFont(FONT, 7.5)
+        c.setFillColor(MUTED)
+    if r.product.report_note:
+        note = charts._truncate(r.product.report_note, FONT, 7.5, PAGE_W - MARGIN_X - note_left - 12)
+        c.drawRightString(PAGE_W - MARGIN_X, 74, note)
     c.restoreState()
 
 
@@ -1047,7 +1074,7 @@ def render_pdf(r: ReportData, sections: list[str] | None = None) -> bytes:
         out,
         pagesize=A4,
         title=f"{_title(r)} · {_period(r, long=False)}",
-        author="AI",
+        author=r.product.product_name,
         subject=_who(r),
     )
     content_frame = Frame(MARGIN_X, MARGIN_BOTTOM, CONTENT_W, PAGE_H - MARGIN_TOP - MARGIN_BOTTOM,

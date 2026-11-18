@@ -20,6 +20,8 @@ from fastapi.responses import Response
 from app.core.logging import get_logger
 from app.deps import DBSession, ProjectScopeDep
 from app.models import Device, StreamSession, StreamState, Violation, ViolationStatus
+from app.services.product_branding import file_slug
+from app.services.product_branding import get_active as get_active_brand
 from app.services.coverage import has_membership, member_device_ids, monitored_hours, per_camera_hour
 from app.schemas import (
     AnalyticsComparison,
@@ -728,7 +730,8 @@ async def export_analytics(
 
     try:
         # Initialize export service
-        export_service = ExportService(db)
+        product = await get_active_brand(db)
+        export_service = ExportService(db, file_prefix=file_slug(product.product_name))
 
         # Prepare filters
         camera_ids = None if request.scope.all else request.scope.camera_ids or None

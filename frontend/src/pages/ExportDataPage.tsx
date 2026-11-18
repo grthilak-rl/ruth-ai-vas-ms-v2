@@ -36,13 +36,19 @@ import type {
   ExportRequest,
   TimeRangePreset,
 } from '../types/analytics';
+import { PROJECT_PARAM } from '../state/project/viewProject';
 import './ExportDataPage.css';
 
 export function ExportDataPage() {
   const [searchParams, setSearchParams] = useSearchParams();
   const kind: ExportKind = searchParams.get('type') === 'raw' ? 'raw' : 'report';
-  const setKind = (next: ExportKind) =>
-    setSearchParams(next === 'raw' ? { type: 'raw' } : {}, { replace: true });
+  const setKind = (next: ExportKind) => {
+    const params = new URLSearchParams(next === 'raw' ? { type: 'raw' } : {});
+    // Keep the viewed project (project view mode) when switching tabs.
+    const project = searchParams.get(PROJECT_PARAM);
+    if (project) params.set(PROJECT_PARAM, project);
+    setSearchParams(params, { replace: true });
+  };
   const [format, setFormat] = useState<ExportFormat>('csv');
   const [preset, setPreset] = useState<TimeRangePreset>('24h');
   const [customFrom, setCustomFrom] = useState<Date | undefined>();

@@ -33,14 +33,12 @@ from app.schemas.analytics import (
     ViolationTrendsResponse,
 )
 from app.schemas.project import (
-    ArchivedViolation,
-    ArchivedViolationListResponse,
-    LiveCameraInfo,
-    PreflightResponse,
+    ProjectBrief,
+    ProjectBriefList,
     ProjectListResponse,
     ProjectSummary,
+    StartPreflightResponse,
     StartProjectRequest,
-    StartProjectResponse,
 )
 from app.schemas.models import (
     InferenceRateSummary,
@@ -188,12 +186,10 @@ __all__ = [
     "ChatResponse",
     "InferenceRateSummary",
     # Project schemas
-    "ArchivedViolation",
-    "ArchivedViolationListResponse",
-    "LiveCameraInfo",
-    "PreflightResponse",
+    "ProjectBrief",
+    "ProjectBriefList",
     "ProjectListResponse",
+    "StartPreflightResponse",
     "ProjectSummary",
     "StartProjectRequest",
-    "StartProjectResponse",
 ]

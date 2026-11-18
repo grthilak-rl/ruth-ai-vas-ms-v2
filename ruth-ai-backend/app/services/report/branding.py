@@ -22,9 +22,6 @@ from app.models.app_setting import REPORT_BRANDING_KEY, AppSetting
 
 logger = get_logger(__name__)
 
-ASSETS = Path(__file__).resolve().parents[2] / "assets"
-VENDOR_LOGO = ASSETS / "report" / "vendor_logo.jpeg"
-
 MAX_LOGO_BYTES = 1024 * 1024
 #: Uploaded logos are scaled down to fit this box; the cover draws at most
 #: 170 × 64 pt, so this is ample for print.
@@ -82,31 +79,45 @@ async def save_branding(db: AsyncSession, branding: ReportBranding, by: str | No
     return branding
 
 
+def open_upload(data: bytes, what: str = "logo"):
+    """Check an upload is a PNG or JPEG of at most 1 MB; returns it opened.
+
+    The caller owns the returned image (use it as a context manager).
+    """
+    from PIL import Image, UnidentifiedImageError
+
+    if len(data) > MAX_LOGO_BYTES:
+        raise LogoError(f"The {what} must be 1 MB or smaller.")
+    try:
+        with Image.open(BytesIO(data)) as probe:
+            fmt = probe.format
+            probe.verify()
+    except (UnidentifiedImageError, OSError, SyntaxError, Image.DecompressionBombError) as exc:
+        raise LogoError("The file is not a readable image.") from exc
+    if fmt not in ACCEPTED_FORMATS:
+        raise LogoError(f"The {what} must be a PNG or JPEG image.")
+    return Image.open(BytesIO(data))
+
+
+def encode_png(image, max_px: tuple[int, int]) -> bytes:
+    """Re-encode as a PNG that fits ``max_px``; transparency survives."""
+    from PIL import Image
+
+    image = image.convert("RGBA" if image.mode in ("RGBA", "LA", "P") else "RGB")
+    image.thumbnail(max_px, Image.LANCZOS)
+    out = BytesIO()
+    image.save(out, "PNG", optimize=True)
+    return out.getvalue()
+
+
 def prepare_logo(data: bytes) -> bytes:
     """Validate an upload and re-encode it as a bounded PNG.
 
     Re-encoding means what is stored is always a plain image Pillow wrote,
     whatever the upload carried; transparency survives.
     """
-    from PIL import Image, UnidentifiedImageError
-
-    if len(data) > MAX_LOGO_BYTES:
-        raise LogoError("The logo must be 1 MB or smaller.")
-    try:
-        with Image.open(BytesIO(data)) as probe:
-            fmt = probe.format
-            probe.verify()
-    except (UnidentifiedImageError, OSError, SyntaxError) as exc:
-        raise LogoError("The file is not a readable image.") from exc
-    if fmt not in ACCEPTED_FORMATS:
-        raise LogoError("The logo must be a PNG or JPEG image.")
-
-    with Image.open(BytesIO(data)) as image:
-        image = image.convert("RGBA" if image.mode in ("RGBA", "LA", "P") else "RGB")
-        image.thumbnail(LOGO_MAX_PX, Image.LANCZOS)
-        out = BytesIO()
-        image.save(out, "PNG", optimize=True)
-    return out.getvalue()
+    with open_upload(data) as image:
+        return encode_png(image, LOGO_MAX_PX)
 
 
 def store_logo(png: bytes) -> str:

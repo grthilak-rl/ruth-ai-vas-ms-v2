@@ -356,6 +356,19 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     except Exception as e:
         logger.error("Failed to start auto shift report scheduler", error=str(e))
 
+    # A project action (Start/Stop/End/Resume job) still queued or running
+    # was cut short by this restart: mark it interrupted so the Project tab
+    # offers Retry. Never resumed automatically.
+    try:
+        from app.core.database import get_session_factory
+        from app.services.project_jobs import recover_interrupted
+
+        factory = get_session_factory()
+        if factory is not None:
+            await recover_interrupted(factory)
+    except Exception as e:
+        logger.error("Failed to recover interrupted project actions", error=str(e))
+
     logger.info("Ruth AI Backend startup complete")
 
     yield  # Application runs here

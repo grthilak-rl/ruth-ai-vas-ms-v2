@@ -50,6 +50,7 @@ class ViolationResponse(BaseModel):
     """Response schema for a single violation."""
 
     id: uuid.UUID = Field(..., description="Violation UUID")
+    project_id: uuid.UUID | None = Field(None, description="Project the violation is tagged with")
     type: str = Field(..., description="Violation type (e.g., fall_detected)")
     type_detail: str | None = Field(
         None,
@@ -105,6 +106,7 @@ class ViolationDetailResponse(BaseModel):
     """
 
     id: uuid.UUID = Field(..., description="Violation UUID")
+    project_id: uuid.UUID | None = Field(None, description="Project the violation is tagged with")
     type: str = Field(..., description="Violation type")
     type_detail: str | None = Field(
         None,

@@ -4,7 +4,7 @@ import {
   fetchLifecyclePreflight,
   runLifecycle,
   type LifecycleAction,
-  type LifecycleResult,
+  type ProjectJob,
   type ProjectSummary,
 } from '../admin/adminApi';
 import { formatDateTime } from '../admin/format';
@@ -17,6 +17,10 @@ import './ProjectLifecyclePanel.css';
  * exactly what will change, plus the site-wide effects. The plan comes from
  * the same server functions that run the action, so what is confirmed is
  * what happens. End also needs the project name typed.
+ *
+ * Confirming queues the action as a background job; its progress, result
+ * and Retry are shown by ProjectJobProgress above this card. Only one action
+ * runs at a time, so the buttons are disabled while one is running.
  *
  * Stop and Resume are safe to repeat: an interrupted one leaves the project
  * in "stopping"/"resuming" with the error shown, and running it again
@@ -52,10 +56,17 @@ function actionsFor(state: string): LifecycleAction[] {
   }
 }
 
-export function ProjectLifecyclePanel({ project }: { project: ProjectSummary | null }) {
+export function ProjectLifecyclePanel({
+  project,
+  busy = false,
+  onQueued,
+}: {
+  project: ProjectSummary | null;
+  busy?: boolean;
+  onQueued?: (job: ProjectJob) => void;
+}) {
   const queryClient = useQueryClient();
   const [action, setAction] = useState<LifecycleAction | null>(null);
-  const [result, setResult] = useState<LifecycleResult | null>(null);
 
   if (!project) return null;
   const state = project.state;
@@ -73,11 +84,9 @@ export function ProjectLifecyclePanel({ project }: { project: ProjectSummary | n
               key={a}
               type="button"
               className={`admin-button ${a === 'end' ? 'admin-button--danger' : a === 'stop' ? 'admin-button--secondary' : ''}`}
-              onClick={() => {
-                setResult(null);
-                setAction(a);
-              }}
-              disabled={action !== null}
+              onClick={() => setAction(a)}
+              disabled={action !== null || busy}
+              title={busy ? 'Another project action is running' : undefined}
             >
               {(state === 'stopping' && a === 'stop') || (state === 'resuming' && a === 'resume')
                 ? `Finish: ${ACTION_LABELS[a].toLowerCase()}`
@@ -89,11 +98,11 @@ export function ProjectLifecyclePanel({ project }: { project: ProjectSummary | n
 
       <p className="admin-muted">
         {state === 'active' &&
-          'Cameras, recording and inference run as configured. Stop turns the site off without losing anything; Resume brings it back exactly as it was.'}
+          'Cameras, recording and inference run as configured. Stop turns the site off without losing anything; Resume brings the cameras back exactly as they were. End makes the project past, so the next one can start.'}
         {state === 'stopped' &&
-          `Stopped ${project.stopped_at ? formatDateTime(project.stopped_at) : ''}${project.stopped_by ? ` by ${project.stopped_by}` : ''}. Cameras are disabled, inference is off and footage deletion is paused. All data stays readable.`}
+          `Stopped ${project.stopped_at ? formatDateTime(project.stopped_at) : ''}${project.stopped_by ? ` by ${project.stopped_by}` : ''}. Cameras are disabled, inference is off and footage deletion is paused (Resume leaves the pause on; only Settings → System lifts it). All data stays readable.`}
         {state === 'ended' &&
-          `Ended ${project.ended_at ? formatDateTime(project.ended_at) : ''}${project.ended_by ? ` by ${project.ended_by}` : ''}. Cameras stay off and footage deletion stays paused. All data stays readable.`}
+          `Ended ${project.ended_at ? formatDateTime(project.ended_at) : ''}${project.ended_by ? ` by ${project.ended_by}` : ''}. Its data stays viewable from the project list; start the next project when ready.`}
         {(state === 'stopping' || state === 'resuming') &&
           'The last attempt did not finish. Running it again is safe and completes it.'}
       </p>
@@ -106,14 +115,13 @@ export function ProjectLifecyclePanel({ project }: { project: ProjectSummary | n
           project={project}
           action={action}
           onCancel={() => setAction(null)}
-          onDone={(r) => {
-            setResult(r);
+          onDone={(job) => {
             setAction(null);
+            onQueued?.(job);
             queryClient.invalidateQueries({ queryKey: ['admin', 'projects'] });
           }}
         />
       )}
-      {result && <ResultView result={result} />}
     </section>
   );
 }
@@ -127,7 +135,7 @@ function Preflight({
   project: ProjectSummary;
   action: LifecycleAction;
   onCancel: () => void;
-  onDone: (r: LifecycleResult) => void;
+  onDone: (job: ProjectJob) => void;
 }) {
   const plan = useQuery({
     queryKey: ['admin', 'projects', 'lifecycle', action],
@@ -229,37 +237,12 @@ function Preflight({
               onClick={run}
               disabled={busy || !plan.data.allowed || !nameOk}
             >
-              {busy ? 'Working…' : `Confirm: ${ACTION_LABELS[action].toLowerCase()}`}
+              {busy ? 'Queueing…' : `Confirm: ${ACTION_LABELS[action].toLowerCase()}`}
             </button>
             <button type="button" className="admin-button admin-button--secondary" onClick={onCancel} disabled={busy}>
               Cancel
             </button>
           </div>
-        </>
-      )}
-    </div>
-  );
-}
-
-function ResultView({ result }: { result: LifecycleResult }) {
-  return (
-    <div className={`lifecycle__result ${result.complete ? '' : 'lifecycle__result--incomplete'}`} role="status">
-      {result.complete ? (
-        <p>
-          Done: the project is now <strong>{STATE_LABELS[result.project.state] ?? result.project.state}</strong>.
-          {result.retention_paused !== null &&
-            ` Footage deletion pause: ${result.retention_paused ? 'on' : 'off'}.`}
-        </p>
-      ) : (
-        <>
-          <p>
-            Not finished; the project is <strong>{result.project.state}</strong>. Run it again to complete:
-          </p>
-          <ul>
-            {result.errors.map((e) => (
-              <li key={e}>{e}</li>
-            ))}
-          </ul>
         </>
       )}
     </div>

@@ -26,6 +26,7 @@ from sqlalchemy.dialects.postgresql import JSONB, UUID
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.models.base import Base, generate_uuid
+from app.models.project_tag import ProjectTagMixin
 
 #: Job is queued or actively writing the archive.
 EXPORT_BUILDING = "building"
@@ -40,7 +41,7 @@ EXPORT_EXPIRED = "expired"
 TERMINAL_STATES = (EXPORT_READY, EXPORT_FAILED, EXPORT_EXPIRED)
 
 
-class ViolationExport(Base):
+class ViolationExport(ProjectTagMixin, Base):
     """One requested bulk export of violation evidence."""
 
     __tablename__ = "violation_exports"

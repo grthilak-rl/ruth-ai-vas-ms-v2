@@ -188,3 +188,18 @@ describe('select all matching: a frozen, open-only selection', () => {
     expect(filter.until).toBe(NOW.toISOString());
   });
 });
+
+describe('past-project default range', () => {
+  it('shows the whole project when a past project is open and the URL names no range', () => {
+    expect(listStateFromSearch(new URLSearchParams(''), 10, 'all').filters.range).toBe('all');
+    expect(listStateFromSearch(new URLSearchParams('range=7d'), 10, 'all').filters.range).toBe('7d');
+    expect(listStateFromSearch(new URLSearchParams('')).filters.range).toBe('7d');
+  });
+
+  it('round-trips an explicit 7 days while the default is all', () => {
+    const state = listStateFromSearch(new URLSearchParams('range=7d'), 10, 'all');
+    expect(listStateToSearch(state, 10, 'all').get('range')).toBe('7d');
+    const all = listStateFromSearch(new URLSearchParams(''), 10, 'all');
+    expect(listStateToSearch(all, 10, 'all').get('range')).toBeNull();
+  });
+});

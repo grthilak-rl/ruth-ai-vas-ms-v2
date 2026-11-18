@@ -27,11 +27,10 @@ from sqlalchemy import func, select
 from app.core.admin_auth import AdminUser
 from app.core.config import get_settings
 from app.core.logging import get_logger
-from app.deps import DBSession
+from app.deps import DBSession, ProjectScopeDep
 from app.models.customer_report import TRIGGER_MANUAL, TRIGGER_REGENERATE, CustomerReport
 from app.models.enums import ViolationStatus
 from app.models.violation import Violation
-from app.models.project import CURRENT_PROJECT_STATES, Project
 from app.models.violation_export import EXPORT_READY
 from app.schemas.customer_report import (
     GALLERY_SIZES,
@@ -72,13 +71,14 @@ def _not_found() -> HTTPException:
 
 
 @router.get("/defaults", response_model=CustomerReportDefaults, summary="Report period defaults")
-async def report_defaults(db: DBSession, _admin: AdminUser) -> CustomerReportDefaults:
+async def report_defaults(
+    db: DBSession, _admin: AdminUser, scope: ProjectScopeDep
+) -> CustomerReportDefaults:
     schedule = await ShiftService(db).get_schedule()
     offset = day_offset_minutes(schedule)
     now_local = datetime.now(schedule.tzinfo)
-    active = (
-        await db.execute(select(Project).where(Project.state.in_(CURRENT_PROJECT_STATES)))
-    ).scalars().first()
+    # The project being viewed (the current one unless a past one is open).
+    active = scope.project
     settings = get_settings()
     return CustomerReportDefaults(
         timezone=schedule.timezone,
@@ -139,7 +139,7 @@ async def _period_or_422(request: CustomerReportRequest, db):
     summary="Evidence gallery candidates for a report",
 )
 async def gallery_preview(
-    request: CustomerReportRequest, db: DBSession, _admin: AdminUser
+    request: CustomerReportRequest, db: DBSession, _admin: AdminUser, scope: ProjectScopeDep
 ) -> GalleryPreview:
     """What the gallery would show, minus ``gallery_exclude``.
 
@@ -149,7 +149,8 @@ async def gallery_preview(
     """
     start, end, _ = await _period_or_422(request, db)
     report = await load_report(
-        db, start=start, end=end, preset=request.preset, mode=request.mode, shift=request.shift
+        db, start=start, end=end, preset=request.preset, mode=request.mode, shift=request.shift,
+        project=scope.project,
     )
     picks = await select_gallery(db, report, request.gallery_size, request.gallery_exclude)
     return GalleryPreview(
@@ -178,12 +179,15 @@ async def gallery_preview(
     summary="Start building a customer report",
 )
 async def create_report(
-    request: CustomerReportRequest, db: DBSession, admin: AdminUser
+    request: CustomerReportRequest, db: DBSession, admin: AdminUser, scope: ProjectScopeDep
 ) -> CustomerReportJob:
     start, end, label = await _period_or_422(request, db)
 
     now = datetime.now(timezone.utc)
     row = CustomerReport(
+        # Explicit, never the database default: a report built while viewing
+        # a past project belongs to that project, not the current one.
+        project_id=scope.project_id,
         format=request.format,
         preset=request.preset,
         mode=request.mode,
@@ -208,6 +212,7 @@ async def create_report(
     logger.info(
         "Customer report requested",
         report_id=str(row.id),
+        project=scope.project.name if scope.project else None,
         preset=request.preset,
         period=label,
         mode=request.mode,
@@ -247,6 +252,7 @@ async def _view(db, rows) -> list[CustomerReportJob]:
             item.dismissed_since = (
                 await db.execute(
                     select(func.count()).select_from(Violation).where(
+                        Violation.project_id == row.project_id,
                         Violation.timestamp >= row.period_start,
                         Violation.timestamp < row.period_end,
                         Violation.status == ViolationStatus.DISMISSED,
@@ -335,6 +341,7 @@ async def regenerate_report(report_id: uuid.UUID, db: DBSession, admin: AdminUse
         shift_name=original.shift_name,
         trigger=TRIGGER_REGENERATE,
         regenerated_from=original.id,
+        project_id=original.project_id,
         attempts=1,
         stage="Queued",
         total=4,

@@ -1,0 +1,57 @@
+/* Past-project banner. Sticks under the top nav on every page while a past
+   project is open, so no screen can be mistaken for the current project. */
+.project-banner {
+  position: sticky;
+  top: 0;
+  z-index: 50;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.5rem 1rem;
+  padding: 0.5rem 1rem;
+  font-size: 0.875rem;
+  color: #3d2c00;
+  background: #fff4cc;
+  border-bottom: 1px solid #e8c95c;
+}
+
+.project-banner--error {
+  color: #5c0b0b;
+  background: #fde7e7;
+  border-bottom-color: #e4a3a3;
+}
+
+.project-banner__what strong {
+  font-weight: 600;
+}
+
+.project-banner__sep {
+  color: #6b5a1f;
+}
+
+.project-banner__live {
+  color: #6b5a1f;
+}
+
+.project-banner__back {
+  margin-left: auto;
+  padding: 0.25rem 0.75rem;
+  font: inherit;
+  font-weight: 600;
+  color: #3d2c00;
+  background: transparent;
+  border: 1px solid #b8962b;
+  border-radius: 4px;
+  cursor: pointer;
+}
+
+.project-banner__back:hover,
+.project-banner__back:focus-visible {
+  background: #ffe999;
+}
+
+@media (max-width: 600px) {
+  .project-banner__back {
+    margin-left: 0;
+  }
+}

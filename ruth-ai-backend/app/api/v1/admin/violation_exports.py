@@ -24,7 +24,7 @@ from sqlalchemy import func, select
 from app.core.admin_auth import AdminUser
 from app.core.config import get_settings
 from app.core.logging import get_logger
-from app.deps import DBSession
+from app.deps import DBSession, ProjectScopeDep
 from app.models import EXPORT_READY, ViolationExport
 from app.models.violation import Violation
 from app.schemas.violation_export import (
@@ -45,15 +45,19 @@ router = APIRouter(prefix="/violation-exports", tags=["Admin"])
 _background: set = set()
 
 
-def _statement(request: ExportRequest):
+def _statement(request: ExportRequest, project_id):
     """The filtered violation query, built by the Violations page's own helper.
 
     Imported here rather than reimplemented so an export cannot disagree
     with the list the operator was looking at.
+
+    The project filter is explicit, not left to the request's scoped
+    session: the same statement runs later in the build job's own session,
+    which is not scoped, and must still read only the viewed project.
     """
     from app.api.v1.violations import apply_violation_filters
 
-    stmt = select(Violation)
+    stmt = select(Violation).where(Violation.project_id == project_id)
     f = request.filters
     return apply_violation_filters(
         stmt,
@@ -81,7 +85,7 @@ def _options(request: ExportRequest) -> ExportOptions:
 
 @router.post("/preview", response_model=ExportPreview, summary="Preview an export")
 async def preview_export(
-    request: ExportRequest, db: DBSession, _admin: AdminUser
+    request: ExportRequest, db: DBSession, _admin: AdminUser, scope: ProjectScopeDep
 ) -> ExportPreview:
     """Counts and a size estimate, so the operator sees the shape first.
 
@@ -91,7 +95,7 @@ async def preview_export(
     """
     options = _options(request)
     try:
-        plan = await resolve_plan(db, _statement(request), options)
+        plan = await resolve_plan(db, _statement(request, scope.project_id), options)
     except ValueError as e:
         raise HTTPException(
             status_code=status.HTTP_409_CONFLICT,
@@ -119,11 +123,11 @@ async def preview_export(
     summary="Start building an export",
 )
 async def create_export(
-    request: ExportRequest, db: DBSession, admin: AdminUser
+    request: ExportRequest, db: DBSession, admin: AdminUser, scope: ProjectScopeDep
 ) -> ExportJob:
     options = _options(request)
     try:
-        plan = await resolve_plan(db, _statement(request), options)
+        plan = await resolve_plan(db, _statement(request, scope.project_id), options)
     except ValueError as e:
         raise HTTPException(
             status_code=status.HTTP_409_CONFLICT,
@@ -156,6 +160,8 @@ async def create_export(
 
     now = datetime.now(timezone.utc)
     row = ViolationExport(
+        # Explicit: an export made while viewing a past project belongs to it.
+        project_id=scope.project_id,
         request=options.as_dict(),
         total=plan.total,
         created_by=admin.username,
@@ -178,7 +184,7 @@ async def create_export(
         )
 
     task = asyncio.create_task(
-        run_job(row.id, _statement(request), options, session_factory)
+        run_job(row.id, _statement(request, scope.project_id), options, session_factory)
     )
     _background.add(task)
     task.add_done_callback(_background.discard)

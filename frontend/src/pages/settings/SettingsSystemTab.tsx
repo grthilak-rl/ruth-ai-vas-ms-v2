@@ -1,13 +1,16 @@
 import { useCallback, useState } from 'react';
 import { useDevicesQuery, useHealthQuery, useModelsStatusQuery } from '../../state';
 import { SystemHealthSkeleton, SystemHealthView } from '../../components/system-health';
+import { ProductBrandingCard } from './ProductBrandingCard';
 
 /**
  * Settings -> System. Path: /settings/system.
  *
- * Service status, component health and model health. Read-only and open:
- * every endpoint behind it (/health, /models/status) is unauthenticated,
- * so this tab needs no admin token and shows the same thing to everyone.
+ * Product branding (whose product this is; admin-only to change, see
+ * ProductBrandingCard), then service status, component health and model
+ * health. The health part is read-only and open: every endpoint behind it
+ * (/health, /models/status) is unauthenticated, so it needs no admin token
+ * and shows the same thing to everyone.
  *
  * The previous version of this page also rendered a "Recent Events" audit
  * feed built by generateMockAuditEvents() — three hardcoded entries
@@ -20,7 +23,6 @@ import { SystemHealthSkeleton, SystemHealthView } from '../../components/system-
 export function SettingsSystemTab() {
   const {
     data: health,
-    isLoading: isHealthLoading,
     isError: isHealthError,
     refetch: refetchHealth,
     isFetching: isHealthFetching,
@@ -49,32 +51,34 @@ export function SettingsSystemTab() {
     }
   }, [refetchHealth, refetchModels, refetchDevices]);
 
-  if (isHealthLoading && !health) {
-    return <SystemHealthSkeleton />;
-  }
-
+  let healthView;
   if (isHealthError && !health) {
-    return (
+    healthView = (
       <div className="error-state">
         <p>Unable to load system health data.</p>
         <button onClick={() => refetchHealth()}>Retry</button>
       </div>
     );
-  }
-
-  if (!health) {
-    return <SystemHealthSkeleton />;
+  } else if (!health) {
+    healthView = <SystemHealthSkeleton />;
+  } else {
+    healthView = (
+      <SystemHealthView
+        health={health}
+        models={modelsData?.models ?? []}
+        modelsLoading={isModelsLoading}
+        devices={devicesData?.items ?? []}
+        devicesLoading={isDevicesLoading}
+        onRefresh={handleRefresh}
+        isRefreshing={isManualRefresh || isHealthFetching}
+      />
+    );
   }
 
   return (
-    <SystemHealthView
-      health={health}
-      models={modelsData?.models ?? []}
-      modelsLoading={isModelsLoading}
-      devices={devicesData?.items ?? []}
-      devicesLoading={isDevicesLoading}
-      onRefresh={handleRefresh}
-      isRefreshing={isManualRefresh || isHealthFetching}
-    />
+    <>
+      <ProductBrandingCard />
+      {healthView}
+    </>
   );
 }

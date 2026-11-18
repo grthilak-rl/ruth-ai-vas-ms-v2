@@ -92,7 +92,7 @@ export function FootageRetentionCard() {
         {mode === 'off' &&
           'Recordings, snapshots and bookmarks are kept indefinitely. Nothing is deleted automatically.'}
         {mode === 'paused' &&
-          'Paused (project stopped or ended). Nothing is deleted, whatever the retention settings say.'}
+          'Paused. Nothing is deleted, whatever the retention settings say. Stopping or ending a project pauses deletion; no project action lifts the pause — only "Remove pause" here does.'}
         {mode === 'on' &&
           `Recordings older than ${state.hot_retention_days} days, snapshots older than ` +
             `${state.snapshot_retention_days} days and bookmarks older than ` +

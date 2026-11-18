@@ -50,7 +50,5 @@
   gap: 10px;
 }
 
-/* Branding and automatic reports are two cards on one tab. */
-.branding + .branding {
-  margin-top: 1.25rem;
-}
+/* Branding and automatic reports are two cards on one tab; the gap
+   between them comes from .settings-layout__content (SettingsLayout.css). */

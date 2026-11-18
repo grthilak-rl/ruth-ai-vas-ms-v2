@@ -202,7 +202,15 @@ export interface AlertsListState {
   expanded: string | null;
 }
 
-export function listStateFromSearch(search: URLSearchParams, defaultPageSize = DEFAULT_PAGE_SIZE): AlertsListState {
+/**
+ * `defaultRange` is the range when the URL names none: the last 7 days, or
+ * the whole project when a past project is open (its data is all older).
+ */
+export function listStateFromSearch(
+  search: URLSearchParams,
+  defaultPageSize = DEFAULT_PAGE_SIZE,
+  defaultRange: DateRange = DEFAULT_FILTERS.range
+): AlertsListState {
   const statusValues = search.getAll('status');
   const statuses = statusValues.includes('any')
     ? []
@@ -216,7 +224,7 @@ export function listStateFromSearch(search: URLSearchParams, defaultPageSize = D
   return {
     filters: {
       statuses,
-      range: range && RANGES.includes(range) ? range : DEFAULT_FILTERS.range,
+      range: range && RANGES.includes(range) ? range : defaultRange,
       dateFrom: parseLocalDate(search.get('from')) ? search.get('from') : null,
       dateTo: parseLocalDate(search.get('to')) ? search.get('to') : null,
       cameraId: search.get('camera') || null,
@@ -235,7 +243,11 @@ export function listStateFromSearch(search: URLSearchParams, defaultPageSize = D
   };
 }
 
-export function listStateToSearch(state: AlertsListState, defaultPageSize = DEFAULT_PAGE_SIZE): URLSearchParams {
+export function listStateToSearch(
+  state: AlertsListState,
+  defaultPageSize = DEFAULT_PAGE_SIZE,
+  defaultRange: DateRange = DEFAULT_FILTERS.range
+): URLSearchParams {
   const { filters } = state;
   const search = new URLSearchParams();
   const isDefaultStatus =
@@ -243,7 +255,7 @@ export function listStateToSearch(state: AlertsListState, defaultPageSize = DEFA
     filters.statuses.every((s) => DEFAULT_FILTERS.statuses.includes(s));
   if (filters.statuses.length === 0) search.append('status', 'any');
   else if (!isDefaultStatus) filters.statuses.forEach((s) => search.append('status', s));
-  if (filters.range !== DEFAULT_FILTERS.range) search.set('range', filters.range);
+  if (filters.range !== defaultRange) search.set('range', filters.range);
   if (filters.range === 'custom') {
     if (filters.dateFrom) search.set('from', filters.dateFrom);
     if (filters.dateTo) search.set('to', filters.dateTo);

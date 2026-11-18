@@ -22,6 +22,7 @@ from app.api.v1 import (
     ai,
     analytics,
     bookmark_analyses,
+    branding,
     chat,
     device_models,
     devices,
@@ -30,6 +31,7 @@ from app.api.v1 import (
     hardware,
     health,
     models,
+    projects,
     shifts,
     violations,
 )
@@ -75,9 +77,11 @@ def create_application() -> FastAPI:
 
     # Register API routers
     app.include_router(health.router, prefix="/api/v1")
+    app.include_router(branding.router, prefix="/api/v1")
     app.include_router(devices.router, prefix="/api/v1")
     app.include_router(events.router, prefix="/api/v1")
     app.include_router(violations.router, prefix="/api/v1")
+    app.include_router(projects.router, prefix="/api/v1")
     app.include_router(shifts.router, prefix="/api/v1")
     app.include_router(analytics.router, prefix="/api/v1")
     app.include_router(models.router, prefix="/api/v1")

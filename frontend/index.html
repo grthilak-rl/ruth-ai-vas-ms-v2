@@ -3,7 +3,12 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>Visics AI</title>
+    <!-- The active product brand replaces these as soon as the app loads
+         (src/state/brand/BrandProvider.tsx). The icon URL serves the active
+         brand's icon, so even the first paint shows the right one. -->
+    <link rel="icon" type="image/png" href="/api/v1/branding/asset/icon" />
+    <link rel="apple-touch-icon" href="/api/v1/branding/asset/icon" />
+    <title>Video analytics</title>
   </head>
   <body>
     <div id="root"></div>

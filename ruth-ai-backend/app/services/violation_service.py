@@ -39,7 +39,7 @@ from datetime import datetime, timezone
 from typing import TYPE_CHECKING
 from uuid import UUID
 
-from sqlalchemy import and_, select
+from sqlalchemy import and_, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.logging import get_logger
@@ -350,6 +350,10 @@ class ViolationService:
             Violation.device_id == device_id,
             Violation.type == violation_type,
             Violation.status.in_(OPEN_STATES),
+            # A new event belongs to the current project (the column default
+            # tags it so); never fold it into a past project's still-open
+            # violation, whatever scope the caller's session has.
+            Violation.project_id == func.ruth_current_project_id(),
         ]
 
         # Session matching

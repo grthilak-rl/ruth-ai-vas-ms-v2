@@ -147,6 +147,13 @@ async def run_report_job(report_id: uuid.UUID, session_factory) -> None:
             row = await db.get(CustomerReport, report_id)
             if row is None:
                 return
+            # The report reads only its own project's data, whichever
+            # project is current while it builds.
+            from app.core.project_scope import scope_session
+            from app.models import Project
+
+            project = await db.get(Project, row.project_id)
+            scope_session(db, row.project_id)
             options = row.options or {}
             await _stage(db, report_id, 0)
             report = await load_report(
@@ -156,6 +163,7 @@ async def run_report_job(report_id: uuid.UUID, session_factory) -> None:
                 preset=row.preset,
                 mode=row.mode,
                 shift=row.shift_name,
+                project=project,
             )
 
             await _stage(db, report_id, 1)

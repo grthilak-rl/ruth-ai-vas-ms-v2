@@ -184,7 +184,7 @@ export function ProjectCamerasCard({
                       </td>
                       <td>
                         {c.name}
-                        {!c.device_id && <span className="admin-muted"> (not synced to Ruth yet)</span>}
+                        {!c.device_id && <span className="admin-muted"> (not synced yet)</span>}
                       </td>
                       <td>{c.vas_enabled_now ? 'Enabled' : 'Disabled'}</td>
                       <td>

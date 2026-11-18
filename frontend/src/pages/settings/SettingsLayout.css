@@ -1,6 +1,10 @@
 /* Settings shell: header, tab bar, content well. */
 
 .settings-layout {
+  box-sizing: border-box;
+  /* Full width up to the max, so the header and tabs do not shift sideways
+     between tabs whose content is narrower (Reports) or wider (Project). */
+  width: 100%;
   max-width: 1200px;
   padding: 1.5rem;
   margin: 0 auto;
@@ -91,8 +95,22 @@
   border-bottom-color: #1a73e8;
 }
 
+/* Every tab stacks its cards with the same gap. Tabs that render several
+   cards side by side in a fragment (Reports) get it from here; the Project
+   tab's own stack uses the same token. Cards must not set outer margins. */
+.settings-layout {
+  --settings-card-gap: 1.5rem;
+}
+
 .settings-layout__content {
+  display: flex;
+  flex-direction: column;
+  gap: var(--settings-card-gap);
   min-height: 20rem;
+}
+
+.settings-layout__content > * {
+  min-width: 0;
 }
 
 @media (max-width: 640px) {

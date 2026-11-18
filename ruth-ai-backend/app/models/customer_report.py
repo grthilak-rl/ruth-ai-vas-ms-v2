@@ -18,6 +18,7 @@ from sqlalchemy.dialects.postgresql import JSONB, UUID
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.models.base import Base, generate_uuid
+from app.models.project_tag import ProjectTagMixin
 from app.models.violation_export import EXPORT_BUILDING
 
 TRIGGER_MANUAL = "manual"
@@ -25,7 +26,7 @@ TRIGGER_AUTO = "auto"
 TRIGGER_REGENERATE = "regenerate"
 
 
-class CustomerReport(Base):
+class CustomerReport(ProjectTagMixin, Base):
     """One requested customer report."""
 
     __tablename__ = "customer_reports"

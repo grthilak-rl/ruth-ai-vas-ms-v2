@@ -356,6 +356,12 @@ class Settings(BaseSettings):
         default="/evidence/branding",
         description="Where the uploaded customer logo is stored.",
     )
+    # Product (white-label) branding: whose product this is. Profiles live in
+    # the `product_branding` app setting, edited under Settings -> System.
+    product_branding_dir: str = Field(
+        default="/evidence/product-branding",
+        description="Where uploaded product brand images (logos, icon) are stored.",
+    )
 
     evidence_bookmark_cooldown_seconds: int = Field(
         default=60,
@@ -391,6 +397,24 @@ class Settings(BaseSettings):
         ge=60,
         le=14400,
         description="Hard timeout for the pre-archive pg_dump",
+    )
+    project_backup_keep: int = Field(
+        default=5,
+        ge=1,
+        le=100,
+        description=(
+            "How many pre-start dumps (project-*.dump) to keep in "
+            "project_backup_dir. Older ones are deleted after a new dump is "
+            "verified; other files in the directory are never touched."
+        ),
+    )
+    project_backup_require_mount: bool = Field(
+        default=False,
+        description=(
+            "Refuse Start when project_backup_dir is on the container's own "
+            "filesystem (not a mounted volume): there a dump fills the root "
+            "disk and is lost on the next deploy. On in production."
+        ),
     )
 
     @property

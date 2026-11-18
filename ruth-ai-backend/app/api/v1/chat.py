@@ -8,6 +8,8 @@ from fastapi import APIRouter, HTTPException, status
 import structlog
 
 from app.deps import NLPChatClientDep
+from app.deps import DBSession
+from app.services.product_branding import get_active as get_active_brand
 from app.integrations.nlp_chat import (
     NLPChatConnectionError,
     NLPChatError,
@@ -63,6 +65,7 @@ The service can be enabled/disabled via the /chat/control endpoints.
 async def chat(
     request: ChatRequest,
     nlp_client: NLPChatClientDep,
+    db: DBSession,
 ) -> ChatResponse:
     """Process a natural language question about Ruth AI data.
 
@@ -71,9 +74,12 @@ async def chat(
     logger.info("Chat request received", question=request.question[:100])
 
     try:
+        brand = await get_active_brand(db)
         result = await nlp_client.ask(
             question=request.question,
             include_raw_data=request.include_raw_data,
+            assistant_name=brand.display_assistant_name,
+            product_name=brand.product_name,
         )
 
         logger.info(

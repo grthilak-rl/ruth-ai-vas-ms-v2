@@ -13,6 +13,7 @@ from app.api.v1.admin import (
     customer_reports,
     me,
     model_store,
+    product_branding,
     projects,
     report_branding,
     violation_exports,
@@ -32,6 +33,7 @@ protected_router.include_router(projects.router)
 protected_router.include_router(violation_exports.router)
 protected_router.include_router(customer_reports.router)
 protected_router.include_router(report_branding.router)
+protected_router.include_router(product_branding.router)
 protected_router.include_router(footage_retention.admin_router)
 router.include_router(protected_router)
 

@@ -56,6 +56,8 @@ class NLPChatClient:
         self,
         question: str,
         include_raw_data: bool = False,
+        assistant_name: str | None = None,
+        product_name: str | None = None,
     ) -> dict[str, Any]:
         """Ask a natural language question.
 
@@ -81,6 +83,8 @@ class NLPChatClient:
                 json={
                     "question": question,
                     "include_raw_data": include_raw_data,
+                    "assistant_name": assistant_name,
+                    "product_name": product_name,
                 },
             )
 

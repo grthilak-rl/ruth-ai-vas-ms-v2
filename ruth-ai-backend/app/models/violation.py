@@ -14,11 +14,12 @@ import uuid
 from datetime import datetime
 from typing import TYPE_CHECKING
 
-from sqlalchemy import DateTime, Float, ForeignKey, String, Text
+from sqlalchemy import DateTime, Float, ForeignKey, Index, String, Text
 from sqlalchemy.dialects.postgresql import ENUM, JSONB, UUID
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.models.base import Base, TimestampMixin, generate_uuid
+from app.models.project_tag import ProjectTagMixin
 from app.models.enums import ViolationStatus, ViolationType
 
 if TYPE_CHECKING:
@@ -28,7 +29,7 @@ if TYPE_CHECKING:
     from app.models.stream_session import StreamSession
 
 
-class Violation(Base, TimestampMixin):
+class Violation(ProjectTagMixin, Base, TimestampMixin):
     """Safety violation entity.
 
     A Violation represents a detected safety incident that requires
@@ -59,6 +60,8 @@ class Violation(Base, TimestampMixin):
     """
 
     __tablename__ = "violations"
+    # Every scoped list reads "this project's violations, newest first".
+    __table_args__ = (Index("ix_violations_project_timestamp", "project_id", "timestamp"),)
 
     # Primary key
     id: Mapped[uuid.UUID] = mapped_column(

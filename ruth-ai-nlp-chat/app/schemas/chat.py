@@ -24,6 +24,16 @@ class ChatRequest(BaseModel):
         default=False,
         description="Include raw SQL results in response",
     )
+    assistant_name: str | None = Field(
+        default=None,
+        max_length=30,
+        description="What the assistant calls itself (the active product brand's).",
+    )
+    product_name: str | None = Field(
+        default=None,
+        max_length=60,
+        description="The product the assistant belongs to (the active product brand).",
+    )
 
 
 class ChatResponse(BaseModel):

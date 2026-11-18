@@ -1,6 +1,7 @@
 import { useState, type FormEvent } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import { AdminApiError, adminLogin, safeNextPath } from './adminApi';
+import { useBrand } from '../../state/brand/brand';
 import './AdminPages.css';
 
 function loginErrorMessage(error: unknown): string {
@@ -37,6 +38,7 @@ export function AdminLogin() {
   const [password, setPassword] = useState('');
   const [error, setError] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
+  const brand = useBrand();
 
   const handleSubmit = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
@@ -56,6 +58,14 @@ export function AdminLogin() {
   return (
     <div className="admin-page admin-page--centered">
       <form className="admin-card admin-login" onSubmit={handleSubmit} noValidate>
+        {/* Whose product this is: the active brand, shown before signing in. */}
+        <div className="admin-login__brand">
+          {brand.logoLight ? (
+            <img src={brand.logoLight} alt={brand.productName} className="admin-login__logo" />
+          ) : (
+            brand.ready && <span className="admin-login__product">{brand.productName}</span>
+          )}
+        </div>
         <h1 className="admin-card__title">Admin sign-in</h1>
         <p className="admin-card__subtitle">Model Management requires an admin account.</p>
 

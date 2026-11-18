@@ -38,13 +38,16 @@ logger = get_logger(__name__)
 class ExportService:
     """Service for exporting analytics data in various formats."""
 
-    def __init__(self, db: AsyncSession):
+    def __init__(self, db: AsyncSession, file_prefix: str = "visics-ai"):
         """Initialize export service.
 
         Args:
             db: Database session
+            file_prefix: Start of the download file name: the active product
+                brand's slug ("visics-ai" -> visics-ai-analytics-<ts>.csv)
         """
         self.db = db
+        self.file_prefix = file_prefix
 
     async def export_violations(
         self,
@@ -247,7 +250,7 @@ class ExportService:
 
         # Generate filename
         timestamp = datetime.now().strftime("%Y%m%d-%H%M%S")
-        filename = f"ruth-ai-analytics-{timestamp}.csv"
+        filename = f"{self.file_prefix}-analytics-{timestamp}.csv"
 
         return csv_bytes, "text/csv", filename
 
@@ -350,7 +353,7 @@ class ExportService:
 
         # Generate filename
         timestamp = datetime.now().strftime("%Y%m%d-%H%M%S")
-        filename = f"ruth-ai-analytics-{timestamp}.xlsx"
+        filename = f"{self.file_prefix}-analytics-{timestamp}.xlsx"
 
         return output.read(), "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", filename
 
@@ -472,6 +475,6 @@ class ExportService:
 
         # Generate filename
         timestamp = datetime.now().strftime("%Y%m%d-%H%M%S")
-        filename = f"ruth-ai-analytics-{timestamp}.pdf"
+        filename = f"{self.file_prefix}-analytics-{timestamp}.pdf"
 
         return output.getvalue(), "application/pdf", filename

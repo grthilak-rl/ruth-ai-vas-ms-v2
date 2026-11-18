@@ -55,6 +55,7 @@ from app.models.enums import EvidenceStatus, EvidenceType, ViolationStatus
 from app.models.evidence import Evidence
 from app.models.project import Project
 from app.services.incidents import group_incidents
+from app.services.product_branding import ReportProductBrand, report_brand
 from app.services.report.branding import ReportBranding, get_branding
 from app.services.shift_schedule import ShiftSchedule
 from app.services.shift_service import ShiftService
@@ -272,6 +273,8 @@ class ReportData:
     #: Hours the report's cameras ran AI inference in the period (stream
     #: sessions; see app/services/coverage.py). Filled by ``load_report``.
     monitored_camera_hours: float | None = None
+    #: Whose product prepared the report (white-label brand), as of building it.
+    product: ReportProductBrand = field(default_factory=ReportProductBrand.builtin)
 
     @property
     def incidents_per_camera_hour(self) -> float | None:
@@ -538,6 +541,7 @@ def build_report(
     max_span_minutes: int = 60,
     type_seen: dict[str, tuple[datetime, datetime]] | None = None,
     shift: str | None = None,
+    product: ReportProductBrand | None = None,
 ) -> ReportData:
     """``rows`` cover ``report_windows(...).fetch_from(data_from)`` to ``end``."""
     if mode not in MODE_LABELS:
@@ -742,6 +746,7 @@ def build_report(
 
     return ReportData(
         branding=branding,
+        product=product or ReportProductBrand.builtin(),
         project_name=project_name,
         mode=mode,
         preset=preset,
@@ -942,6 +947,7 @@ async def load_report(
         labeler=labeler,
         schedule=schedule,
         branding=await get_branding(db),
+        product=await report_brand(db),
         project_name=project_name,
         start=start,
         end=end,

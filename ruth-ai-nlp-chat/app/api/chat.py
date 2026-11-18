@@ -95,6 +95,8 @@ async def chat(
         result = await chat_service.ask(
             question=request.question,
             include_raw_data=request.include_raw_data,
+            assistant_name=request.assistant_name,
+            product_name=request.product_name,
         )
 
         logger.info(

@@ -68,6 +68,11 @@ class ExportItem:
     #: export, which includes reviewed and dismissed violations; the
     #: dismissal path leaves it None because the status is implied.
     status: str | None = None
+    #: The project the violation is tagged with. Set explicitly by every
+    #: caller (never inferred from "the current project"), so an image
+    #: labelled while viewing a past project says it came from that project.
+    project_id: uuid.UUID | None = None
+    project_name: str | None = None
 
 
 @dataclass
@@ -183,6 +188,10 @@ def build_sidecar(
             "display_name": item.camera_display_name,
             "area": item.camera_area,
             "in_out": item.camera_in_out,
+        },
+        "project": {
+            "id": str(item.project_id) if item.project_id else None,
+            "name": item.project_name,
         },
     }
     if extra:

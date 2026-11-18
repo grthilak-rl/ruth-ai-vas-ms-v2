@@ -30,6 +30,9 @@ REPORT_BRANDING_KEY = "report_branding"
 #: Key for automatic per-shift customer reports (on/off, settle delay).
 AUTO_REPORTS_KEY = "auto_reports"
 
+#: Key for product (white-label) brand profiles and which one is active.
+PRODUCT_BRANDING_KEY = "product_branding"
+
 
 class AppSetting(Base, TimestampMixin):
     """One site-global setting.

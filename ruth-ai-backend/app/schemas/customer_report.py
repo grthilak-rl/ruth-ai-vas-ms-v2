@@ -51,6 +51,7 @@ class GalleryPreview(BaseModel):
 
 class CustomerReportJob(BaseModel):
     id: uuid.UUID
+    project_id: uuid.UUID | None = None
     status: str
     error: str | None = None
     stage: str | None = None

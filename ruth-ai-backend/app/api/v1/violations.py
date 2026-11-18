@@ -130,12 +130,26 @@ async def export_dismissed_false_alarms(
             await db.execute(select(Device).where(Device.id.in_({v.device_id for v in violations})))
         ).scalars()
     }
+    from app.models import Project
+
+    # Each violation's own project, explicitly: in the scoped UI this is the
+    # project being viewed, so a dismissal in a past project labels the frame
+    # with that project, not the current one.
+    project_names = dict(
+        (
+            await db.execute(
+                select(Project.id, Project.name).where(Project.id.in_({v.project_id for v in violations}))
+            )
+        ).all()
+    )
     labeler = ViolationLabeler.current()
     items = []
     for v in violations:
         cam = camera_fields(devices.get(v.device_id), v)
         items.append(
             ExportItem(
+                project_id=v.project_id,
+                project_name=project_names.get(v.project_id),
                 violation_id=v.id,
                 model_id=v.model_id,
                 model_version=v.model_version,
@@ -405,6 +419,7 @@ async def list_violations(
         items=[
             ViolationResponse(
                 id=v.id,
+                project_id=v.project_id,
                 **labeler.type_fields(v),
                 **camera_fields(v.device, v),
                 status=v.status.value,
@@ -797,6 +812,7 @@ async def list_incidents(
                 ],
                 representative=ViolationResponse(
                     id=rep_v.id,
+                    project_id=rep_v.project_id,
                     **labeler.type_fields(rep_v),
                     **cam,
                     status=rep_v.status.value,
@@ -901,6 +917,7 @@ async def get_violation(
 
     return ViolationDetailResponse(
         id=violation.id,
+        project_id=violation.project_id,
         **ViolationLabeler.current().type_fields(violation),
         **camera_fields(await db.get(Device, violation.device_id), violation),
         status=violation.status.value,
@@ -1031,6 +1048,7 @@ async def update_violation_status(
 
     return ViolationResponse(
         id=violation.id,
+        project_id=violation.project_id,
         **ViolationLabeler.current().type_fields(violation),
         **camera_fields(await db.get(Device, violation.device_id), violation),
         status=violation.status.value,

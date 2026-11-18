@@ -17,10 +17,11 @@ from sqlalchemy.dialects.postgresql import ENUM, JSONB, UUID
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.models.base import Base, generate_uuid
+from app.models.project_tag import ProjectTagMixin
 from app.models.enums import BookmarkAnalysisState
 
 
-class BookmarkAnalysis(Base):
+class BookmarkAnalysis(ProjectTagMixin, Base):
     """Async AI analysis job against a VAS bookmark.
 
     Each submission creates a new row. Re-runs of the same bookmark with

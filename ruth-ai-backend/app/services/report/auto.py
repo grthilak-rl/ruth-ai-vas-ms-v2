@@ -212,16 +212,23 @@ class AutoReportScheduler:
             self._active()
 
             project = await current_project(db)
-            since = lookback_start(now, settings.enabled_at, project.resumed_at if project else None)
+            # Shifts before this project started belong to the previous
+            # project; never back-fill them into this one.
+            resumed = project.resumed_at if project else None
+            if project is not None:
+                resumed = max(filter(None, (resumed, project.started_at)))
+            since = lookback_start(now, settings.enabled_at, resumed)
             due = due_occurrences(schedule, now, since, timedelta(minutes=settings.settle_minutes))
-            queued = await self._enqueue(db, due, now)
+            queued = await self._enqueue(db, due, now, project.id if project else None)
             to_start = await self._claim(db, now - LOOKBACK - timedelta(days=1))
 
         for report_id in to_start:
             self._launch(report_id, session_factory, launch)
         return {"due": len(due), "queued": queued, "started": len(to_start)}
 
-    async def _enqueue(self, db: AsyncSession, due: list[Occurrence], now: datetime) -> int:
+    async def _enqueue(
+        self, db: AsyncSession, due: list[Occurrence], now: datetime, project_id: uuid.UUID | None = None
+    ) -> int:
         if not due:
             return 0
         existing = set(
@@ -259,6 +266,9 @@ class AutoReportScheduler:
                     created_by=None,
                     created_at=now,
                     updated_at=now,
+                    # Explicit: the current project (the scheduler runs
+                    # only while it is active).
+                    **({"project_id": project_id} if project_id else {}),
                 )
                 .on_conflict_do_nothing(
                     index_elements=["preset", "period_start", "period_end"],

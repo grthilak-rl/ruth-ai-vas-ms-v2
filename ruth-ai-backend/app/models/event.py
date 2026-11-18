@@ -19,6 +19,7 @@ from sqlalchemy.dialects.postgresql import ENUM, JSONB, UUID
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.models.base import Base, TimestampMixin, generate_uuid
+from app.models.project_tag import ProjectTagMixin
 from app.models.enums import EventType
 
 if TYPE_CHECKING:
@@ -27,7 +28,7 @@ if TYPE_CHECKING:
     from app.models.violation import Violation
 
 
-class Event(Base, TimestampMixin):
+class Event(ProjectTagMixin, Base, TimestampMixin):
     """AI detection event entity.
 
     An Event represents a single frame inference result from the AI Runtime.

@@ -35,12 +35,30 @@ import type {
   TimeRangePreset,
   TimeRange,
 } from '../types/analytics';
+import { useProjectView } from '../state/project/projectView';
 import './AnalyticsPage.css';
 
+/**
+ * In the current project the page opens on the last 24 hours. A past
+ * project's data is all older, so there it opens on the project's whole
+ * period (start to end) instead of an empty day.
+ */
 export function AnalyticsPage() {
-  const [preset, setPreset] = useState<TimeRangePreset>('24h');
-  const [customFrom, setCustomFrom] = useState<Date | undefined>();
-  const [customTo, setCustomTo] = useState<Date | undefined>();
+  const { viewedSlug, viewed } = useProjectView();
+  if (viewedSlug && !viewed) {
+    // The project's dates are not known yet (first load of the list).
+    return <div className="analytics-page" aria-busy="true" />;
+  }
+  const period = viewed
+    ? { from: new Date(viewed.started_at), to: viewed.ended_at ? new Date(viewed.ended_at) : new Date() }
+    : undefined;
+  return <AnalyticsPageContent period={period} />;
+}
+
+function AnalyticsPageContent({ period }: { period?: { from: Date; to: Date } }) {
+  const [preset, setPreset] = useState<TimeRangePreset>(period ? 'custom' : '24h');
+  const [customFrom, setCustomFrom] = useState<Date | undefined>(period?.from);
+  const [customTo, setCustomTo] = useState<Date | undefined>(period?.to);
   const [data, setData] = useState<AnalyticsSummaryResponse | null>(null);
   const [currentTimeRange, setCurrentTimeRange] = useState<TimeRange | null>(null);
   const [isLoading, setIsLoading] = useState(true);
@@ -109,7 +127,7 @@ export function AnalyticsPage() {
 
   // Fetch on mount and when time range changes (for presets)
   useEffect(() => {
-    if (preset !== 'custom') {
+    if (preset !== 'custom' || (customFrom && customTo)) {
       fetchData();
     }
     fetchHealthStatus();
