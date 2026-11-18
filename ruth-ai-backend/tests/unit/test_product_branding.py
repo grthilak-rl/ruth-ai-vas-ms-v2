@@ -247,7 +247,19 @@ def test_public_view_exposes_the_active_brand_only():
 async def test_open_endpoint_needs_no_sign_in(client):
     r = await client.get("/api/v1/branding")
     assert r.status_code == 200
-    assert r.json()["product_name"] == "Visics AI"
+    # Display fields only: no profile id or label, no other profiles, no
+    # report note, no audit fields (updated_by/at).
+    assert r.json() == {
+        "product_name": "Visics AI",
+        "short_name": "Visics AI",
+        "assistant_name": "Visi",
+        "accent": None,
+        "logo_light": r.json()["logo_light"],
+        "logo_dark": None,
+        "icon": r.json()["icon"],
+    }
+    assert re.fullmatch(r"/api/v1/branding/asset/logo_light\?v=[0-9a-f]{12}", r.json()["logo_light"])
+    assert re.fullmatch(r"/api/v1/branding/asset/icon\?v=[0-9a-f]{12}", r.json()["icon"])
     assert r.headers["cache-control"] == "no-cache"
     icon = await client.get(r.json()["icon"])
     assert icon.status_code == 200

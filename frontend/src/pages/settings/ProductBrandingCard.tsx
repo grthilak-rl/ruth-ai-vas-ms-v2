@@ -1,11 +1,10 @@
-import { useEffect, useRef, useState, type ChangeEvent, type FormEvent } from 'react';
+import { useEffect, useId, useRef, useState, type ChangeEvent, type FormEvent, type ReactNode } from 'react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { useOutletContext } from 'react-router-dom';
 import { useAdminSession } from '../admin/useAdminSession';
 import { formatDateTime } from '../admin/format';
 import {
   BRAND_IMAGE_SLOTS,
-  MAX_BRAND_IMAGE_BYTES,
   activateBrandProfile,
   contrastOnWhite,
   createBrandProfile,
@@ -22,6 +21,7 @@ import {
 } from '../../state/api/branding.api';
 import { ACTIVE_BRAND_QUERY_KEY, useBrand } from '../../state/brand/brand';
 import { InlineAdminSignIn } from './InlineAdminSignIn';
+import { checkBrandImage, profileInitials, thumbSlot } from './productBrandingRules';
 import type { SettingsOutletContext } from './SettingsLayout';
 import '../admin/AdminPages.css';
 import './ProductBrandingCard.css';
@@ -36,9 +36,12 @@ import './ProductBrandingCard.css';
  * is Settings -> Reports.
  *
  * Anyone can see which brand is active; changing anything is admin-only.
+ *
+ * One form per profile, one Save: text fields and images are edited
+ * together, chosen images show as pending until Save, and the form closes
+ * when everything is saved.
  */
 
-const ACCEPTED = ['image/png', 'image/jpeg'];
 const PROFILES_KEY = ['product-branding'] as const;
 
 const SLOT_LABEL: Record<BrandImageSlot, string> = {
@@ -77,12 +80,21 @@ export function ProductBrandingCard() {
   return <BrandProfilesEditor />;
 }
 
+/** What the open form is editing; `key` stays the same when Add creates the profile. */
+interface Editing {
+  key: string;
+  id: string | null;
+}
+
+let formSerial = 0;
+
 function BrandProfilesEditor() {
   const queryClient = useQueryClient();
   const branding = useQuery({ queryKey: PROFILES_KEY, queryFn: getProductBranding });
-  const [editing, setEditing] = useState<string | 'new' | null>(null);
+  const [editing, setEditing] = useState<Editing | null>(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [notice, setNotice] = useState<string | null>(null);
 
   const apply = (data: ProductBranding) => {
     queryClient.setQueryData(PROFILES_KEY, data);
@@ -93,6 +105,7 @@ function BrandProfilesEditor() {
   const run = async (action: () => Promise<ProductBranding>, fallback: string): Promise<boolean> => {
     setBusy(true);
     setError(null);
+    setNotice(null);
     try {
       apply(await action());
       return true;
@@ -102,6 +115,12 @@ function BrandProfilesEditor() {
     } finally {
       setBusy(false);
     }
+  };
+
+  const open = (next: Editing | null) => {
+    setNotice(null);
+    setError(null);
+    setEditing(next);
   };
 
   const activate = (p: BrandProfile) => {
@@ -117,7 +136,7 @@ function BrandProfilesEditor() {
   const remove = (p: BrandProfile) => {
     if (!window.confirm(`Delete the brand profile "${p.name}" and its images?`)) return;
     void run(() => deleteBrandProfile(p.id), 'Could not delete the profile').then((ok) => {
-      if (ok && editing === p.id) setEditing(null);
+      if (ok && editing?.id === p.id) setEditing(null);
     });
   };
 
@@ -131,7 +150,26 @@ function BrandProfilesEditor() {
   }
 
   const data = branding.data;
-  const editingProfile = data.profiles.find((p) => p.id === editing) ?? null;
+  const editingProfile = editing?.id ? (data.profiles.find((p) => p.id === editing.id) ?? null) : null;
+
+  const saveFields = async (fields: BrandFields): Promise<string> => {
+    if (editing?.id) {
+      apply(await updateBrandProfile(editing.id, fields));
+      return editing.id;
+    }
+    const before = new Set(data.profiles.map((p) => p.id));
+    const next = await createBrandProfile(fields);
+    apply(next);
+    const created = next.profiles.find((p) => !before.has(p.id));
+    if (!created) throw new Error('The profile was added, but could not be found. Reload the page.');
+    // Same form (same key): a retry after a failed image saves, not adds again.
+    setEditing((e) => (e ? { ...e, id: created.id } : e));
+    return created.id;
+  };
+
+  const saveImage = async (id: string, slot: BrandImageSlot, change: File | 'remove') => {
+    apply(await (change === 'remove' ? deleteBrandImage(id, slot) : uploadBrandImage(id, slot, change)));
+  };
 
   return (
     <section className="admin-card product-branding">
@@ -147,6 +185,11 @@ function BrandProfilesEditor() {
           {error}
         </p>
       )}
+      {notice && (
+        <p className="product-branding__notice" role="status">
+          {notice}
+        </p>
+      )}
 
       <ul className="product-branding__list" aria-label="Brand profiles">
         {data.profiles.map((p) => (
@@ -154,7 +197,7 @@ function BrandProfilesEditor() {
             key={p.id}
             className={`product-branding__item${p.active ? ' product-branding__item--active' : ''}`}
           >
-            <BrandImage profile={p} slot="icon" className="product-branding__icon" />
+            <ProfileThumb profile={p} />
             <div className="product-branding__names">
               <span className="product-branding__name">{p.name}</span>
               <span className="admin-muted">{p.product_name}</span>
@@ -171,10 +214,10 @@ function BrandProfilesEditor() {
                 type="button"
                 className="admin-button admin-button--secondary"
                 disabled={busy}
-                onClick={() => setEditing(editing === p.id ? null : p.id)}
-                aria-expanded={editing === p.id}
+                onClick={() => open(editing?.id === p.id ? null : { key: p.id, id: p.id })}
+                aria-expanded={editing?.id === p.id}
               >
-                {editing === p.id ? 'Close' : 'Edit'}
+                {editing?.id === p.id ? 'Close' : 'Edit'}
               </button>
               <button
                 type="button"
@@ -196,54 +239,27 @@ function BrandProfilesEditor() {
             type="button"
             className="admin-button admin-button--secondary"
             disabled={busy}
-            onClick={() => setEditing('new')}
+            onClick={() => open({ key: `new-${++formSerial}`, id: null })}
           >
             Add profile
           </button>
         </div>
       )}
 
-      {editing === 'new' && (
+      {editing && (
         <ProfileForm
-          key="new"
-          profile={null}
-          busy={busy}
-          onCancel={() => setEditing(null)}
-          onSave={async (fields) => {
-            setBusy(true);
-            setError(null);
-            try {
-              const before = new Set(data.profiles.map((p) => p.id));
-              const next = await createBrandProfile(fields);
-              apply(next);
-              // Stay on the new profile so its images can be uploaded.
-              setEditing(next.profiles.find((p) => !before.has(p.id))?.id ?? null);
-            } catch (e: unknown) {
-              setError(errorText(e, 'Could not add the profile'));
-            } finally {
-              setBusy(false);
-            }
-          }}
-        />
-      )}
-
-      {editingProfile && (
-        <ProfileForm
-          key={editingProfile.id}
+          key={editing.key}
           profile={editingProfile}
+          adding={editing.key.startsWith('new-')}
           busy={busy}
-          onCancel={() => setEditing(null)}
-          onSave={(fields) =>
-            run(() => updateBrandProfile(editingProfile.id, fields), 'Could not save the profile').then(
-              () => undefined
-            )
-          }
-          onUpload={(slot, file) =>
-            run(() => uploadBrandImage(editingProfile.id, slot, file), 'Could not upload the image')
-          }
-          onRemoveImage={(slot) =>
-            run(() => deleteBrandImage(editingProfile.id, slot), 'Could not remove the image')
-          }
+          onBusy={setBusy}
+          onCancel={() => open(null)}
+          onSaveFields={saveFields}
+          onSaveImage={saveImage}
+          onDone={(message) => {
+            setEditing(null);
+            setNotice(message);
+          }}
         />
       )}
 
@@ -257,15 +273,38 @@ function BrandProfilesEditor() {
   );
 }
 
-/** An image of a profile, through the admin endpoint (a blob URL). */
+function ProfileThumb({ profile }: { profile: BrandProfile }) {
+  const slot = thumbSlot(profile);
+  const initials = (
+    <span className="product-branding__thumb product-branding__thumb--initials" aria-hidden="true">
+      {profileInitials(profile)}
+    </span>
+  );
+  if (!slot) return initials;
+  return (
+    <BrandImage
+      profile={profile}
+      slot={slot}
+      className={`product-branding__thumb product-branding__thumb--${slot}`}
+      fallback={initials}
+    />
+  );
+}
+
+/**
+ * An image of a profile, through the admin endpoint (a blob URL). The
+ * version is part of the profile, so a new upload shows at once.
+ */
 function BrandImage({
   profile,
   slot,
   className,
+  fallback = null,
 }: {
   profile: BrandProfile;
   slot: BrandImageSlot;
   className?: string;
+  fallback?: ReactNode;
 }) {
   const version = profile.images[slot];
   // The blob URL with the version it shows, so a stale one is never used.
@@ -290,7 +329,7 @@ function BrandImage({
   }, [profile.id, slot, version]);
 
   const url = version && loaded?.version === version ? loaded.url : null;
-  if (!url) return <span className={`${className ?? ''} product-branding__empty`} aria-hidden="true" />;
+  if (!url) return <>{fallback}</>;
   return <img src={url} alt="" className={className} />;
 }
 
@@ -305,23 +344,66 @@ function toFields(p: BrandProfile | null): BrandFields {
   };
 }
 
+/** An image chosen in the form, saved with the form. */
+type PendingImage = { kind: 'file'; file: File; preview: string } | { kind: 'remove' };
+type PendingImages = Partial<Record<BrandImageSlot, PendingImage>>;
+
 function ProfileForm({
   profile,
+  adding,
   busy,
-  onSave,
+  onBusy,
+  onSaveFields,
+  onSaveImage,
+  onDone,
   onCancel,
-  onUpload,
-  onRemoveImage,
 }: {
+  /** The saved profile; null while adding (until Add has created it). */
   profile: BrandProfile | null;
+  adding: boolean;
   busy: boolean;
-  onSave: (fields: BrandFields) => Promise<void>;
+  onBusy: (busy: boolean) => void;
+  onSaveFields: (fields: BrandFields) => Promise<string>;
+  onSaveImage: (id: string, slot: BrandImageSlot, change: File | 'remove') => Promise<void>;
+  onDone: (message: string) => void;
   onCancel: () => void;
-  onUpload?: (slot: BrandImageSlot, file: File) => Promise<boolean>;
-  onRemoveImage?: (slot: BrandImageSlot) => Promise<boolean>;
 }) {
   const [fields, setFields] = useState<BrandFields>(() => toFields(profile));
+  const [pending, setPending] = useState<PendingImages>({});
   const [localError, setLocalError] = useState<string | null>(null);
+  const formId = useId();
+
+  // Preview URLs of chosen files, released when the form closes.
+  const previews = useRef(new Set<string>());
+  useEffect(() => {
+    const urls = previews.current;
+    return () => urls.forEach((u) => URL.revokeObjectURL(u));
+  }, []);
+
+  const setSlot = (slot: BrandImageSlot, next: PendingImage | undefined) =>
+    setPending((p) => {
+      const old = p[slot];
+      if (old?.kind === 'file') {
+        URL.revokeObjectURL(old.preview);
+        previews.current.delete(old.preview);
+      }
+      const copy = { ...p };
+      if (next) copy[slot] = next;
+      else delete copy[slot];
+      return copy;
+    });
+
+  const choose = async (slot: BrandImageSlot, file: File) => {
+    const problem = await checkBrandImage(slot, file);
+    if (problem) {
+      setLocalError(`${SLOT_LABEL[slot]}: ${problem}`);
+      return;
+    }
+    setLocalError(null);
+    const preview = URL.createObjectURL(file);
+    previews.current.add(preview);
+    setSlot(slot, { kind: 'file', file, preview });
+  };
 
   const set = (key: keyof BrandFields) => (e: ChangeEvent<HTMLInputElement>) =>
     setFields((f) => ({ ...f, [key]: e.target.value }));
@@ -347,20 +429,51 @@ function ProfileForm({
       return;
     }
     setLocalError(null);
-    await onSave(trimmed);
+    onBusy(true);
+    let id: string;
+    try {
+      id = await onSaveFields(trimmed);
+    } catch (e: unknown) {
+      setLocalError(errorText(e, adding ? 'Could not add the profile' : 'Could not save the profile'));
+      onBusy(false);
+      return;
+    }
+    let images = 0;
+    for (const slot of BRAND_IMAGE_SLOTS) {
+      const change = pending[slot];
+      if (!change) continue;
+      try {
+        await onSaveImage(id, slot, change.kind === 'file' ? change.file : 'remove');
+      } catch (e: unknown) {
+        // What is saved stays saved; what failed stays pending, so Save retries it.
+        setLocalError(
+          `“${trimmed.name}” is saved, but the ${SLOT_LABEL[slot].toLowerCase()} is not: ` +
+            `${errorText(e, 'the server refused it')}`
+        );
+        onBusy(false);
+        return;
+      }
+      setSlot(slot, undefined);
+      images += 1;
+    }
+    onBusy(false);
+    const what = images === 0 ? '' : images === 1 ? ' with 1 image change' : ` with ${images} image changes`;
+    onDone(`${adding ? 'Added' : 'Saved'} “${trimmed.name}”${what}.`);
   };
 
+  const pendingCount = Object.keys(pending).length;
+
   return (
-    <div className="product-branding__form">
+    <form className="product-branding__form" onSubmit={submit} aria-label="Brand profile">
       <h3 className="product-branding__form-title">
-        {profile ? `Edit “${profile.name}”` : 'New brand profile'}
+        {adding ? 'New brand profile' : `Edit “${profile?.name ?? ''}”`}
       </h3>
       {localError && (
         <p className="admin-login__error" role="alert">
           {localError}
         </p>
       )}
-      <form className="product-branding__fields" onSubmit={submit}>
+      <div className="product-branding__fields">
         <label className="admin-field">
           <span className="admin-field__label">Label (only shown here)</span>
           <input className="admin-field__input" value={fields.name} maxLength={60} onChange={set('name')} placeholder="e.g. RuthLabs (investor demo)" disabled={busy} />
@@ -390,99 +503,119 @@ function ProfileForm({
           <span className="admin-field__label">Report cover note (optional, beside “Prepared by”)</span>
           <input className="admin-field__input" value={fields.report_note ?? ''} maxLength={120} onChange={set('report_note')} disabled={busy} />
         </label>
-        <div className="product-branding__form-actions">
-          <button type="submit" className="admin-button" disabled={busy}>
-            {profile ? 'Save' : 'Add profile'}
-          </button>
-          <button type="button" className="admin-button admin-button--secondary" onClick={onCancel} disabled={busy}>
-            {profile ? 'Close' : 'Cancel'}
-          </button>
-        </div>
-      </form>
+      </div>
 
-      {profile && onUpload && onRemoveImage ? (
-        <div className="product-branding__images">
-          {BRAND_IMAGE_SLOTS.map((slot) => (
-            <ImageSlot
-              key={slot}
-              profile={profile}
-              slot={slot}
-              busy={busy}
-              onError={setLocalError}
-              onUpload={(file) => onUpload(slot, file)}
-              onRemove={() => onRemoveImage(slot)}
-            />
-          ))}
-          <p className="admin-muted">
-            PNG or JPEG, up to 1 MB. Images are checked and re-encoded on the server; SVG is not
-            accepted.
-          </p>
-        </div>
-      ) : (
-        <p className="admin-muted">Logos and the icon can be uploaded once the profile is added.</p>
-      )}
-    </div>
+      <div className="product-branding__images" role="group" aria-labelledby={`${formId}-images`}>
+        <h4 id={`${formId}-images`} className="product-branding__images-title">
+          Logos and icon
+        </h4>
+        {BRAND_IMAGE_SLOTS.map((slot) => (
+          <ImageSlot
+            key={slot}
+            profile={profile}
+            slot={slot}
+            pending={pending[slot]}
+            busy={busy}
+            onChoose={(file) => void choose(slot, file)}
+            onRemove={() => setSlot(slot, { kind: 'remove' })}
+            onUndo={() => setSlot(slot, undefined)}
+          />
+        ))}
+        <p className="admin-muted">
+          PNG or JPEG, up to 1 MB. Chosen images are saved with the profile. They are checked and
+          re-encoded on the server; SVG is not accepted.
+        </p>
+      </div>
+
+      <div className="product-branding__form-actions">
+        <button type="submit" className="admin-button" disabled={busy}>
+          {busy ? 'Saving…' : adding && !profile ? 'Add profile' : 'Save'}
+        </button>
+        <button type="button" className="admin-button admin-button--secondary" onClick={onCancel} disabled={busy}>
+          Cancel
+        </button>
+        {pendingCount > 0 && (
+          <span className="admin-muted">
+            {pendingCount === 1 ? '1 image change' : `${pendingCount} image changes`} not saved yet
+          </span>
+        )}
+      </div>
+    </form>
   );
 }
 
 function ImageSlot({
   profile,
   slot,
+  pending,
   busy,
-  onError,
-  onUpload,
+  onChoose,
   onRemove,
+  onUndo,
 }: {
-  profile: BrandProfile;
+  profile: BrandProfile | null;
   slot: BrandImageSlot;
+  pending: PendingImage | undefined;
   busy: boolean;
-  onError: (message: string | null) => void;
-  onUpload: (file: File) => Promise<boolean>;
-  onRemove: () => Promise<boolean>;
+  onChoose: (file: File) => void;
+  onRemove: () => void;
+  onUndo: () => void;
 }) {
   const input = useRef<HTMLInputElement>(null);
-  const hasImage = Boolean(profile.images[slot]);
-  const builtin = profile.builtin_images.includes(slot);
+  const saved = Boolean(profile?.images[slot]);
+  const builtin = Boolean(profile?.builtin_images.includes(slot));
 
-  const choose = (event: ChangeEvent<HTMLInputElement>) => {
+  const picked = (event: ChangeEvent<HTMLInputElement>) => {
     const file = event.target.files?.[0];
     event.target.value = '';
-    if (!file) return;
-    if (!ACCEPTED.includes(file.type)) {
-      onError('Images must be PNG or JPEG.');
-      return;
-    }
-    if (file.size > MAX_BRAND_IMAGE_BYTES) {
-      onError('Images must be 1 MB or smaller.');
-      return;
-    }
-    onError(null);
-    void onUpload(file);
+    if (file) onChoose(file);
   };
 
+  let preview: ReactNode;
+  let status: ReactNode = null;
+  if (pending?.kind === 'file') {
+    preview = <img src={pending.preview} alt="" />;
+    status = <span className="admin-badge product-branding__badge--pending">Will be saved</span>;
+  } else if (pending?.kind === 'remove') {
+    preview = <span className="admin-muted">Removed when you save</span>;
+    status = <span className="admin-badge product-branding__badge--pending">Will be removed</span>;
+  } else if (saved && profile) {
+    preview = <BrandImage profile={profile} slot={slot} />;
+    status = <span className="admin-badge admin-badge--uploaded">{builtin ? 'Built in' : 'Saved'}</span>;
+  } else {
+    preview = <span className="admin-muted">None</span>;
+  }
+
   return (
-    <div className="product-branding__slot">
-      <span className="admin-field__label">{SLOT_LABEL[slot]}</span>
-      <div className={`product-branding__preview product-branding__preview--${slot}`}>
-        {hasImage ? (
-          <BrandImage profile={profile} slot={slot} />
-        ) : (
-          <span className="admin-muted">None</span>
-        )}
-      </div>
-      <p className="admin-muted">
-        {SLOT_HELP[slot]}
-        {builtin ? ' Built in.' : ''}
-      </p>
+    <div className="product-branding__slot" data-slot={slot}>
+      <span className="product-branding__slot-head">
+        <span className="admin-field__label">{SLOT_LABEL[slot]}</span>
+        {status}
+      </span>
+      <div className={`product-branding__preview product-branding__preview--${slot}`}>{preview}</div>
+      <p className="admin-muted">{SLOT_HELP[slot]}</p>
       <div className="product-branding__slot-actions">
-        <input ref={input} type="file" accept="image/png,image/jpeg" hidden onChange={choose} />
+        <input
+          ref={input}
+          type="file"
+          accept="image/png,image/jpeg"
+          hidden
+          onChange={picked}
+          aria-label={SLOT_LABEL[slot]}
+        />
         <button type="button" className="admin-button admin-button--secondary" disabled={busy} onClick={() => input.current?.click()}>
-          {hasImage ? 'Replace' : 'Upload'}
+          {saved || pending?.kind === 'file' ? 'Replace' : 'Choose file'}
         </button>
-        {hasImage && (
-          <button type="button" className="admin-button admin-button--link" disabled={busy} onClick={() => void onRemove()}>
-            Remove
+        {pending ? (
+          <button type="button" className="admin-button admin-button--link" disabled={busy} onClick={onUndo}>
+            {pending.kind === 'file' && !saved ? 'Remove' : 'Undo'}
           </button>
+        ) : (
+          saved && (
+            <button type="button" className="admin-button admin-button--link" disabled={busy} onClick={onRemove}>
+              Remove
+            </button>
+          )
         )}
       </div>
     </div>

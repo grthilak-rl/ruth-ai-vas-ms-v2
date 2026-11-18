@@ -230,9 +230,8 @@ export const UPLOADED_STATE_LABEL: Record<UploadedState, string> = {
 /** One sentence saying what the state means and what to do about it. */
 export const UPLOADED_STATE_HINT: Record<UploadedState, string> = {
   installed: '',
-  not_installed:
-    'Uploaded but not yet installed into the store runtime, so nothing is ' +
-    'running it. Installing is currently an ops step.',
+  // Brand-neutral on purpose (white-label): no link to a vendor's runbook.
+  not_installed: 'Not installed on this server yet. Ask your system administrator to install it.',
   installed_outside_management:
     'The store runtime is serving this model, but there is no upload record ' +
     'for it here — it was installed directly on the server. Files and size ' +

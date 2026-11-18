@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import {
   mergeModels,
+  UPLOADED_STATE_HINT,
   UPLOADED_STATE_LABEL,
   type MergeInput,
 } from '../mergeModels';
@@ -294,5 +295,19 @@ describe('labels', () => {
       'not_installed',
       'runtime_unreachable',
     ]);
+  });
+});
+
+describe('uploaded-state hints (white-label)', () => {
+  it('not installed: points to the administrator, not to a vendor runbook', () => {
+    expect(UPLOADED_STATE_HINT.not_installed).toBe(
+      'Not installed on this server yet. Ask your system administrator to install it.'
+    );
+  });
+
+  it('no hint names a brand or carries a link', () => {
+    for (const hint of Object.values(UPLOADED_STATE_HINT)) {
+      expect(hint).not.toMatch(/visics|ruth|github|https?:\/\//i);
+    }
   });
 });

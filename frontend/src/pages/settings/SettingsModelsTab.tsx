@@ -31,10 +31,6 @@ import './SettingsModelsTab.css';
  * only the manage affordances are gated.
  */
 
-/** Where an operator finds the install procedure. */
-const RUNBOOK_HREF =
-  'https://github.com/visics/ruth-ai-vas-ms-v2/blob/main/docs/model-store/README.md';
-
 function HealthDot({ health }: { health: string }) {
   return (
     <span
@@ -108,15 +104,6 @@ function UploadedRow({ model }: { model: MergedModel }) {
           <td colSpan={6}>
             <span className="models-tab__hint">
               {hint}
-              {state === 'not_installed' && (
-                <>
-                  {' '}
-                  <a href={RUNBOOK_HREF} target="_blank" rel="noreferrer">
-                    Installation runbook
-                  </a>
-                  .
-                </>
-              )}
             </span>
             {/*
               Enable / Apply lands here. It is the next workstream (Store
