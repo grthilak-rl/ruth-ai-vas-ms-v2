@@ -31,8 +31,40 @@ from app.services.exceptions import (
 )
 
 
+@pytest.fixture(autouse=True)
+def project_running():
+    """start_stream first checks the project lifecycle (a stopped or ended
+    project blocks every camera start). These tests are about the stream
+    itself, so the project counts as running unless a test says otherwise."""
+    with patch(
+        "app.services.project_lifecycle.ensure_running", new=AsyncMock()
+    ) as gate:
+        yield gate
+
+
 class TestStreamStart:
     """Tests for start_stream method."""
+
+    @pytest.mark.asyncio
+    async def test_start_refused_while_project_not_running(
+        self,
+        mock_db,
+        mock_vas_client,
+        project_running,
+    ):
+        """A stopped project blocks the start before anything is created."""
+        from app.services.project_lifecycle import ProjectNotRunningError
+
+        project_running.side_effect = ProjectNotRunningError("stopped")
+        mock_db.execute = AsyncMock()
+        service = StreamService(mock_vas_client, mock_db)
+
+        with pytest.raises(ProjectNotRunningError):
+            await service.start_stream(uuid.uuid4())
+
+        project_running.assert_awaited_once_with(mock_db)
+        mock_db.execute.assert_not_awaited()
+        assert mock_db._added == []
 
     @pytest.mark.asyncio
     async def test_start_creates_session_and_calls_vas(
@@ -61,7 +93,7 @@ class TestStreamStart:
 
         mock_db.execute = mock_execute
 
-        service = StreamService(mock_vas_client, None, mock_db)
+        service = StreamService(mock_vas_client, mock_db)
 
         # Act
         session = await service.start_stream(device.id)
@@ -98,7 +130,7 @@ class TestStreamStart:
 
         mock_db.execute = mock_execute
 
-        service = StreamService(mock_vas_client, None, mock_db)
+        service = StreamService(mock_vas_client, mock_db)
 
         # Act
         session = await service.start_stream(
@@ -130,7 +162,7 @@ class TestStreamStart:
 
         mock_db.execute = mock_execute
 
-        service = StreamService(mock_vas_client, None, mock_db)
+        service = StreamService(mock_vas_client, mock_db)
 
         # Act & Assert
         with pytest.raises(DeviceNotFoundError):
@@ -166,7 +198,7 @@ class TestStreamStart:
 
         mock_db.execute = mock_execute
 
-        service = StreamService(mock_vas_client, None, mock_db)
+        service = StreamService(mock_vas_client, mock_db)
 
         # Act & Assert
         with pytest.raises(StreamAlreadyActiveError) as exc_info:
@@ -200,7 +232,7 @@ class TestStreamStart:
 
         mock_db.execute = mock_execute
 
-        service = StreamService(mock_vas_client, None, mock_db)
+        service = StreamService(mock_vas_client, mock_db)
 
         # Act & Assert
         with pytest.raises(StreamStartError) as exc_info:
@@ -239,7 +271,7 @@ class TestStreamStart:
 
         mock_db.execute = mock_execute
 
-        service = StreamService(mock_vas_client, None, mock_db)
+        service = StreamService(mock_vas_client, mock_db)
 
         # Act & Assert
         with pytest.raises(StreamStartError):
@@ -281,7 +313,7 @@ class TestStreamStop:
 
         mock_db.execute = mock_execute
 
-        service = StreamService(mock_vas_client, None, mock_db)
+        service = StreamService(mock_vas_client, mock_db)
 
         # Act
         result = await service.stop_stream(device.id)
@@ -305,7 +337,7 @@ class TestStreamStop:
 
         mock_db.execute = mock_execute
 
-        service = StreamService(mock_vas_client, None, mock_db)
+        service = StreamService(mock_vas_client, mock_db)
 
         # Act & Assert
         with pytest.raises(StreamNotActiveError):
@@ -342,7 +374,7 @@ class TestStreamStop:
 
         mock_db.execute = mock_execute
 
-        service = StreamService(mock_vas_client, None, mock_db)
+        service = StreamService(mock_vas_client, mock_db)
 
         # Act
         result = await service.stop_stream(device.id)
@@ -381,7 +413,7 @@ class TestStreamStop:
 
         mock_db.execute = mock_execute
 
-        service = StreamService(mock_vas_client, None, mock_db)
+        service = StreamService(mock_vas_client, mock_db)
 
         # Act
         result = await service.stop_stream(device.id, force=True)
@@ -420,7 +452,7 @@ class TestStreamStop:
 
         mock_db.execute = mock_execute
 
-        service = StreamService(mock_vas_client, None, mock_db)
+        service = StreamService(mock_vas_client, mock_db)
 
         # Act & Assert
         with pytest.raises(StreamStopError):
@@ -484,7 +516,7 @@ class TestSessionRetrieval:
 
         mock_db.execute = mock_execute
 
-        service = StreamService(mock_vas_client, None, mock_db)
+        service = StreamService(mock_vas_client, mock_db)
 
         # Act
         result = await service.get_stream_session(session.id)
@@ -507,7 +539,7 @@ class TestSessionRetrieval:
 
         mock_db.execute = mock_execute
 
-        service = StreamService(mock_vas_client, None, mock_db)
+        service = StreamService(mock_vas_client, mock_db)
 
         # Act & Assert
         with pytest.raises(StreamSessionNotFoundError):
@@ -532,7 +564,7 @@ class TestSessionRetrieval:
 
         mock_db.execute = mock_execute
 
-        service = StreamService(mock_vas_client, None, mock_db)
+        service = StreamService(mock_vas_client, mock_db)
 
         # Act
         result = await service.get_active_session_for_device(device_id)
@@ -555,7 +587,7 @@ class TestSessionRetrieval:
 
         mock_db.execute = mock_execute
 
-        service = StreamService(mock_vas_client, None, mock_db)
+        service = StreamService(mock_vas_client, mock_db)
 
         # Act
         result = await service.get_active_session_for_device(uuid.uuid4())
@@ -584,7 +616,7 @@ class TestSessionRetrieval:
 
         mock_db.execute = mock_execute
 
-        service = StreamService(mock_vas_client, None, mock_db)
+        service = StreamService(mock_vas_client, mock_db)
 
         # Act
         result = await service.get_active_streams()
@@ -610,7 +642,7 @@ class TestSessionRetrieval:
 
         mock_db.execute = mock_execute
 
-        service = StreamService(mock_vas_client, None, mock_db)
+        service = StreamService(mock_vas_client, mock_db)
 
         # Act
         result = await service.get_live_streams()
@@ -641,7 +673,7 @@ class TestStreamStatus:
 
         mock_db.execute = mock_execute
 
-        service = StreamService(mock_vas_client, None, mock_db)
+        service = StreamService(mock_vas_client, mock_db)
 
         # Act
         result = await service.is_stream_active(session.device_id)
@@ -664,7 +696,7 @@ class TestStreamStatus:
 
         mock_db.execute = mock_execute
 
-        service = StreamService(mock_vas_client, None, mock_db)
+        service = StreamService(mock_vas_client, mock_db)
 
         # Act
         result = await service.is_stream_active(uuid.uuid4())
@@ -690,7 +722,7 @@ class TestStreamStatus:
 
         mock_db.execute = mock_execute
 
-        service = StreamService(mock_vas_client, None, mock_db)
+        service = StreamService(mock_vas_client, mock_db)
 
         # Act
         status = await service.get_stream_status(session.device_id)
@@ -716,7 +748,7 @@ class TestStreamStatus:
 
         mock_db.execute = mock_execute
 
-        service = StreamService(mock_vas_client, None, mock_db)
+        service = StreamService(mock_vas_client, mock_db)
 
         # Act
         status = await service.get_stream_status(uuid.uuid4())
@@ -748,7 +780,7 @@ class TestMarkStreamError:
 
         mock_db.execute = mock_execute
 
-        service = StreamService(mock_vas_client, None, mock_db)
+        service = StreamService(mock_vas_client, mock_db)
 
         # Act
         result = await service.mark_stream_error(
@@ -775,7 +807,7 @@ class TestMarkStreamError:
 
         mock_db.execute = mock_execute
 
-        service = StreamService(mock_vas_client, None, mock_db)
+        service = StreamService(mock_vas_client, mock_db)
 
         # Act & Assert
         with pytest.raises(StreamNotActiveError):
@@ -805,7 +837,7 @@ class TestRecoverStuckSessions:
 
         mock_db.execute = mock_execute
 
-        service = StreamService(mock_vas_client, None, mock_db)
+        service = StreamService(mock_vas_client, mock_db)
 
         # Act
         result = await service.recover_stuck_sessions()
@@ -835,7 +867,7 @@ class TestRecoverStuckSessions:
 
         mock_db.execute = mock_execute
 
-        service = StreamService(mock_vas_client, None, mock_db)
+        service = StreamService(mock_vas_client, mock_db)
 
         # Act
         result = await service.recover_stuck_sessions()
@@ -859,7 +891,7 @@ class TestRecoverStuckSessions:
 
         mock_db.execute = mock_execute
 
-        service = StreamService(mock_vas_client, None, mock_db)
+        service = StreamService(mock_vas_client, mock_db)
 
         # Act
         result = await service.recover_stuck_sessions()

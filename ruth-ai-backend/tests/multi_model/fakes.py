@@ -40,6 +40,10 @@ class FakeVAS:
     async def get_streams(self, **_kwargs):
         return SimpleNamespace(streams=[])
 
+    async def get_devices(self, **_kwargs):
+        # Bulk camera health for the device list; none known to this fake.
+        return []
+
 
 class FakeRuntime:
     """Stands in for RuntimeRouter. Records every call; scripts every result.

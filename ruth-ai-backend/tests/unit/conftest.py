@@ -20,14 +20,12 @@ from app.integrations.vas import (
     Bookmark,
     BookmarkStatus,
     Device as VASDevice,
-    DeviceStatus,
     Snapshot,
     SnapshotStatus,
     Stream,
     StreamHealth,
     StreamStartResponse,
     StreamStopResponse,
-    StreamState as VASStreamState,
 )
 from app.models import (
     Device,
@@ -217,20 +215,16 @@ class MockVASClient:
         self._check_failure("start_stream")
         stream_id = str(make_uuid())
         return StreamStartResponse(
-            camera_id=device_id,
-            stream_id=stream_id,
+            status="started",
+            device_id=device_id,
+            room_id=device_id,
             v2_stream_id=stream_id,
-            state=VASStreamState.LIVE,
-            message="Stream started",
         )
 
     async def stop_stream(self, device_id: str) -> StreamStopResponse:
         """Stop stream for device."""
         self._check_failure("stop_stream")
-        return StreamStopResponse(
-            camera_id=device_id,
-            message="Stream stopped",
-        )
+        return StreamStopResponse(status="stopped", device_id=device_id)
 
     async def create_snapshot(
         self,
@@ -346,7 +340,6 @@ def vas_device_factory():
             name=name,
             description=description,
             location=location,
-            status=DeviceStatus.ONLINE if is_active else DeviceStatus.OFFLINE,
             is_active=is_active,
         )
     return _create

@@ -18,7 +18,7 @@ Usage:
 
     # Create services with injected dependencies
     device_service = DeviceService(vas_client, db)
-    stream_service = StreamService(vas_client, ai_runtime_client, db)
+    stream_service = StreamService(vas_client, db)
     violation_service = ViolationService(db)
     evidence_service = EvidenceService(vas_client, db)
     event_service = EventIngestionService(

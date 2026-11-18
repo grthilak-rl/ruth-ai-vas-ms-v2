@@ -97,7 +97,12 @@ async def test_ended_projects_are_past_not_current():
 
 
 async def test_tagged_tables_default_to_the_current_project():
-    """The column default is ruth_current_project_id(), on every tagged table."""
+    """The column default is ruth_current_project_id(), on every tagged table.
+
+    project_cameras and project_jobs also have a project_id, but as an
+    explicit reference to one project (membership, the project a job acts
+    on), not a tag defaulting to the current project, so they are excluded.
+    """
     from sqlalchemy import text
 
     from app.models.project_tag import TAGGED_TABLES
@@ -108,7 +113,8 @@ async def test_tagged_tables_default_to_the_current_project():
                 text(
                     "SELECT table_name, is_nullable, column_default FROM information_schema.columns "
                     "WHERE table_schema = 'public' AND column_name = 'project_id' "
-                    "AND table_name NOT LIKE '%\\_archive' AND table_name <> 'project_cameras'"
+                    "AND table_name NOT LIKE '%\\_archive' "
+                    "AND table_name NOT IN ('project_cameras', 'project_jobs')"
                 )
             )
         ).all()

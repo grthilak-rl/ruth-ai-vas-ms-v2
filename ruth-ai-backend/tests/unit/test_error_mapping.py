@@ -431,7 +431,7 @@ class TestVASExceptionMapping:
 
     def test_vas_auth_error_maps_to_503(self):
         """VASAuthenticationError maps to 503 ServiceUnavailable."""
-        exc = VASAuthenticationError("Auth failed", status_code=401)
+        exc = VASAuthenticationError("Auth failed")
         api_error = map_vas_exception(exc)
 
         assert isinstance(api_error, ServiceUnavailableAPIError)
@@ -439,7 +439,7 @@ class TestVASExceptionMapping:
 
     def test_vas_forbidden_maps_to_403(self):
         """VASForbiddenError maps to 403 Forbidden."""
-        exc = VASForbiddenError("Access denied", status_code=403)
+        exc = VASForbiddenError("Access denied")
         api_error = map_vas_exception(exc)
 
         assert isinstance(api_error, ForbiddenAPIError)
@@ -447,7 +447,7 @@ class TestVASExceptionMapping:
 
     def test_vas_not_found_maps_to_404(self):
         """VASNotFoundError maps to 404 NotFound."""
-        exc = VASNotFoundError("Stream not found", status_code=404)
+        exc = VASNotFoundError("Stream not found")
         api_error = map_vas_exception(exc)
 
         assert isinstance(api_error, NotFoundAPIError)
@@ -455,7 +455,7 @@ class TestVASExceptionMapping:
 
     def test_vas_stream_not_live_maps_to_503(self):
         """VASStreamNotLiveError maps to 503 ServiceUnavailable."""
-        exc = VASStreamNotLiveError("Stream not live", status_code=409)
+        exc = VASStreamNotLiveError("Stream not live")
         api_error = map_vas_exception(exc)
 
         assert isinstance(api_error, ServiceUnavailableAPIError)
@@ -463,7 +463,7 @@ class TestVASExceptionMapping:
 
     def test_vas_conflict_maps_to_409(self):
         """VASConflictError maps to 409 Conflict."""
-        exc = VASConflictError("State conflict", status_code=409)
+        exc = VASConflictError("State conflict")
         api_error = map_vas_exception(exc)
 
         assert isinstance(api_error, ConflictAPIError)
@@ -471,7 +471,7 @@ class TestVASExceptionMapping:
 
     def test_vas_validation_maps_to_400(self):
         """VASValidationError maps to 400 Validation."""
-        exc = VASValidationError("Invalid request", status_code=400)
+        exc = VASValidationError("Invalid request")
         api_error = map_vas_exception(exc)
 
         assert isinstance(api_error, ValidationAPIError)
@@ -479,7 +479,7 @@ class TestVASExceptionMapping:
 
     def test_vas_mediasoup_unavailable_maps_to_503(self):
         """VASMediaSoupUnavailableError maps to 503 ServiceUnavailable."""
-        exc = VASMediaSoupUnavailableError("MediaSoup down", status_code=503)
+        exc = VASMediaSoupUnavailableError("MediaSoup down")
         api_error = map_vas_exception(exc)
 
         assert isinstance(api_error, ServiceUnavailableAPIError)
@@ -487,7 +487,7 @@ class TestVASExceptionMapping:
 
     def test_vas_rtsp_error_maps_to_502(self):
         """VASRTSPError maps to 502 BadGateway."""
-        exc = VASRTSPError("Camera connection failed", status_code=502)
+        exc = VASRTSPError("Camera connection failed")
         api_error = map_vas_exception(exc)
 
         assert isinstance(api_error, BadGatewayAPIError)
@@ -495,7 +495,7 @@ class TestVASExceptionMapping:
 
     def test_vas_server_error_maps_to_502(self):
         """VASServerError maps to 502 BadGateway."""
-        exc = VASServerError("Internal VAS error", status_code=500)
+        exc = VASServerError("Internal VAS error")
         api_error = map_vas_exception(exc)
 
         assert isinstance(api_error, BadGatewayAPIError)
