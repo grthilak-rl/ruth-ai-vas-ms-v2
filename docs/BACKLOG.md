@@ -5,6 +5,54 @@ investigation. Newest first.
 
 ---
 
+## BL-18 · Legacy API integration tests (`ruth-ai-backend/tests/integration`) are not run
+
+**Status:** backlog · **Raised:** 2026-11-19 (test suites green)
+
+- 101 tests, mostly untouched since 2026-05-26. `conftest.py` hard-codes
+  `postgresql+asyncpg://ruth:ruth@localhost:5432/ruth_ai_test`, so they
+  cannot run against the throwaway DB `make test` starts. Without it, all
+  101 error at setup.
+- `make test` prints them as NOT RUN on every run. Every other backend
+  suite runs (unit, multi_model, stream_sessions, schema, projects,
+  model_store).
+- Fix: read the URL from `INTEGRATION_TEST_DATABASE_URL` (skip when
+  unset, as the other DB suites do), add it to `scripts/test-all.sh`,
+  then fix or delete what fails. Expect the same kind of drift as the
+  unit tests had (old VAS response shapes, the project-lifecycle gate).
+
+---
+
+## BL-17 · VAS event consumer: `event=` log argument clashes with structlog's message
+
+**Status:** backlog · **Raised:** 2026-11-18 (Ruth Stream sign-in deploy) · **Severity:** low (log noise; no lost work)
+
+- **Where.** ruth-ai-backend/app/services/vas_event_consumer.py:183, the
+  `else` branch of `_handle_event`:
+  `logger.debug("Ignoring VAS event type", event=event)`.
+- **Root cause.** structlog's `BoundLogger.debug(event, **kw)` already takes
+  the message as its first argument, named `event`. Passing `event=` as well
+  raises `TypeError: BoundLogger.debug() got multiple values for argument
+  'event'`. That happens before the level check, so the call fails even
+  though DEBUG is off.
+- **When it fires.** On any VAS event type that is in neither
+  `ACTIVATE_EVENTS` nor `PAUSE_EVENTS`. Seen once on 2026-11-18 15:23:55 UTC
+  for `auto_resume.complete`, which VAS publishes after every restart.
+  Ruth's log shows `Error processing VAS event — continuing` at ERROR, with
+  a traceback.
+- **Impact.** Cosmetic, apart from a false ERROR line. The event was going
+  to be ignored anyway. The read loop catches the exception, then still
+  advances and saves `last_id`, so nothing is retried or lost.
+  `stream.started` and `stream.stopped` take the other branches and are not
+  affected.
+- **Fix.** Rename the keyword, e.g. `logger.debug("Ignoring VAS event
+  type", event_type=event)`, matching the `VAS event received` line above
+  it. No other logger call in the Ruth backend passes `event=` (checked
+  2026-11-18). Optional: a unit test that feeds `_handle_event` an unknown
+  event type with the inference loop present and expects no exception.
+
+---
+
 ## BL-16 · Archived violations are not location-stamped; chat does not know the area column
 
 **Status:** backlog · **Raised:** 2026-11-17 (location-history deploy)
