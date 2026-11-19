@@ -16,6 +16,8 @@ interface VideoCanvasProps {
   corners: Point[];
   isDrawing: boolean;
   mode: 'rectangle' | 'manual';
+  /** The image's natural size, once loaded (the space points are in). */
+  onImageSize?: (width: number, height: number) => void;
 }
 
 export function VideoCanvas({
@@ -26,7 +28,8 @@ export function VideoCanvas({
   onClick,
   corners,
   isDrawing,
-  mode
+  mode,
+  onImageSize
 }: VideoCanvasProps) {
   const containerRef = useRef<HTMLDivElement>(null);
   const imageRef = useRef<HTMLImageElement>(null);
@@ -35,6 +38,15 @@ export function VideoCanvas({
   // Natural-image px -> displayed px. Measured with the container size (on
   // load and resize) instead of reading the image ref during render.
   const [displayScale, setDisplayScale] = useState<{ x: number; y: number } | null>(null);
+  // Last pointer position in image px, to end a drag that leaves the image.
+  const lastPointRef = useRef<Point | null>(null);
+  // Latest callbacks for the listeners below (bound once / per drag).
+  const onImageSizeRef = useRef(onImageSize);
+  const onMouseUpRef = useRef(onMouseUp);
+  useEffect(() => {
+    onImageSizeRef.current = onImageSize;
+    onMouseUpRef.current = onMouseUp;
+  });
 
   const measure = () => {
     if (containerRef.current) {
@@ -45,6 +57,7 @@ export function VideoCanvas({
     if (img && img.naturalWidth && img.naturalHeight) {
       const rect = img.getBoundingClientRect();
       setDisplayScale({ x: rect.width / img.naturalWidth, y: rect.height / img.naturalHeight });
+      onImageSizeRef.current?.(img.naturalWidth, img.naturalHeight);
     }
   };
 
@@ -53,8 +66,20 @@ export function VideoCanvas({
     window.addEventListener('resize', measure);
 
     return () => window.removeEventListener('resize', measure);
-    // eslint-disable-next-line react-hooks/exhaustive-deps -- measure reads refs only; bind once
+    // measure reads refs only: bound once.
   }, []);
+
+  // A drag released outside the image used to leave the editor stuck in
+  // "drawing" (BL-6): end it on a mouse-up anywhere in the window. Mouse-ups
+  // on the image stop propagation, so this only sees the ones outside it.
+  useEffect(() => {
+    if (!isDrawing) return;
+    const end = () => {
+      if (lastPointRef.current) onMouseUpRef.current?.(lastPointRef.current);
+    };
+    window.addEventListener('mouseup', end);
+    return () => window.removeEventListener('mouseup', end);
+  }, [isDrawing]);
 
   const getCanvasCoordinates = (e: React.MouseEvent<HTMLDivElement>): Point => {
     if (!containerRef.current || !imageRef.current) {
@@ -81,12 +106,14 @@ export function VideoCanvas({
     e.preventDefault();
     e.stopPropagation();
     const point = getCanvasCoordinates(e);
+    lastPointRef.current = point;
     onMouseDown?.(point);
   };
 
   const handleMouseMove = (e: React.MouseEvent<HTMLDivElement>) => {
     e.preventDefault();
     const point = getCanvasCoordinates(e);
+    lastPointRef.current = point;
     const displayPoint = { x: e.clientX - (imageRef.current?.getBoundingClientRect().left || 0), y: e.clientY - (imageRef.current?.getBoundingClientRect().top || 0) };
     setCurrentPoint(displayPoint);
     onMouseMove?.(point);
@@ -108,6 +135,8 @@ export function VideoCanvas({
 
   const handleMouseLeave = () => {
     setCurrentPoint(undefined);
+    // Leaving the image ends a drag at the last point inside it (BL-6).
+    if (isDrawing && lastPointRef.current) onMouseUp?.(lastPointRef.current);
   };
 
   // Convert corners from video coordinates to display coordinates for canvas

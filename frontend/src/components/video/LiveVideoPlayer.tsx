@@ -11,6 +11,8 @@ import { drawStoreDetections, storeOverlaysFrom } from '../../services/storeOver
 import { estimateRadiusFromClick } from '../../services/roiRayCast';
 import { useCameraDetectionsAll } from '../../state/hooks/useCameraDetectionsAll';
 import { fanOutDetections } from './detectionFanOut';
+import type { ZoneConfig } from '../../types/geofencing';
+import { zonePointsOnCanvas } from '../zoneGeometry';
 import './LiveVideoPlayer.css';
 
 /**
@@ -30,12 +32,8 @@ type PlayerState =
   | 'error'
   | 'offline';
 
-interface GeofenceZone {
-  id: string;
-  name: string;
-  points: number[][];
-  type: 'restricted' | 'allowed';
-}
+/** A zone to draw: frame pixels, or normalised with `coords: 'normalized'`. */
+type GeofenceZone = ZoneConfig;
 
 interface LiveVideoPlayerProps {
   deviceId: string;
@@ -318,14 +316,15 @@ export function LiveVideoPlayer({
       for (const zone of geofenceZones!) {
         if (!zone.points || zone.points.length < 3) continue;
 
-        // Zone points are stored as [x, y] in pixel coordinates (1920x1080 video space)
-        // Scale to canvas size
-        const videoWidth = video.videoWidth || 1920;
-        const videoHeight = video.videoHeight || 1080;
-        const scaledPoints = zone.points.map((point) => ({
-          x: (point[0] / videoWidth) * canvas.width,
-          y: (point[1] / videoHeight) * canvas.height,
-        }));
+        // Normalised zones scale straight to the canvas; pixel zones are
+        // relative to the video's own size (1920x1080 if not known yet).
+        const scaledPoints = zonePointsOnCanvas(
+          zone,
+          video.videoWidth || 1920,
+          video.videoHeight || 1080,
+          canvas.width,
+          canvas.height,
+        );
 
         ctx.save();
 

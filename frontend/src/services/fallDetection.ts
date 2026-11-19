@@ -76,7 +76,7 @@ const DEFAULT_CONFIG: FallDetectionConfig = {
 /**
  * Convert a Blob to a base64-encoded string (without the data URI prefix)
  */
-function blobToBase64(blob: Blob): Promise<string> {
+export function blobToBase64(blob: Blob): Promise<string> {
   return new Promise((resolve, reject) => {
     const reader = new FileReader();
     reader.onloadend = () => {

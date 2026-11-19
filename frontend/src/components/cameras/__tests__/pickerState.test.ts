@@ -221,6 +221,22 @@ describe('uploaded (model store) models in the picker', () => {
     expect(toAIModel(harness, true).state).toBe('active');
   });
 
+  it('a store model with zone types gets zone setup, keyed on its rules not its id', () => {
+    const geofence = store('geofence', {
+      display_name: 'Geo-Fencing', all_rules_need_zone: true,
+      zone_required_rules: ['intrusion', 'exit'], zone_types: ['restricted', 'allowed'],
+    });
+    const row = toAIModel(geofence, false);
+    expect(row.state).toBe('inactive'); // enabling opens the zone editor first
+    expect(row.requiresGeofencing).toBe(true);
+    expect(row.zoneTypes).toEqual(['restricted', 'allowed']);
+    expect(row.disabledReason).toBeUndefined();
+    // models without zone rules are unchanged
+    const hardHat = toAIModel(store('hard_hat', { display_name: 'Hard Hat' }), false);
+    expect(hardHat.requiresGeofencing).toBe(false);
+    expect(hardHat.zoneTypes).toBeUndefined();
+  });
+
   it('warn when built-in PPE and uploaded PPE models run together', () => {
     const available = [builtin('ppe_detection'), builtin('fall_detection'),
       store('hard_hat', { display_name: 'Hard Hat' }), store('safety_vest', { display_name: 'Safety Vest' }),

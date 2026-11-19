@@ -55,6 +55,9 @@ class StoreModelInfo:
     #: default, and the value for anything missing or invalid) opens on
     #: the first qualifying result, as before.
     persistence_seconds: float = 0.0
+    #: the zone types its rules need (``requires_zone``), in rule order,
+    #: e.g. ("restricted", "allowed"): what the zone editor offers
+    zone_types: Tuple[str, ...] = field(default_factory=tuple)
 
     def rule_label(self, violation_type: str) -> Optional[str]:
         """The manifest's display name for a violation type, if it gives one."""
@@ -81,6 +84,7 @@ def _version_key(name: str) -> Tuple[int, ...]:
 def _info_from_manifest(model_id: str, version: str, manifest: dict) -> StoreModelInfo:
     rules = [r for r in manifest.get("rules", []) if isinstance(r, dict)]
     zone_rules = tuple(str(r.get("id")) for r in rules if r.get("requires_zone"))
+    zone_types = tuple(dict.fromkeys(str(r["requires_zone"]) for r in rules if r.get("requires_zone")))
     reports_ppe = any(
         VIOLATION_TYPE_MAP.get(str(r.get("violation_type", "")).strip().lower())
         == ViolationType.PPE_VIOLATION
@@ -109,6 +113,7 @@ def _info_from_manifest(model_id: str, version: str, manifest: dict) -> StoreMod
         display_name=str(manifest.get("display_name") or model_id),
         zone_required_rules=zone_rules,
         all_rules_need_zone=bool(rules) and len(zone_rules) == len(rules),
+        zone_types=zone_types,
         reports_ppe=reports_ppe,
         min_confidence=min(floors) if floors else 1.0,
         rule_labels=rule_labels,

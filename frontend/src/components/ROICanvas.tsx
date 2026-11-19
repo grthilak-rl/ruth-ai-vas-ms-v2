@@ -41,7 +41,27 @@ export const ROICanvas: React.FC<ROICanvasProps> = ({
     ctx.fillStyle = 'rgba(16, 185, 129, 0.2)'; // Green with transparency
     ctx.lineWidth = 3;
 
-    if (mode === 'rectangle' && corners.length >= 2) {
+    if (corners.length === 4 && !isDrawing) {
+      // A complete zone is drawn as its polygon in both modes. (Drawing a
+      // rectangle from the first corner to the last drew TL->BL, a
+      // zero-width sliver, so a finished or reopened rectangle vanished:
+      // BL-6.)
+      ctx.beginPath();
+      ctx.moveTo(corners[0].x, corners[0].y);
+      for (let i = 1; i < 4; i++) ctx.lineTo(corners[i].x, corners[i].y);
+      ctx.closePath();
+      ctx.fill();
+      ctx.stroke();
+      corners.forEach((point, index) => {
+        ctx.fillStyle = '#10b981';
+        ctx.beginPath();
+        ctx.arc(point.x, point.y, 8, 0, 2 * Math.PI);
+        ctx.fill();
+        ctx.fillStyle = '#ffffff';
+        ctx.font = 'bold 14px sans-serif';
+        ctx.fillText((index + 1).toString(), point.x - 5, point.y + 5);
+      });
+    } else if (mode === 'rectangle' && corners.length >= 2) {
       // Draw rectangle from first corner to last (or current point if drawing)
       const start = corners[0];
       const end = currentPoint && isDrawing ? currentPoint : corners[corners.length - 1];

@@ -66,9 +66,13 @@ export function configsFor(
 
 /** A runtime model as a picker row. */
 export function toAIModel(model: ModelStatusInfo, isEnabled: boolean, isPending: boolean = false): AIModel {
-  // An uploaded model whose every rule needs a zone can raise nothing until
-  // zones can be drawn; the backend refuses it too (422 zone_required).
-  const blockedForZones = model.all_rules_need_zone === true && !isEnabled;
+  // Zone setup is keyed on "the model has zone rules", not on a model id:
+  // an uploaded model with zone types gets the setup button, and enabling
+  // it opens the zone editor first.
+  const zoneTypes = model.zone_types ?? [];
+  // A model whose every rule needs a zone but which names no zone type
+  // could never be set up here; the backend refuses it too (422).
+  const blockedForZones = model.all_rules_need_zone === true && !isEnabled && zoneTypes.length === 0;
   let state: AIModel['state'];
   if (blockedForZones) {
     state = 'unavailable';
@@ -85,9 +89,10 @@ export function toAIModel(model: ModelStatusInfo, isEnabled: boolean, isPending:
     id: model.model_id,
     name: model.display_name ?? modelDisplayName(model.model_id),
     state,
-    requiresGeofencing: MODELS_REQUIRING_CONFIG.has(model.model_id),
+    requiresGeofencing: MODELS_REQUIRING_CONFIG.has(model.model_id) || zoneTypes.length > 0,
     pending: isPending,
   };
+  if (zoneTypes.length > 0) row.zoneTypes = zoneTypes;
   if (blockedForZones) {
     row.disabledReason = `Needs a zone for every rule (${(model.zone_required_rules ?? []).join(', ')}) — available with zone setup`;
   }

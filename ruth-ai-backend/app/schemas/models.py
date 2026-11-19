@@ -41,6 +41,9 @@ class ModelStatusInfo(BaseModel):
     all_rules_need_zone: bool | None = Field(
         None, description="True when the model can raise nothing without a zone"
     )
+    zone_types: list[str] | None = Field(
+        None, description="Zone types the model's rules need (what the zone editor offers)"
+    )
     reports_ppe: bool | None = Field(
         None, description="Reports missing PPE, like the built-in ppe_detection"
     )

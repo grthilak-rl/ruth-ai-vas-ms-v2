@@ -162,7 +162,7 @@ def test_a_mixed_camera_gates_each_model_separately(resolve):
 # ---------------------------------------------------------------------------
 
 
-@pytest.mark.parametrize("name", ["hard_hat", "safety_vest", "gloves", "goggles", "fall_pose"])
+@pytest.mark.parametrize("name", ["hard_hat", "safety_vest", "gloves", "goggles", "fall_pose", "geofence"])
 def test_shipped_manifests_keep_todays_effective_gate(name):
     """Behaviour-preserving by construction.
 

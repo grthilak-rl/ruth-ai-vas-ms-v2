@@ -63,6 +63,13 @@ POSE_FALL_INDICATORS = {
     "wide_box": ("width_over_height_above",),
 }
 POSE_COORDS = {"legacy_640", "person_relative"}
+#: Optional zone settings on a rule with requires_zone, and their values
+#: (the first is the default). Mirrors ZONE_* in inference.py.
+ZONE_RULE_SETTINGS = {
+    "zone_anchor": ("bottom_center", "center"),
+    "zone_test": ("inside", "outside"),
+    "zone_point_test": ("standard", "legacy_ray_cast"),
+}
 #: Longest persistence a manifest may ask for: past this an alarm would be
 #: too late to be useful, so a bigger value is almost certainly a typo.
 MAX_PERSISTENCE_SECONDS = 60
@@ -182,6 +189,13 @@ def manifest_problems(manifest: Dict[str, Any]) -> List[str]:
                 p.append(f"rule {rid}: score_above must be in [0, 1)")
             if rule.get("requires_zone"):
                 p.append(f"rule {rid}: pose rules do not support requires_zone")
+        for key, allowed in ZONE_RULE_SETTINGS.items():
+            if key not in rule:
+                continue
+            if not rule.get("requires_zone"):
+                p.append(f"rule {rid}: {key} needs requires_zone")
+            elif rule[key] not in allowed:
+                p.append(f"rule {rid}: {key} must be one of {list(allowed)}")
         if not rule.get("violation_type"):
             p.append(f"rule {rid}: violation_type required")
         if rule.get("severity") not in SEVERITIES:
@@ -201,6 +215,27 @@ def manifest_problems(manifest: Dict[str, Any]) -> List[str]:
     limits = manifest.get("limits", {})
     if not isinstance(limits.get("max_memory_mb"), int):
         p.append("limits.max_memory_mb must be an integer")
+    # Optional, detect models: NMS IoU and a class filter for model.predict.
+    predict = manifest.get("predict")
+    if predict is not None:
+        if task != "detect":
+            p.append("predict is for detect models (pose models use pose.iou)")
+        elif not isinstance(predict, dict) or not set(predict) <= {"iou", "classes"}:
+            p.append("predict must be an object with optional iou and classes")
+        else:
+            iou = predict.get("iou")
+            if iou is not None and (not _is_number(iou) or not 0 < iou <= 1):
+                p.append("predict.iou must be in (0, 1]")
+            wanted = predict.get("classes")
+            if wanted is not None:
+                if not isinstance(wanted, list) or not wanted:
+                    p.append("predict.classes must be a non-empty list of class names")
+                elif set(wanted) - names:
+                    p.append(f"predict.classes {sorted(set(wanted) - names)} not in the model's classes")
+                else:
+                    unused = {c for r in rules for c in r.get("classes", [])} - set(wanted)
+                    if unused:
+                        p.append(f"predict.classes leaves out {sorted(unused)}, which rules need")
     # Optional, any task: the backend opens a violation only after the
     # rule has held for this long (a miss resets the clock). Absent = 0.
     persistence = manifest.get("persistence")

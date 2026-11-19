@@ -360,6 +360,7 @@ async def _store_model_statuses(
                 display_name=info.display_name,
                 zone_required_rules=list(info.zone_required_rules),
                 all_rules_need_zone=info.all_rules_need_zone,
+                zone_types=list(info.zone_types),
                 reports_ppe=info.reports_ppe,
             )
         )

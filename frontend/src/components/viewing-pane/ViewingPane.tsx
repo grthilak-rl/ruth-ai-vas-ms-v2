@@ -320,7 +320,9 @@ const ViewingPaneTile = memo(function ViewingPaneTile({
         enabledModels={activeModels}
         isTankOverflowEnabled={activeModels.includes('tank_overflow_monitoring')}
         isChaneTankEnabled={activeModels.includes('chane_tank_monitor')}
-        isGeofencingEnabled={activeModels.includes('geo_fencing')}
+        // Zones of the primary model's config (the wall only knows that one),
+        // whichever model it is.
+        isGeofencingEnabled={(modelConfig?.zones?.length ?? 0) > 0}
         tankCorners={modelConfig?.tank_corners}
         chaneTankRoiCircle={modelConfig?.roi_circle}
         geofenceZones={modelConfig?.zones}

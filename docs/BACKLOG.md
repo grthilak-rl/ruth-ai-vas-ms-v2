@@ -5,6 +5,72 @@ investigation. Newest first.
 
 ---
 
+## BL-37 · Flaky test: multi_model g8 (frames_processed counter)
+
+**Status:** backlog · **Raised:** 2026-11-19 (geofence release tests)
+
+`tests/multi_model/test_multi_model_loop.py::test_g8_publish_before_counter_and_one_counter_write_per_tick`
+sometimes finds the session's `frames_processed` in the DB lower than the
+total of the counter writes it recorded (e.g. 23 against 25).
+
+- **Predates the 2026-11-19 changes.** Interleaved runs of the whole
+  multi_model suite: 3 failures in 12 on the pre-change code
+  (`pre-fall-floor` image), 1 in 12 on the new code.
+- **Only within the suite:** 0 failures in 15 runs of g8 alone. Something
+  from an earlier test interferes.
+- **Not a write cut off at shutdown.** Recording the write after it
+  completes did not remove the failures.
+- **Next:**
+  - Check whether earlier tests leave loop or violation tasks (or pool
+    connections) running into g8.
+  - Check whether `_add_session_counter` swallows a failed update (it logs
+    at debug only).
+  - `make test` names the test when it fails (logs in `test-logs/`).
+
+---
+
+## BL-36 · Remove the unified runtime container after one release
+
+**Status:** backlog · **Raised:** 2026-11-19 (geofence migration; built-ins
+retired)
+
+After the geofence deploy every built-in model is retired: moved to
+`ai/models/.disabled/` (fall_detection, geo_fencing, ppe_detection,
+tank_overflow_monitoring, chane_tank_monitor), files kept for a rollback.
+The `unified-ai-runtime` container then serves nothing. It keeps running
+for one release so a rollback is just a move and a restart. System Health
+shows it as "disabled" because compose sets `UNIFIED_RUNTIME_IN_USE: "false"`
+on the backend.
+
+After one release with no rollback:
+- **Deploy:** remove the `unified-ai-runtime` service from
+  `vas-ruthai-deploy/docker-compose.yml`. It frees its GPU memory (1.6 GB
+  in use on 2026-11-19; its internal budget reserved 13.3 GB) and one
+  image.
+- **Repo:** delete `ai/models/.disabled/`. This also does BL-30 for
+  fall_detection. The parity tests that import built-ins
+  (`test_pose_fall.py`, `test_geofence.py`) then skip, as designed.
+- **Backend:**
+  - Drop the unified runtime client and its routing
+    (`app/integrations/unified_runtime`, `UNIFIED_RUNTIME_URL`).
+  - Make the model store runtime the only AI runtime in System Health.
+  - Drop built-in IDs from schema defaults and examples.
+  - Keep every built-in ID in `RESERVED_MODEL_IDS`: past violations carry
+    them.
+- **Frontend:**
+  - Drop the built-in-only paths: `ppe_detection`, `tank_overflow_monitoring`
+    and `chane_tank_monitor` overlays and managers, `LEGACY_FALL_MODEL_ID`,
+    the `MODELS_REQUIRING_CONFIG` ids.
+  - Bookmark monitoring's built-in cases (it runs store models through
+    the generic store path since the geofence release).
+  - The `UNIFIED_RUNTIME_IN_USE` flag and the compose line, once the
+    service is gone.
+- **Archived script:** `archive/ai-models/chane_tank_overflow/` (a standalone
+  desktop script, never a runtime model) can be deleted or kept as
+  reference.
+
+---
+
 ## BL-32 · Licensing: the Ultralytics models and library are AGPL-3.0
 
 **Status:** decision needed before the product is licensed · **Raised:**
@@ -87,6 +153,9 @@ still be a deliberate choice, not a side effect.
 ---
 
 ## BL-30 · Remove the built-in fall_detection after one release
+
+**Update 2026-11-19:** folded into BL-36 (remove the unified runtime and
+every disabled built-in together, after one release).
 
 **Status:** backlog · **Raised:** 2026-11-19 (fall_pose migration)
 
@@ -1058,7 +1127,12 @@ add cases for fall + tank, fall + empty PPE, fall + PPE with persons.
 
 ## BL-6 · Geo/tank setup modal: rectangle mode, loaded zones, edits overwritten
 
-**Status:** parked · **Found:** 2026-10-04 (M3 live check) · **Area:**
+**Update 2026-11-19: fixed in the geofence release** (all four findings, as
+proposed; see `docs/model-store/GEOFENCE_MIGRATION.md`). It goes live with
+that deploy. The modal is now keyed on "the model has zone rules", and store
+models save normalised zones.
+
+**Status:** fixed (pending deploy) · was parked · **Found:** 2026-10-04 (M3 live check) · **Area:**
 frontend, `GeofenceSetupModal.tsx`, `VideoCanvas.tsx`, `ROICanvas.tsx`
 (unchanged since `2722551`; not caused by M2/M3)
 

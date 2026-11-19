@@ -21,7 +21,12 @@ export interface ZoneConfig {
   id: string;
   name: string;
   points: number[][];
-  type: 'restricted' | 'allowed';
+  /** 'restricted' / 'allowed' for geo-fencing; a store model may name
+   *  other zone types in its rules (`requires_zone`). */
+  type: string;
+  /** 'normalized': points are fractions (0-1) of the image width/height.
+   *  Absent: frame pixels (the built-in geo_fencing format). */
+  coords?: 'normalized';
 }
 
 /**

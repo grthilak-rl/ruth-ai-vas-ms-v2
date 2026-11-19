@@ -27,6 +27,33 @@ min_confidence. A rule with ``requires_zone`` only considers detections whose
 anchor (bottom centre) lies inside a zone of that type in ``config.zones``;
 with no such zone it is inactive and can never fire (fails closed).
 
+Zones
+-----
+``config.zones`` (per camera, per model, sent with every request) is a list
+of ``{"id", "name", "type", "points": [[x, y], ...]}``. Points are frame
+pixels, or, with ``"coords": "normalized"`` on the zone, fractions (0-1) of
+the frame width and height. Normalised zones are scaled to each frame, so a
+snapshot drawn at one resolution cannot misplace a zone on frames inferred
+at another. The zone editor writes normalised zones.
+
+Optional per-rule settings, all off by default (then the zone test is
+exactly as before):
+
+- ``zone_anchor``: ``"bottom_center"`` (default: where a person stands) or
+  ``"center"`` (the box centre, as the built-in geo_fencing model used).
+- ``zone_test``: ``"inside"`` (default: fires when the anchor is inside a
+  zone of the rule's type) or ``"outside"`` (fires when it is outside one,
+  for "allowed" zones a person must not leave). The first matching zone in
+  list order is the one reported.
+- ``zone_point_test``: ``"standard"`` (default) or ``"legacy_ray_cast"``, the
+  built-in geo_fencing model's polygon test. They differ only for an anchor
+  exactly on an edge or vertex; the legacy one exists so that migration is
+  exact.
+
+``predict`` (manifest, detect models only, optional): ``{"iou": x}`` sets
+the NMS IoU threshold (absent: Ultralytics' default) and ``{"classes":
+[names]}`` restricts detection to those classes (absent: every class).
+
 Trial mode
 ----------
 An optional manifest block puts one model under observation without
@@ -179,12 +206,70 @@ def _point_in_polygon(x: float, y: float, points: List[List[float]]) -> bool:
     return inside
 
 
-def _zone_for(det: Dict[str, Any], zones: List[Dict[str, Any]]) -> Optional[Dict[str, Any]]:
+def _legacy_ray_cast(x: float, y: float, polygon: List[List[float]]) -> bool:
+    """The built-in geo_fencing model's polygon test, transcribed verbatim
+    from ai/models/geo_fencing/1.0.0/inference.py (``_point_in_polygon``),
+    edge cases included. A parity test runs both on the same points."""
+    n = len(polygon)
+    inside = False
+    p1x, p1y = polygon[0]
+    xinters = 0.0
+    for i in range(1, n + 1):
+        p2x, p2y = polygon[i % n]
+        if y > min(p1y, p2y):
+            if y <= max(p1y, p2y):
+                if x <= max(p1x, p2x):
+                    if p1y != p2y:
+                        xinters = (y - p1y) * (p2x - p1x) / (p2y - p1y) + p1x
+                    if p1x == p2x or x <= xinters:
+                        inside = not inside
+        p1x, p1y = p2x, p2y
+    return inside
+
+
+ZONE_ANCHORS = ("bottom_center", "center")
+ZONE_TESTS = ("inside", "outside")
+ZONE_POINT_TESTS = ("standard", "legacy_ray_cast")
+
+
+def _zone_points(zone: Dict[str, Any], frame_shape: Optional[Tuple[int, ...]]) -> List[List[float]]:
+    """A zone's polygon in frame pixels."""
+    points = zone.get("points") or []
+    if zone.get("coords") != "normalized":
+        return points
+    if frame_shape is None:
+        raise ValueError("normalized zones need the frame shape")
+    height, width = frame_shape[0], frame_shape[1]
+    return [[float(p[0]) * width, float(p[1]) * height] for p in points]
+
+
+def _zone_for(
+    det: Dict[str, Any],
+    zones: List[Dict[str, Any]],
+    rule: Optional[Dict[str, Any]] = None,
+    frame_shape: Optional[Tuple[int, ...]] = None,
+) -> Optional[Dict[str, Any]]:
+    """The first zone (list order) that makes ``det`` match ``rule``'s zone
+    test, if any. With no zone settings on the rule: bottom centre, inside,
+    standard test, as always."""
+    rule = rule or {}
     x1, y1, x2, y2 = det["bbox"]
-    anchor_x, anchor_y = (x1 + x2) / 2.0, y2  # bottom centre: where the person stands
+    anchor_x = (x1 + x2) / 2.0
+    if rule.get("zone_anchor", "bottom_center") == "center":
+        anchor_y = (y1 + y2) / 2.0
+    else:
+        anchor_y = y2  # bottom centre: where the person stands
+    want_inside = rule.get("zone_test", "inside") == "inside"
+    legacy = rule.get("zone_point_test", "standard") == "legacy_ray_cast"
     for zone in zones:
-        points = zone.get("points") or []
-        if len(points) >= 3 and _point_in_polygon(anchor_x, anchor_y, points):
+        points = _zone_points(zone, frame_shape)
+        if len(points) < 3:
+            continue
+        if legacy:
+            inside = _legacy_ray_cast(anchor_x, anchor_y, points)
+        else:
+            inside = _point_in_polygon(anchor_x, anchor_y, points)
+        if inside == want_inside:
             return zone
     return None
 
@@ -366,7 +451,7 @@ def apply_rules(
                 violating["indicators"] = held
             zone_type = rule.get("requires_zone")
             if zone_type:
-                zone = _zone_for(obj, [z for z in zones if z.get("type") == zone_type])
+                zone = _zone_for(obj, [z for z in zones if z.get("type") == zone_type], rule, frame_shape)
                 if zone is None:
                     continue
                 violating["in_zone"] = True
@@ -543,6 +628,12 @@ def infer(frame: np.ndarray, config: Optional[Dict[str, Any]] = None, **kwargs) 
     predict_args = dict(imgsz=manifest["imgsz"], conf=predict_floor, device=device, verbose=False)
     if is_pose and manifest["pose"].get("iou") is not None:
         predict_args["iou"] = float(manifest["pose"]["iou"])
+    predict = manifest.get("predict") or {}
+    if predict.get("iou") is not None:
+        predict_args["iou"] = float(predict["iou"])
+    if predict.get("classes"):
+        wanted = set(predict["classes"])
+        predict_args["classes"] = sorted(int(k) for k, name in manifest["classes"].items() if name in wanted)
 
     started = time.perf_counter()
     results = model.predict(frame, **predict_args)

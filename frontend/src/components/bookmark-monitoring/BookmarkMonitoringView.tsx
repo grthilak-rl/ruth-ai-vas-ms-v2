@@ -47,6 +47,9 @@ import {
   type ChaneTankResult,
   drawChaneTankMonitor,
 } from '../../services/chaneTankMonitor';
+import { StoreDetectionManager, type StoreDetectionResult } from '../../services/storeDetection';
+import { drawStoreDetections } from '../../services/storeOverlay';
+import { zonePointsOnCanvas } from '../zoneGeometry';
 import { getBookmarkVideoUrl } from '../../state/api/bookmarkAnalyses.api';
 import { estimateRadiusFromClick } from '../../services/roiRayCast';
 import type { ModelConfig } from '../../types/geofencing';
@@ -73,12 +76,14 @@ type ActiveManager =
   | { kind: 'fall'; mgr: FallDetectionManager }
   | { kind: 'ppe'; mgr: PPEDetectionManager }
   | { kind: 'tank'; mgr: TankDetectionManager }
-  | { kind: 'chaneTank'; mgr: ChaneTankMonitorManager };
+  | { kind: 'chaneTank'; mgr: ChaneTankMonitorManager }
+  | { kind: 'store'; mgr: StoreDetectionManager };
 
 const FALL_FPS = 2;
 const PPE_FPS = 1;
 const TANK_FPS = 1;
 const CHANE_TANK_FPS = 2;
+const STORE_FPS = 1;
 
 export function BookmarkMonitoringView({
   vasBookmarkId,
@@ -96,6 +101,7 @@ export function BookmarkMonitoringView({
   const [tankResult, setTankResult] = useState<TankDetectionResult | null>(null);
   const [chaneTankResult, setChaneTankResult] =
     useState<ChaneTankResult | null>(null);
+  const [storeResult, setStoreResult] = useState<StoreDetectionResult | null>(null);
   // chane_tank_monitor ROI selection: a provisional circle the operator places
   // by clicking; nothing is committed to config until they press Confirm.
   const [provisionalRoi, setProvisionalRoi] = useState<ProvisionalRoi | null>(
@@ -142,6 +148,7 @@ export function BookmarkMonitoringView({
     setPPEResult(null);
     setTankResult(null);
     setChaneTankResult(null);
+    setStoreResult(null);
     const canvas = canvasRef.current;
     if (canvas) {
       const ctx = canvas.getContext('2d');
@@ -227,8 +234,15 @@ export function BookmarkMonitoringView({
       });
       mgr.start(video, (result) => setChaneTankResult(result));
       managerRef.current = { kind: 'chaneTank', mgr };
+    } else {
+      // Any other model: an uploaded (store) model — PPE models, geofence
+      // (its zones travel in modelConfig). /api/v1/ai/inference routes store
+      // models to the model store runtime; a result that is not a store
+      // result simply draws nothing.
+      const mgr = new StoreDetectionManager(modelId, modelConfig, STORE_FPS);
+      mgr.start(video, (result) => setStoreResult(result));
+      managerRef.current = { kind: 'store', mgr };
     }
-    // Unknown models silently no-op — surface only models we render.
   }, [modelId, modelConfig]);
 
   // Model (or config) switched: stop any running manager. If the
@@ -263,6 +277,7 @@ export function BookmarkMonitoringView({
       setPPEResult(null);
       setTankResult(null);
       setChaneTankResult(null);
+      setStoreResult(null);
       const canvas = canvasRef.current;
       if (canvas) {
         const ctx = canvas.getContext('2d');
@@ -409,6 +424,28 @@ export function BookmarkMonitoringView({
         canvas.width,
         canvas.height,
       );
+    } else if (managerRef.current?.kind === 'store') {
+      // Zones first (under the boxes), then the store overlay.
+      for (const zone of modelConfig?.zones ?? []) {
+        if (!zone.points || zone.points.length < 3) continue;
+        const pts = zonePointsOnCanvas(zone, video.videoWidth || 1920, video.videoHeight || 1080,
+          canvas.width, canvas.height);
+        ctx.save();
+        ctx.beginPath();
+        ctx.moveTo(pts[0].x, pts[0].y);
+        for (const p of pts.slice(1)) ctx.lineTo(p.x, p.y);
+        ctx.closePath();
+        const restricted = zone.type !== 'allowed';
+        ctx.fillStyle = restricted ? 'rgba(255, 0, 0, 0.15)' : 'rgba(0, 255, 0, 0.15)';
+        ctx.strokeStyle = restricted ? 'rgba(255, 0, 0, 0.8)' : 'rgba(0, 255, 0, 0.8)';
+        ctx.lineWidth = 2;
+        ctx.fill();
+        ctx.stroke();
+        ctx.restore();
+      }
+      if (storeResult?.overlay) {
+        drawStoreDetections(ctx, [storeResult.overlay], canvas.width, canvas.height);
+      }
     }
 
     // Provisional ROI circle (chane_tank_monitor click-to-set, pre-confirm).
@@ -440,9 +477,11 @@ export function BookmarkMonitoringView({
     ppeResult,
     tankResult,
     chaneTankResult,
+    storeResult,
     provisionalRoi,
     geomTick,
     modelConfig?.tank_corners,
+    modelConfig?.zones,
   ]);
 
   const isChaneSelected = modelId === 'chane_tank_monitor';

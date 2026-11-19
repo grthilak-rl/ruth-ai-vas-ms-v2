@@ -32,6 +32,8 @@ export interface AIModel {
   name: string;
   state: AIModelState;
   requiresGeofencing?: boolean;
+  /** Zone types the model's rules need (store models): the editor offers these. */
+  zoneTypes?: string[];
   /** A change to this model is in flight; the picker locks until it settles. */
   pending?: boolean;
   /** Why the model can't be enabled here (shown under its row). */
@@ -292,6 +294,7 @@ export function AIModelSelector({
           videoUrl={videoUrl}
           onConfigSaved={handleConfigSaved}
           initialConfig={modelConfigs[selectedModelForConfig.id]}
+          zoneTypes={selectedModelForConfig.zoneTypes}
         />
       )}
     </div>

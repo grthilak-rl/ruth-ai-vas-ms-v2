@@ -273,6 +273,20 @@ class HealthService:
             rid: reg for rid, reg in _all_runtimes.items() if rid != store_runtime_id
         }
 
+        # Retired on purpose (UNIFIED_RUNTIME_IN_USE=false): every built-in
+        # model is gone and all inference runs in the model store runtime,
+        # which has its own component. Left out of overall health, with no
+        # network call, like the other disabled components. With the flag on,
+        # a runtime with no models is still judged (unhealthy) as before.
+        if not get_unified_runtime_config().unified_runtime_in_use:
+            return ComponentHealth(
+                status="disabled",
+                details=AIRuntimeDetails(
+                    reasons=["not in use: UNIFIED_RUNTIME_IN_USE=false (built-in models retired; "
+                             "inference runs in the model store runtime)"],
+                ).model_dump(exclude_none=True),
+            )
+
         start_time = time.perf_counter()
 
         try:

@@ -661,6 +661,9 @@ export interface ModelStatusInfo {
   /** Every rule needs a zone: the model can raise nothing without one */
   all_rules_need_zone?: boolean;
 
+  /** Zone types its rules need (requires_zone): what the zone editor offers */
+  zone_types?: string[];
+
   /** Reports missing PPE, like the built-in ppe_detection */
   reports_ppe?: boolean;
 }

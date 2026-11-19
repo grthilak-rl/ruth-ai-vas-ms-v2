@@ -3,13 +3,40 @@
  *
  * Model-aware configuration:
  * - tank_overflow_monitoring: Shows tank capacity and alert threshold
- * - geo_fencing: Shows zone name and zone type (restricted/allowed)
+ * - zone models: any model whose rules need a zone (`zoneTypes`, from the
+ *   store manifest's `requires_zone`), or the built-in geo_fencing. Shows
+ *   zone name and zone type. Store models save the zone normalised (0-1 of
+ *   the image size, `coords: 'normalized'`), so snapshot and inference
+ *   resolutions cannot disagree; the built-in keeps frame pixels.
+ *
+ * The saved config is read once per opening (the modal mounts per opening),
+ * so a refetch while it is open cannot overwrite the points being edited.
+ * A saved zone reopens in rectangle mode if it is an axis-aligned rectangle,
+ * otherwise in manual mode; switching mode keeps a complete zone, and only
+ * Reset clears it (BL-6).
  */
 
-import { useState, useEffect } from 'react';
+import { useState, useRef } from 'react';
 import { VideoCanvas } from './VideoCanvas';
 import type { Point, ModelConfig, GeofenceMode, ZoneConfig } from '../types/geofencing';
+import { buildZone, modeFor, readInitialConfig, zonePointsInImage } from './zoneGeometry';
 import './GeofenceSetupModal.css';
+
+/** Zone types the built-in geo_fencing model understands. */
+const BUILTIN_GEOFENCE_ZONE_TYPES = ['restricted', 'allowed'];
+
+function zoneTypeLabel(type: string): string {
+  if (type === 'restricted') return 'Restricted (Alert when entered)';
+  if (type === 'allowed') return 'Allowed (Alert when exited)';
+  return type.charAt(0).toUpperCase() + type.slice(1).replace(/_/g, ' ');
+}
+
+function defaultZoneName(type: string): string {
+  if (type === 'restricted') return 'Restricted Zone';
+  if (type === 'allowed') return 'Allowed Zone';
+  return `${zoneTypeLabel(type)} Zone`;
+}
+
 
 interface GeofenceSetupModalProps {
   isOpen: boolean;
@@ -21,6 +48,8 @@ interface GeofenceSetupModalProps {
   videoUrl: string;
   onConfigSaved: (config: ModelConfig) => void;
   initialConfig?: ModelConfig;
+  /** Zone types the model's rules need (store models); absent for others. */
+  zoneTypes?: string[];
 }
 
 export function GeofenceSetupModal({
@@ -31,55 +60,52 @@ export function GeofenceSetupModal({
   modelName,
   videoUrl,
   onConfigSaved,
-  initialConfig
+  initialConfig,
+  zoneTypes
 }: GeofenceSetupModalProps) {
-  const [mode, setMode] = useState<GeofenceMode>('rectangle');
-  const [corners, setCorners] = useState<Point[]>([]);
-  const [isDrawing, setIsDrawing] = useState(false);
-  const [startPoint, setStartPoint] = useState<Point | null>(null);
-
-  // Tank-specific configuration (for tank_overflow_monitoring)
-  const [capacityLiters, setCapacityLiters] = useState(1000);
-  const [alertThreshold, setAlertThreshold] = useState(90);
-
-  // Geo-fencing specific configuration (for geo_fencing)
-  const [zoneName, setZoneName] = useState('Restricted Zone');
-  const [zoneType, setZoneType] = useState<'restricted' | 'allowed'>('restricted');
-
   // Determine model type
   const isTankModel = modelId === 'tank_overflow_monitoring';
-  const isGeoFencingModel = modelId === 'geo_fencing';
+  const storeZoneTypes = zoneTypes ?? [];
+  const zoneTypeOptions =
+    storeZoneTypes.length > 0
+      ? storeZoneTypes
+      : modelId === 'geo_fencing' ? BUILTIN_GEOFENCE_ZONE_TYPES : [];
+  const isZoneModel = zoneTypeOptions.length > 0;
+  /** Store models save normalised zones; the built-in reads pixels only. */
+  const saveNormalized = storeZoneTypes.length > 0;
 
-  // Initialize from existing config
-  useEffect(() => {
-    if (initialConfig) {
-      // Tank model config
-      if (initialConfig.tank_corners) {
-        // eslint-disable-next-line react-hooks/set-state-in-effect -- seeds the editor from the saved config when the modal opens or the config changes
-        setCorners(initialConfig.tank_corners.map(([x, y]) => ({ x, y })));
-      }
-      if (initialConfig.capacity_liters !== undefined) {
-        setCapacityLiters(initialConfig.capacity_liters);
-      }
-      if (initialConfig.alert_threshold !== undefined) {
-        setAlertThreshold(initialConfig.alert_threshold);
-      }
+  // The saved config, read once for this opening.
+  const [initial] = useState(() => readInitialConfig(initialConfig));
 
-      // Geo-fencing model config
-      if (initialConfig.zones && initialConfig.zones.length > 0) {
-        const zone = initialConfig.zones[0] as ZoneConfig;
-        if (zone.points) {
-          setCorners(zone.points.map(([x, y]) => ({ x, y })));
-        }
-        if (zone.name) {
-          setZoneName(zone.name);
-        }
-        if (zone.type) {
-          setZoneType(zone.type);
-        }
-      }
+  const [mode, setMode] = useState<GeofenceMode>(() => modeFor(initial.corners));
+  const [corners, setCorners] = useState<Point[]>(initial.corners);
+  const [isDrawing, setIsDrawing] = useState(false);
+  const [startPoint, setStartPoint] = useState<Point | null>(null);
+  const [imageSize, setImageSize] = useState<{ width: number; height: number } | null>(null);
+  const pendingZoneRef = useRef<ZoneConfig | null>(initial.pendingZone);
+
+  // Tank-specific configuration (for tank_overflow_monitoring)
+  const [capacityLiters, setCapacityLiters] = useState(initial.capacityLiters ?? 1000);
+  const [alertThreshold, setAlertThreshold] = useState(initial.alertThreshold ?? 90);
+
+  // Zone configuration (zone models)
+  const [zoneType, setZoneType] = useState<string>(() =>
+    initial.zoneType && zoneTypeOptions.includes(initial.zoneType)
+      ? initial.zoneType
+      : (zoneTypeOptions[0] ?? 'restricted'));
+  const [zoneName, setZoneName] = useState(() => initial.zoneName ?? defaultZoneName(zoneType));
+
+  // The image's natural size: needed to show a normalised zone, and to save one.
+  const handleImageSize = (width: number, height: number) => {
+    setImageSize((prev) => (prev && prev.width === width && prev.height === height ? prev : { width, height }));
+    const pending = pendingZoneRef.current;
+    if (pending) {
+      pendingZoneRef.current = null;
+      const points = zonePointsInImage(pending, width, height);
+      setCorners(points);
+      setMode(modeFor(points));
     }
-  }, [initialConfig]);
+  };
 
   // Rectangle mode handlers
   const handleMouseDown = (point: Point) => {
@@ -137,7 +163,14 @@ export function GeofenceSetupModal({
 
   const handleModeChange = (newMode: GeofenceMode) => {
     setMode(newMode);
-    handleReset();
+    // A complete zone survives a mode switch; only Reset clears it (BL-6).
+    // A half-drawn one is cleared: its points belong to the other tool.
+    if (corners.length === 4) {
+      setStartPoint(null);
+      setIsDrawing(false);
+    } else {
+      handleReset();
+    }
   };
 
   const handleApply = () => {
@@ -156,18 +189,10 @@ export function GeofenceSetupModal({
         capacity_liters: capacityLiters,
         alert_threshold: alertThreshold
       };
-    } else if (isGeoFencingModel) {
-      // Geo-fencing config
-      config = {
-        zones: [
-          {
-            id: 'zone_1',
-            name: zoneName,
-            points: cornerArray,
-            type: zoneType
-          }
-        ]
-      };
+    } else if (isZoneModel) {
+      const zone = buildZone(corners, zoneName, zoneType, saveNormalized ? imageSize : undefined);
+      if (!zone) return; // Apply is disabled until the image has loaded
+      config = { zones: [zone] };
     } else {
       // Generic fallback
       config = {
@@ -185,14 +210,23 @@ export function GeofenceSetupModal({
       modelId,
       corners: cornerArray,
       ...(isTankModel ? { capacity_liters: capacityLiters, alert_threshold: alertThreshold } : {}),
-      ...(isGeoFencingModel ? { zone_name: zoneName, zone_type: zoneType } : {})
+      ...(isZoneModel ? { zone_name: zoneName, zone_type: zoneType } : {})
     });
   };
 
   const isComplete = corners.length === 4;
+  const canApply = isComplete && (!saveNormalized || imageSize !== null);
+
+  const zoneHelp =
+    zoneType === 'restricted'
+      ? 'Alert will trigger when a person enters this zone'
+      : zoneType === 'allowed'
+        ? 'Alert will trigger when a person leaves this zone'
+        : `Rules of type "${zoneType}" apply inside this zone`;
 
   const getInstructions = () => {
-    const regionType = isGeoFencingModel ? 'restricted zone' : 'tank opening';
+    const regionType = isZoneModel ? 'zone' : 'tank opening';
+    const zoneDone = 'Zone defined. ' + zoneHelp + '.';
 
     if (mode === 'rectangle') {
       if (corners.length === 0) {
@@ -200,8 +234,8 @@ export function GeofenceSetupModal({
       } else if (isDrawing) {
         return 'Release to complete the rectangle';
       } else {
-        if (isGeoFencingModel) {
-          return 'Zone defined. The system will alert when persons enter this area.';
+        if (isZoneModel) {
+          return zoneDone;
         }
         return 'Rectangle defined. The system will detect liquid level within this region.';
       }
@@ -216,8 +250,8 @@ export function GeofenceSetupModal({
       } else if (remaining === 1) {
         return `Click the bottom-left corner of the ${regionType}`;
       } else {
-        if (isGeoFencingModel) {
-          return 'Zone defined. The system will alert when persons enter this area.';
+        if (isZoneModel) {
+          return zoneDone;
         }
         return 'All 4 corners defined. The system will detect liquid level within this region.';
       }
@@ -225,8 +259,8 @@ export function GeofenceSetupModal({
   };
 
   const getModalTitle = () => {
-    if (isGeoFencingModel) {
-      return 'Setup Restricted Zone';
+    if (isZoneModel) {
+      return 'Setup Zone';
     }
     return 'Setup Geo-Fence';
   };
@@ -263,6 +297,7 @@ export function GeofenceSetupModal({
             corners={corners}
             isDrawing={isDrawing}
             mode={mode}
+            onImageSize={handleImageSize}
           />
 
           {/* Mode Selection */}
@@ -333,8 +368,8 @@ export function GeofenceSetupModal({
             </div>
           )}
 
-          {/* Geo-fencing specific Configuration */}
-          {isGeoFencingModel && (
+          {/* Zone configuration */}
+          {isZoneModel && (
             <div className="geofence-modal__config-row">
               <div className="geofence-modal__field">
                 <label className="geofence-modal__label">Zone Name</label>
@@ -353,16 +388,13 @@ export function GeofenceSetupModal({
                 <select
                   className="geofence-modal__select"
                   value={zoneType}
-                  onChange={(e) => setZoneType(e.target.value as 'restricted' | 'allowed')}
+                  onChange={(e) => setZoneType(e.target.value)}
                 >
-                  <option value="restricted">Restricted (Alert when entered)</option>
-                  <option value="allowed">Allowed (Alert when exited)</option>
+                  {zoneTypeOptions.map((type) => (
+                    <option key={type} value={type}>{zoneTypeLabel(type)}</option>
+                  ))}
                 </select>
-                <p className="geofence-modal__help">
-                  {zoneType === 'restricted'
-                    ? 'Alert will trigger when a person enters this zone'
-                    : 'Alert will trigger when a person leaves this zone'}
-                </p>
+                <p className="geofence-modal__help">{zoneHelp}</p>
               </div>
             </div>
           )}
@@ -375,8 +407,8 @@ export function GeofenceSetupModal({
             </div>
           )}
 
-          {/* Geo-fencing Note */}
-          {isGeoFencingModel && isComplete && (
+          {/* Zone Note */}
+          {isZoneModel && isComplete && (zoneType === 'restricted' || zoneType === 'allowed') && (
             <div className="geofence-modal__note">
               <strong>Note:</strong> The system uses person detection to monitor this zone.
               {zoneType === 'restricted'
@@ -414,7 +446,7 @@ export function GeofenceSetupModal({
             type="button"
             className="geofence-modal__button geofence-modal__button--primary"
             onClick={handleApply}
-            disabled={!isComplete}
+            disabled={!canApply}
           >
             Apply & Close
           </button>

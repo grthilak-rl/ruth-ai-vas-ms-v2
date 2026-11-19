@@ -26,6 +26,18 @@ class UnifiedRuntimeConfig(BaseSettings):
         validation_alias="UNIFIED_RUNTIME_ENABLE"
     )
 
+    # Whether the built-in runtime is part of this deployment. false once
+    # every built-in model is retired (all inference in the model store
+    # runtime): System Health then shows it "disabled" (left out of overall
+    # health) instead of judging it. Health only: routing is unchanged.
+    # Deliberately not named like UNIFIED_RUNTIME_ENABLE above, which is a
+    # routing switch (false sends built-in models to legacy containers).
+    unified_runtime_in_use: bool = Field(
+        default=True,
+        description="Built-in runtime is part of this deployment (false = retired)",
+        validation_alias="UNIFIED_RUNTIME_IN_USE",
+    )
+
     # Timeout for unified runtime requests
     unified_runtime_timeout: float = Field(
         default=30.0,

@@ -7,8 +7,9 @@ import type { Device } from '../../state';
 import { cameraCoverage, formatAbsentFor } from '../../state/api/coverage';
 import { describeFeedProblem, feedProblem } from '../../state/api/cameraFeeds';
 import { activeModelIds } from '../../state/api/devices.api';
-import type { ModelConfig } from '../../types/geofencing';
+import type { ModelConfig, ZoneConfig } from '../../types/geofencing';
 import { isFallModel } from '../../services/fallDetection';
+import { zonesForModels } from '../zoneGeometry';
 import './CameraGridCell.css';
 
 /**
@@ -138,7 +139,6 @@ export function CameraGridCell({
   const isPPEDetectionActive = serverModels.includes('ppe_detection');
   const isTankOverflowActive = serverModels.includes('tank_overflow_monitoring');
   const isChaneTankActive = serverModels.includes('chane_tank_monitor');
-  const isGeofencingActive = serverModels.includes('geo_fencing');
 
   // Get tank overflow configuration (corners)
   const tankOverflowConfig = modelConfigs['tank_overflow_monitoring'];
@@ -148,9 +148,13 @@ export function CameraGridCell({
   const chaneTankConfig = modelConfigs['chane_tank_monitor'];
   const chaneTankRoiCircle = chaneTankConfig?.roi_circle;
 
-  // Get geo_fencing configuration (zones)
-  const geofencingConfig = modelConfigs['geo_fencing'];
-  const geofenceZones = geofencingConfig?.zones;
+  // Zones of every running model that has them (built-in geo_fencing or a
+  // store model with zone rules), not just one model id.
+  // Keyed on the zones' content, like serverModels above: a new array every
+  // render would redraw the overlay canvas.
+  const zonesKey = JSON.stringify(zonesForModels(modelConfigs, serverModels));
+  const geofenceZones = useMemo(() => JSON.parse(zonesKey) as ZoneConfig[], [zonesKey]);
+  const isGeofencingActive = geofenceZones.length > 0;
 
   const handleModelToggle = (modelId: string, enabled: boolean, config?: ModelConfig) => {
     onModelToggle(camera.id, modelId, enabled, config);

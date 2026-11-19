@@ -5,8 +5,8 @@
  *   1. Bookmark dropdown — VAS bookmarks from useBookmarksListQuery
  *   2. AI model selector — reuses AIModelSelector + its model-aware
  *      GeofenceSetupModal so tank_overflow gets a tank_corners prompt
- *      and geo_fencing gets a zones prompt; fall_pose (store; the
- *      built-in fall_detection it replaced) and ppe_detection run
+ *      and any zone model (geofence, store models with zone rules) gets
+ *      a zones prompt; fall_pose and the other store models (PPE) run
  *      immediately with no config.
  *   3. BookmarkMonitoringView — the <video> + canvas overlay,
  *      pointing the live-monitoring detection managers at a
@@ -90,11 +90,15 @@ function toAIModel(
   if (m.model_id.includes('_container')) {
     displayName = displayName.replace(' Container', ' (Legacy)');
   }
+  // Store models carry their own display name and, for zone models, the
+  // zone types their rules need: zone setup is keyed on those, not the id.
+  const zoneTypes = m.zone_types ?? [];
   return {
     id: m.model_id,
-    name: displayName,
+    name: m.display_name ?? displayName,
     state,
-    requiresGeofencing: MODELS_REQUIRING_CONFIG.has(m.model_id),
+    requiresGeofencing: MODELS_REQUIRING_CONFIG.has(m.model_id) || zoneTypes.length > 0,
+    ...(zoneTypes.length > 0 ? { zoneTypes } : {}),
   };
 }
 
