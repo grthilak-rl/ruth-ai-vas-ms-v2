@@ -13,7 +13,7 @@ Usage:
     stream_service = StreamService(vas_client, db)
 
     # Start a stream
-    session = await stream_service.start_stream(device_id, model_id="fall_detection")
+    session = await stream_service.start_stream(device_id, model_id="fall_pose")
 
     # Stop a stream
     await stream_service.stop_stream(device_id)
@@ -104,7 +104,7 @@ class StreamService:
         self,
         device_id: UUID,
         *,
-        model_id: str = "fall_detection",
+        model_id: str = "fall_pose",
         model_version: str | None = None,
         inference_fps: int = 10,
         confidence_threshold: float = 0.7,

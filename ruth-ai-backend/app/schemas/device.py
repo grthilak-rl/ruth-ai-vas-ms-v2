@@ -152,7 +152,8 @@ class InferenceStartRequest(BaseModel):
     """Request schema for POST /api/v1/devices/{id}/start-inference."""
 
     model_id: str = Field(
-        default="fall_detection",
+        # fall_pose (model store) replaced the built-in fall_detection.
+        default="fall_pose",
         description="AI model to use for inference",
     )
     model_version: str | None = Field(

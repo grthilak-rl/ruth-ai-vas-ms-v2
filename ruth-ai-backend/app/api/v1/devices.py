@@ -1067,7 +1067,8 @@ async def get_latest_detections(device_id: UUID) -> dict:
     Bounding boxes are only meaningful against the frame they were computed
     on, so ``frame_width`` / ``frame_height`` travel with every result. Model
     coordinate spaces are unchanged from what clients already handle:
-    fall_detection reports in 640x640 model space, ppe_detection in frame
+    fall_detection (built-in, now disabled) reported in 640x640 model space;
+    ppe_detection and every store model, fall_pose included, report in frame
     pixels.
     """
     from app.services.inference_loop import get_inference_loop

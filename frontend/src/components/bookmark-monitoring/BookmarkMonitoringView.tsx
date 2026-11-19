@@ -28,6 +28,7 @@ import type { MouseEvent as ReactMouseEvent } from 'react';
 
 import {
   FallDetectionManager,
+  isFallModel,
   type FallDetectionResult,
   drawFallDetections,
 } from '../../services/fallDetection';
@@ -155,8 +156,9 @@ export function BookmarkMonitoringView({
     if (!video) return;
     if (!modelId) return;
 
-    if (modelId === 'fall_detection') {
-      const mgr = new FallDetectionManager({ fps: FALL_FPS });
+    if (isFallModel(modelId)) {
+      // fall_pose (store) or the built-in fall_detection: same overlay.
+      const mgr = new FallDetectionManager({ fps: FALL_FPS, modelId });
       mgr.start(video, (result) => setFallResult(result));
       managerRef.current = { kind: 'fall', mgr };
     } else if (modelId === 'ppe_detection') {

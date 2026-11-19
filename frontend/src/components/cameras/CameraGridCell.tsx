@@ -8,6 +8,7 @@ import { cameraCoverage, formatAbsentFor } from '../../state/api/coverage';
 import { describeFeedProblem, feedProblem } from '../../state/api/cameraFeeds';
 import { activeModelIds } from '../../state/api/devices.api';
 import type { ModelConfig } from '../../types/geofencing';
+import { isFallModel } from '../../services/fallDetection';
 import './CameraGridCell.css';
 
 /**
@@ -133,7 +134,7 @@ export function CameraGridCell({
     () => (runningKey !== undefined ? (runningKey ? runningKey.split('\n') : []) : activeModelIds(camera.streaming)),
     [runningKey, camera.streaming]
   );
-  const isFallDetectionActive = serverModels.includes('fall_detection');
+  const isFallDetectionActive = serverModels.some(isFallModel);
   const isPPEDetectionActive = serverModels.includes('ppe_detection');
   const isTankOverflowActive = serverModels.includes('tank_overflow_monitoring');
   const isChaneTankActive = serverModels.includes('chane_tank_monitor');

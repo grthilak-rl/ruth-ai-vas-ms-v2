@@ -5,8 +5,9 @@
  *   1. Bookmark dropdown — VAS bookmarks from useBookmarksListQuery
  *   2. AI model selector — reuses AIModelSelector + its model-aware
  *      GeofenceSetupModal so tank_overflow gets a tank_corners prompt
- *      and geo_fencing gets a zones prompt; fall_detection and
- *      ppe_detection run immediately with no config.
+ *      and geo_fencing gets a zones prompt; fall_pose (store; the
+ *      built-in fall_detection it replaced) and ppe_detection run
+ *      immediately with no config.
  *   3. BookmarkMonitoringView — the <video> + canvas overlay,
  *      pointing the live-monitoring detection managers at a
  *      recorded bookmark instead of a WebRTC stream.

@@ -2,7 +2,8 @@
 AI Inference API Endpoints
 
 Handles direct inference requests from frontend with base64-encoded frames.
-Routes to unified AI runtime for model execution.
+Routes built-in models to the unified AI runtime and uploaded (model store)
+models, e.g. fall_pose, to the model store runtime.
 """
 
 from typing import Any, Dict, Optional
@@ -12,6 +13,8 @@ from pydantic import BaseModel, Field
 
 from app.core.logging import get_logger
 from app.integrations.unified_runtime import UnifiedRuntimeClient
+from app.integrations.unified_runtime.config import get_unified_runtime_config
+from app.services.model_store.enabled import enabled_store_models
 
 logger = get_logger(__name__)
 
@@ -25,6 +28,25 @@ class InferenceRequest(BaseModel):
     version: Optional[str] = Field(default=None, description="Model version (defaults to latest)")
     frame: str = Field(..., description="Base64-encoded frame (JPEG or PNG)")
     config: Optional[Dict[str, Any]] = Field(default=None, description="Model-specific configuration")
+
+
+def runtime_url_for(model_id: str) -> Optional[str]:
+    """The runtime that serves ``model_id``: None means the unified runtime.
+
+    Same membership test the inference loop and /models/status use
+    (installed store manifests), so a store model is served here exactly
+    where it is served live. Without a store runtime configured, or with an
+    unreadable store, everything goes to the unified runtime as before.
+    """
+    store_url = get_unified_runtime_config().model_store_runtime_url
+    if not store_url:
+        return None
+    try:
+        if model_id in enabled_store_models():
+            return store_url
+    except Exception:  # noqa: BLE001 - never fail a request over routing
+        logger.debug("Store model lookup failed; using unified runtime", model_id=model_id)
+    return None
 
 
 @router.post(
@@ -59,8 +81,8 @@ async def submit_inference(request: InferenceRequest) -> Dict[str, Any]:
             has_config=request.config is not None,
         )
 
-        # Create unified runtime client
-        runtime_client = UnifiedRuntimeClient()
+        # Unified runtime for built-in models, store runtime for store models
+        runtime_client = UnifiedRuntimeClient(runtime_url=runtime_url_for(request.model_id))
 
         # Submit to unified runtime
         # Generate dummy stream_id since frontend doesn't have one

@@ -52,6 +52,16 @@ RESERVED = {
     "fire_detection", "intrusion_detection",
 }
 SEVERITIES = {"critical", "high", "medium", "low"}
+TASKS = {"detect", "pose"}
+POSE_FALL = "pose_fall"
+#: pose_fall indicator -> the threshold keys it needs (besides `score`).
+POSE_FALL_INDICATORS = {
+    "horizontal_body": ("shoulder_hip_dy_below",),
+    "head_below_hips": ("nose_below_hip_by_more_than",),
+    "legs_spread": ("ankle_dx_above",),
+    "compact_body": ("visible_keypoints_above", "y_span_below"),
+}
+POSE_COORDS = {"legacy_640"}
 STORE_UID = STORE_GID = 1000  # owner of the model store (backend container user)
 
 
@@ -128,8 +138,11 @@ def manifest_problems(manifest: Dict[str, Any]) -> List[str]:
         p.append(f"model_id {model_id!r} must match {MODEL_ID_RE.pattern}")
     if model_id in RESERVED:
         p.append(f"model_id {model_id!r} is a built-in id")
-    if manifest.get("task") != "detect":
-        p.append("task must be 'detect'")
+    task = manifest.get("task")
+    if task not in TASKS:
+        p.append(f"task must be one of {sorted(TASKS)}")
+    if task == "pose":
+        p.extend(_pose_problems(manifest))
     imgsz = manifest.get("imgsz")
     if not isinstance(imgsz, int) or imgsz <= 0 or imgsz % 32:
         p.append("imgsz must be a positive multiple of 32")
@@ -154,6 +167,17 @@ def manifest_problems(manifest: Dict[str, Any]) -> List[str]:
         conf = rule.get("min_confidence")
         if not isinstance(conf, (int, float)) or not 0 < conf <= 1:
             p.append(f"rule {rid}: min_confidence must be in (0, 1]")
+        rtype = rule.get("type")
+        if task == "pose" and rtype != POSE_FALL:
+            p.append(f"rule {rid}: a pose model's rules must be of type '{POSE_FALL}'")
+        if task != "pose" and rtype is not None:
+            p.append(f"rule {rid}: type {rtype!r} needs task 'pose'")
+        if rtype == POSE_FALL:
+            above = rule.get("score_above")
+            if not _is_number(above) or not 0 <= above < 1:
+                p.append(f"rule {rid}: score_above must be in [0, 1)")
+            if rule.get("requires_zone"):
+                p.append(f"rule {rid}: pose rules do not support requires_zone")
         if not rule.get("violation_type"):
             p.append(f"rule {rid}: violation_type required")
         if rule.get("severity") not in SEVERITIES:
@@ -176,6 +200,52 @@ def manifest_problems(manifest: Dict[str, Any]) -> List[str]:
     return p
 
 
+def _is_number(value: Any) -> bool:
+    return isinstance(value, (int, float)) and not isinstance(value, bool)
+
+
+def _pose_problems(manifest: Dict[str, Any]) -> List[str]:
+    """The `pose` and `pose_fall` blocks a pose manifest needs."""
+    p: List[str] = []
+    pose = manifest.get("pose")
+    if not isinstance(pose, dict):
+        return ["pose must be an object with min_person_confidence"]
+    floor = pose.get("min_person_confidence")
+    if not _is_number(floor) or not 0 < floor <= 1:
+        p.append("pose.min_person_confidence must be in (0, 1]")
+    iou = pose.get("iou")
+    if iou is not None and (not _is_number(iou) or not 0 < iou <= 1):
+        p.append("pose.iou must be in (0, 1]")
+
+    fall = manifest.get("pose_fall")
+    if not isinstance(fall, dict):
+        return p + ["pose_fall must be an object (coords, keypoint_min_confidence, indicators)"]
+    if fall.get("coords") not in POSE_COORDS:
+        p.append(f"pose_fall.coords must be one of {sorted(POSE_COORDS)}")
+    kc = fall.get("keypoint_min_confidence")
+    if not _is_number(kc) or not 0 <= kc < 1:
+        p.append("pose_fall.keypoint_min_confidence must be in [0, 1)")
+    if not _is_number(fall.get("missing_hip_offset")):
+        p.append("pose_fall.missing_hip_offset must be a number")
+    indicators = fall.get("indicators")
+    if not isinstance(indicators, dict) or not indicators:
+        return p + ["pose_fall.indicators must be a non-empty object"]
+    for name, settings in indicators.items():
+        if name not in POSE_FALL_INDICATORS:
+            p.append(f"pose_fall.indicators: unknown indicator {name!r}")
+            continue
+        if not isinstance(settings, dict):
+            p.append(f"pose_fall.indicators.{name} must be an object")
+            continue
+        for key in POSE_FALL_INDICATORS[name]:
+            if not _is_number(settings.get(key)):
+                p.append(f"pose_fall.indicators.{name}.{key} must be a number")
+        score = settings.get("score")
+        if not _is_number(score) or not 0 < score <= 1:
+            p.append(f"pose_fall.indicators.{name}.score must be in (0, 1]")
+    return p
+
+
 def model_yaml(manifest: Dict[str, Any]) -> str:
     """Runtime contract for the model. JSON is valid YAML."""
     contract = {
@@ -183,7 +253,11 @@ def model_yaml(manifest: Dict[str, Any]) -> str:
         "model_id": manifest["model_id"],
         "version": VERSION,
         "display_name": manifest.get("display_name", manifest["model_id"]),
-        "description": "Uploaded model (model store), generic detection plugin",
+        "description": (
+            "Uploaded model (model store), generic pose plugin"
+            if manifest.get("task") == "pose"
+            else "Uploaded model (model store), generic detection plugin"
+        ),
         "author": "model store",
         "input": {"type": "frame", "format": "raw_bgr", "min_width": 320,
                   "min_height": 240, "max_width": 4096, "max_height": 4096, "channels": 3},
@@ -262,8 +336,8 @@ def main(argv: List[str]) -> int:
         if not problems:
             weights = find_draft_weights(store, manifest["weights"])
             info = weights_info(weights)
-            if info["task"] != "detect":
-                problems.append(f"weights task is {info['task']!r}, not 'detect'")
+            if info["task"] != manifest["task"]:
+                problems.append(f"weights task is {info['task']!r}, manifest says {manifest['task']!r}")
             if info["names"] != manifest["classes"]:
                 problems.append(f"classes {manifest['classes']} != weights' own {info['names']}")
             if info["train_imgsz"] and info["train_imgsz"] != manifest["imgsz"]:

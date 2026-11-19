@@ -1,0 +1,33 @@
+{
+  "manifest_version": 1,
+  "model_id": "fall_pose",
+  "display_name": "Fall Detection",
+  "weights": "yolo11l-pose.pt",
+  "task": "pose",
+  "imgsz": 640,
+  "classes": {"0": "person"},
+  "pose": {"min_person_confidence": 0.25, "iou": 0.65},
+  "pose_fall": {
+    "coords": "legacy_640",
+    "keypoint_min_confidence": 0.3,
+    "missing_hip_offset": 100,
+    "indicators": {
+      "horizontal_body": {"shoulder_hip_dy_below": 50, "score": 0.8},
+      "head_below_hips": {"nose_below_hip_by_more_than": 20, "score": 0.7},
+      "legs_spread":     {"ankle_dx_above": 100, "score": 0.6},
+      "compact_body":    {"visible_keypoints_above": 10, "y_span_below": 150, "score": 0.7}
+    }
+  },
+  "rules": [
+    {"id": "fall", "type": "pose_fall", "classes": ["person"],
+     "score_above": 0.7, "min_confidence": 0.7,
+     "violation_type": "fall_detected", "severity": "critical"},
+    {"id": "possible_fall", "type": "pose_fall", "classes": ["person"],
+     "score_above": 0.5, "min_confidence": 0.7,
+     "violation_type": "possible_fall", "severity": "high",
+     "display_name": "Possible fall"}
+  ],
+  "performance": {"inference_time_hint_ms": 36, "recommended_fps": 2},
+  "limits": {"max_memory_mb": 2048, "inference_timeout_ms": 5000},
+  "_migration": "Replaces the built-in fall_detection (YOLOv7-w6-pose). The pose_fall block is the old heuristic's constants verbatim, in the old model's 640x640 stretched space (legacy_640): no recalibration. Known to over-fire on small/distant people and person-shaped objects (docs/BACKLOG.md BL-1). Ultralytics yolo11l-pose (v8.3.0 release asset, sha256 61921abe1f2ed930bf28328a16b3162278cdb239a1e8280b6ac827119f13cee0), unmodified: the model change is the only intended difference. Chosen over yolo11x-pose on the 2026-11-19 replay: same agreement with the old model (87.8% vs 87.6% of 500 frames), faster (median 24.9 vs 27.5 ms) and smaller (436 vs 562 MB peak). The fall rule has no display_name on purpose: fall_detected is stored with no type_detail and is shown under the family label 'Fall Detected', as before."
+}

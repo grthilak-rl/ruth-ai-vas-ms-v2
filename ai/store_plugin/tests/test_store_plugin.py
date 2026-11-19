@@ -248,7 +248,7 @@ def load_installer():
     return module
 
 
-@pytest.mark.parametrize("name", ["hard_hat", "safety_vest", "gloves", "goggles", "harness", "no_goggles", "gloves_2", "goggles_2"])
+@pytest.mark.parametrize("name", ["hard_hat", "safety_vest", "gloves", "goggles", "harness", "no_goggles", "gloves_2", "goggles_2", "fall_pose"])
 def test_shipped_manifests_are_valid(name):
     """Unknown top-level keys (`diagnostics`, `_trial`) must not be rejected."""
     assert load_installer().manifest_problems(manifest(name)) == []
@@ -348,7 +348,7 @@ def test_which_models_are_in_trial_mode():
         assert "_trial" not in manifest(name)
 
 
-@pytest.mark.parametrize("name", ["hard_hat", "safety_vest", "gloves", "goggles", "harness", "no_goggles", "gloves_2", "goggles_2"])
+@pytest.mark.parametrize("name", ["hard_hat", "safety_vest", "gloves", "goggles", "harness", "no_goggles", "gloves_2", "goggles_2", "fall_pose"])
 def test_every_shipped_model_gates_violations_at_0_7(name):
     """The manifest floor is now the violation gate (backend side too).
 
@@ -734,7 +734,7 @@ def test_models_sharing_a_violation_type_are_known():
     """
     import collections
     names = ["hard_hat", "safety_vest", "gloves", "goggles", "harness",
-             "no_goggles", "gloves_2", "goggles_2"]
+             "no_goggles", "gloves_2", "goggles_2", "fall_pose"]
     by_type = collections.defaultdict(set)
     for n in names:
         for r in manifest(n)["rules"]:

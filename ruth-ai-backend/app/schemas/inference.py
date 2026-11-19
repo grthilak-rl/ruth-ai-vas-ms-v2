@@ -49,7 +49,7 @@ class InferenceResponse(BaseModel):
     device_id: Optional[UUID] = None
     status: InferenceStatus = InferenceStatus.COMPLETED
     timestamp: datetime
-    model_id: str = "fall_detection"
+    model_id: str = "fall_pose"
     model_version: Optional[str] = "1.0.0"
     detections: list[Detection] = Field(default_factory=list)
     inference_time_ms: Optional[float] = None

@@ -103,7 +103,8 @@ class TestStreamStart:
         assert session.device_id == device.id
         assert session.state == StreamState.LIVE
         assert session.vas_stream_id is not None
-        assert session.model_id == "fall_detection"
+        # Default model: fall_pose (store), which replaced fall_detection.
+        assert session.model_id == "fall_pose"
 
     @pytest.mark.asyncio
     async def test_start_uses_custom_parameters(

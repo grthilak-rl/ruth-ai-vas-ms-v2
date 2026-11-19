@@ -77,8 +77,23 @@ def test_migration_backfill_matches_shipped_manifests_and_builtins():
         for rule in json.loads(path.read_text())["rules"]:
             shipped.setdefault(rule["violation_type"], set()).add(rule["severity"])
     assert all(len(levels) == 1 for levels in shipped.values()), shipped  # no conflicts
-    assert migration.MANIFEST_SEVERITY == {k: v.pop() for k, v in shipped.items()}
-    assert {**migration.BUILTIN_DETAIL_SEVERITY, **migration.BUILTIN_FAMILY_SEVERITY} == BUILTIN_SEVERITY
+    shipped_level = {k: v.pop() for k, v in shipped.items()}
+    builtins = {**migration.BUILTIN_DETAIL_SEVERITY, **migration.BUILTIN_FAMILY_SEVERITY}
+    assert builtins == BUILTIN_SEVERITY
+
+    # Every type the migration backfilled from a manifest is still shipped,
+    # at the level it was backfilled with.
+    for vtype, level in migration.MANIFEST_SEVERITY.items():
+        assert shipped_level.get(vtype) == level, vtype
+    # A type shipped since (e.g. fall_pose's fall_detected / possible_fall,
+    # which moved from a built-in model to a manifest) must keep the level
+    # the migration gave its existing rows, or past and new violations of
+    # the same type would disagree. (A brand-new type has no past rows.)
+    for vtype, level in shipped_level.items():
+        if vtype not in migration.MANIFEST_SEVERITY and vtype in builtins:
+            assert level == builtins[vtype], vtype
+    assert shipped_level["fall_detected"] == "critical"
+    assert shipped_level["possible_fall"] == "high"
 
 
 # --------------------------------------------------------------------------

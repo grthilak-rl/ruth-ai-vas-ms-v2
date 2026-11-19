@@ -1,6 +1,8 @@
 /**
  * Fall Detection Service
- * Extracts frames from video element and sends to unified AI runtime via backend API
+ * Extracts frames from video element and sends them for inference via the
+ * backend API (POST /api/v1/ai/inference), which routes built-in models to
+ * the unified runtime and uploaded (store) models to the model store runtime.
  */
 
 import type { OverlayStyle } from './overlayStyle';
@@ -35,6 +37,20 @@ export interface FallDetectionResult {
 export interface FallDetectionConfig {
   fps: number;           // Frame rate for inference (default: 5)
   enabled: boolean;      // Whether detection is active
+  modelId: string;       // Which fall model to ask (default: FALL_MODEL_ID)
+}
+
+/**
+ * The fall model. `fall_pose` is the model-store replacement for the built-in
+ * `fall_detection` (kept, disabled, for one release); both are fall models
+ * and are drawn the same way.
+ */
+export const FALL_MODEL_ID = 'fall_pose';
+export const LEGACY_FALL_MODEL_ID = 'fall_detection';
+export const FALL_MODEL_IDS: readonly string[] = [FALL_MODEL_ID, LEGACY_FALL_MODEL_ID];
+
+export function isFallModel(modelId: string | null | undefined): boolean {
+  return !!modelId && FALL_MODEL_IDS.includes(modelId);
 }
 
 // COCO keypoint connections for skeleton drawing
@@ -54,6 +70,7 @@ const DEFAULT_CONFIG: FallDetectionConfig = {
   // Previous setting: fps: 5 (200ms interval) - caused 30s delay due to slow CPU inference
   fps: 2,  // 500ms interval - matching earlier ruth-ai-monitor version
   enabled: true,
+  modelId: FALL_MODEL_ID,
 };
 
 /**
@@ -122,7 +139,8 @@ export function extractFrameFromVideo(
 export async function detectFall(
   frameBlob: Blob,
   videoWidth?: number,
-  videoHeight?: number
+  videoHeight?: number,
+  modelId: string = FALL_MODEL_ID
 ): Promise<FallDetectionResult | null> {
   try {
     const frameBase64 = await blobToBase64(frameBlob);
@@ -131,7 +149,7 @@ export async function detectFall(
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
-        model_id: 'fall_detection',
+        model_id: modelId,
         frame: frameBase64,
       }),
     });
@@ -144,13 +162,13 @@ export async function detectFall(
     const result = await response.json();
     return {
       success: true,
-      model: 'fall_detection',
+      model: modelId,
       violation_detected: result.violation_detected ?? false,
       violation_type: result.violation_type ?? null,
       severity: result.severity,
       confidence: result.confidence ?? 0,
       detection_count: result.detection_count ?? (result.detections?.length ?? 0),
-      detections: result.detections || [],
+      detections: fallDetectionsInModelSpace(result),
       timestamp: Date.now(),
       videoWidth,
       videoHeight,
@@ -258,7 +276,8 @@ export class FallDetectionManager {
       const result = await detectFall(
         frameBlob,
         this.video.videoWidth,
-        this.video.videoHeight
+        this.video.videoHeight,
+        this.config.modelId
       );
       if (result && this.onResult) {
         this.onResult(result);
@@ -293,6 +312,38 @@ export class FallDetectionManager {
 // Model outputs coordinates in 640x640 space (matching POC).
 // Kept in sync with LiveVideoPlayer's expectation.
 const MODEL_SIZE = 640;
+
+interface StorePoseObject {
+  bbox: [number, number, number, number];
+  confidence: number;
+  keypoints?: Keypoint[];
+}
+
+/**
+ * Every person in a fall result, in the 640x640 space drawFallDetections
+ * (and isPersonFallen's pixel thresholds) expect.
+ *
+ * The built-in fall_detection already reports all persons, in that space,
+ * as `detections`. fall_pose (a store pose model) reports every person in
+ * frame pixels as `objects` (`detections` holds only the persons a rule
+ * fired on), with the frame size in `metadata.frame_shape` = [h, w, c].
+ * The built-in model stretched the frame to 640x640, so the mapping is a
+ * plain per-axis scale. Both then draw identically, skeleton included.
+ */
+export function fallDetectionsInModelSpace(result: Record<string, unknown>): Detection[] {
+  const objects = result.objects as StorePoseObject[] | undefined;
+  const shape = (result.metadata as { frame_shape?: number[] } | undefined)?.frame_shape;
+  if (!Array.isArray(objects) || !shape || shape.length < 2 || !shape[0] || !shape[1]) {
+    return (result.detections as Detection[] | undefined) ?? [];
+  }
+  const sx = MODEL_SIZE / shape[1];
+  const sy = MODEL_SIZE / shape[0];
+  return objects.map((o) => ({
+    bbox: [o.bbox[0] * sx, o.bbox[1] * sy, o.bbox[2] * sx, o.bbox[3] * sy],
+    confidence: o.confidence,
+    keypoints: (o.keypoints ?? []).map((k) => ({ x: k.x * sx, y: k.y * sy, confidence: k.confidence })),
+  }));
+}
 
 /**
  * Check if a detection represents a fallen person based on pose.

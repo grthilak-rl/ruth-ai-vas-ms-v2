@@ -43,6 +43,10 @@ function slotFor(entry: DetectionEntry): Partial<FannedOutDetections> {
   const frameHeight = entry.frame_height ?? undefined;
 
   switch (entry.model_id) {
+    // fall_pose (the store model that replaced the built-in fall_detection)
+    // deliberately does not come here: it reports frame pixels and is drawn
+    // by the generic store overlay from result.objects. A skeleton overlay
+    // for it is a backlog item.
     case 'fall_detection':
       // Boxes are in the model's 640x640 space; drawFallDetections scales
       // by MODEL_SIZE, so no coordinate work is needed. The defaults mirror

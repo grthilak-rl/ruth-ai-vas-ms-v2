@@ -5,6 +5,143 @@ investigation. Newest first.
 
 ---
 
+## BL-32 · Licensing: the Ultralytics models and library are AGPL-3.0
+
+**Status:** decision needed before the product is licensed · **Raised:**
+2026-11-19 (fall_pose migration)
+
+The inference stack depends on Ultralytics, which is licensed AGPL-3.0
+unless an Ultralytics Enterprise License is bought. AGPL-3.0 also covers
+network use: users of a service built on it are entitled to its source.
+
+What depends on it (checked 2026-11-19):
+- **Library:** `ultralytics==8.4.115` (`ai/requirements-gpu.txt`). Its
+  package metadata says `License: AGPL-3.0`. Both runtime images include
+  it.
+- **Store models:** all 11 installed models are loaded by the store plugin
+  through `ultralytics.YOLO()`.
+  - The 10 PPE models were trained with Ultralytics.
+  - `fall_pose` is the official, unmodified `yolo11l-pose.pt` release
+    asset.
+- **Built-ins:** `geo_fencing` (`yolov8n.pt`, `person.pt`) and
+  `ppe_detection` (`ppe_detector.py`) import Ultralytics.
+  - The disabled `fall_detection` vendors YOLOv7 code in `lib/`. Upstream
+    YOLOv7 is GPL-3.0; check the vendored copy's licence before relying on
+    that.
+
+**Options to decide between:**
+1. Buy an Ultralytics Enterprise License covering the library and the
+   models trained or derived with it.
+2. Comply with AGPL-3.0: publish the corresponding source to users of the
+   service, including our modifications.
+3. Move to permissively licensed detectors and pose models (e.g. Apache-2.0
+   ones), and retrain the PPE models outside Ultralytics.
+   - This costs a retrain and a revalidation for every model.
+   - The store plugin's `task` / rule layer is model-agnostic, so the
+     manifests and rules would carry over.
+
+Get legal advice; this entry is not legal advice. Until a decision is made,
+avoid adding new Ultralytics-only dependencies beyond the store plugin.
+
+---
+
+## BL-31 · Model-store installer replaces the whole set; make installs additive
+
+**Status:** backlog · **Raised:** 2026-11-19 (fall_pose deploy)
+
+`ai/store_plugin/install_enabled.py` rebuilds the **entire** `enabled/` tree
+from only the manifests on its command line, then swaps it in. Any installed
+model that is left off the command line is silently uninstalled at the
+next `docker compose restart model-store-runtime`.
+
+Adding `fall_pose` on 2026-11-19 meant:
+- Passing all 10 PPE manifests plus the new one.
+- Checking by hand that the installed set matched the list.
+- Checking by hand that each installed `store_manifest.json` equalled the
+  repo copy; any drift would have been silently reverted.
+
+A side effect: every install also replaces **every** model's `inference.py`
+with the current plugin. On 2026-11-19 that was intended and checked: the
+10 PPE models gave 380/380 identical responses before and after. It should
+still be a deliberate choice, not a side effect.
+
+**Proposal.**
+- **Base set is what is installed.** `--add <manifest>...` and
+  `--remove <model_id>...` start from the manifests in the current
+  `enabled/*/1.0.0/store_manifest.json`, apply the change, and build the
+  tree as today: staging, one rename, previous tree kept in `state/`.
+- **Unchanged models are kept byte for byte.** Copy or hardlink their
+  version directories from the current tree, including their
+  `inference.py`. Upgrading the plugin becomes an explicit
+  `--upgrade-plugin`, reported per model.
+- **Full replacement stays possible, but only explicitly.** Keep today's
+  form behind `--replace-all`. Without it, refuse to proceed if the
+  result would drop an installed model.
+- **Print the plan first.** Show what is added, removed, manifest-changed
+  and plugin-changed, in `--check` and before acting.
+- **One code path for the store's Apply.** Step 5 piece 3 automates Apply,
+  so it should call the same additive path, not rebuild from a list.
+- **Tests:** add, then remove, then a no-op run; dropping a model is
+  refused without `--replace-all`; unchanged models' files are byte-identical.
+
+---
+
+## BL-30 · Remove the built-in fall_detection after one release
+
+**Status:** backlog · **Raised:** 2026-11-19 (fall_pose migration)
+
+`fall_pose` (model store, `ai/store_plugin/manifests/fall_pose.json`)
+replaced the built-in `fall_detection`. On the switch the built-in was only
+**disabled**: moved to `ai/models/.disabled/fall_detection/1.0.0/`, which the
+unified runtime's discovery skips (hidden directory), so its files stay for
+a rollback. After one release with no rollback:
+
+- Delete `ai/models/.disabled/fall_detection/` (322 MB YOLOv7-w6-pose
+  checkpoint + vendored YOLOv7 `lib/`).
+- Backend: drop `fall_detection` from `unified_runtime/config.py` routing and
+  the client/schema examples; keep it in `model_store/ids.py`
+  `RESERVED_MODEL_IDS` and the installer's `RESERVED` (past violations carry
+  that model_id).
+- Frontend: drop `LEGACY_FALL_MODEL_ID` and the `fall_detection` cases in
+  `detectionFanOut.ts`, `overlayStyle.ts` and `BookmarkMonitoringView.tsx`
+  (keep `SnapshotOverlay`'s 640-space rule for past rows, BL-3), and the dead
+  `components/VideoPlayer.tsx`.
+- `ai/store_plugin/tests/test_pose_fall.py` imports the built-in heuristic
+  for the parity tests and **skips** them once it is gone. That is intended:
+  parity was proven while both existed (0 mismatches, 50,000 random +
+  boundary keypoint sets, and 500 replayed frames on 2026-11-19).
+
+Rollback until then: move the directory back to `ai/models/fall_detection/`
+and `docker compose restart unified-ai-runtime`; nothing else changed for the
+built-in. Capacity note: fall now runs in the store runtime, which serves one
+request at a time (BL-5); measured offline at a median of 25 ms per frame
+(yolo11l-pose, RTX 3090).
+
+---
+
+## BL-29 · Skeleton overlay for fall_pose on live tiles
+
+**Status:** backlog · **Raised:** 2026-11-19 (fall_pose migration)
+
+Live tiles draw `fall_pose` with the generic store overlay
+(`services/storeOverlay.ts`): a box and label per person, red when a rule
+fired. The built-in `fall_detection` also drew the 17-keypoint skeleton and
+coloured each person with the client-side `isPersonFallen` check.
+
+`fall_pose` already sends everything needed: each `result.objects[]` entry
+has `keypoints` (17 × `{x, y, confidence}`, frame pixels), and
+`metadata.task == "pose"`. Bookmark monitoring already draws the skeleton
+for it, via `fallDetectionsInModelSpace` (frame pixels → the 640 space
+`drawFallDetections` expects).
+
+**Proposal.** Teach `drawStoreDetections` to draw keypoints when an object
+has them (generic: any store pose model gets a skeleton), scaled by the
+same frame→canvas transform as the boxes. Do **not** route `fall_pose`
+through `detectionFanOut`'s `fall_detection` case: that path assumes
+640×640 boxes (a test pins this).
+
+---
+
 ## BL-26 · `events` table: written by nothing since 2026-08-01; retire it
 
 **Status:** backlog · **Raised:** 2026-11-19 (gloves_2 bare-hand test)
@@ -129,7 +266,7 @@ investigation. Newest first.
 
 ---
 
-## BL-17 · VAS event consumer: `event=` log argument clashes with structlog's message
+## BL-34 · VAS event consumer: `event=` log argument clashes with structlog's message
 
 **Status:** backlog · **Raised:** 2026-11-18 (Ruth Stream sign-in deploy) · **Severity:** low (log noise; no lost work)
 
@@ -813,7 +950,7 @@ addressing the 69% CPU-side cost.
 
 ---
 
-## BL-9 · `tank_overflow_monitoring` reports as "(invalid)" while running fine
+## BL-33 · `tank_overflow_monitoring` reports as "(invalid)" while running fine
 
 **Status:** parked · **Found:** 2026-10-17 (HPCL live check) · **Area:** AI
 runtime, `ai/runtime/discovery.py`, `ai/runtime/loader.py`
@@ -1141,6 +1278,14 @@ touches an existing router, so it needs explicit approval under the
 
 **Status:** parked · **Found:** 2026-10-04 · **Area:** backend + frontend
 
+**Update 2026-11-19 (fall_pose migration).** New fall violations come from
+`fall_pose` (model store), whose boxes are in **frame pixels** like every
+store model, so they are stored and drawn correctly. Only past rows need the
+fix below: treat `model_id` in (`fall_detection`, `fall-detection-yolov8`)
+as 640×640, and **not** `fall_pose`. Also new: a `fall_pose` violation
+stores only the person(s) the rule fired on; `fall_detection` stored every
+detected person.
+
 **Finding.**
 - `fall_detection` reports boxes in its **640×640 model input space** (the
   frame is resized to 640×640 without letterbox). PPE reports in frame pixels.
@@ -1228,6 +1373,32 @@ is the root-cause fix.
 
 **Status:** parked (approved in principle) · **Found:** 2026-10-04 · **Area:**
 AI model, runtime version selection
+
+### Update 2026-11-19: now applies to fall_pose, not the built-in
+
+Fall detection moved to the model store as `fall_pose` (yolo11l-pose + the
+`pose_fall` rule in `ai/store_plugin/inference.py`). The migration copied
+the 1.0.0 heuristic **unchanged**: the manifest's `pose_fall` block holds
+these exact constants in the old 640×640 space (`coords: "legacy_640"`), so
+everything under "Root cause" still holds, and recalibration is still open.
+
+What changes for this item:
+- Recalibrating is now a manifest change, not a new built-in version. It
+  needs a `coords` mode relative to person size (only `legacy_640` exists;
+  plugin `_pose_band` and installer `POSE_COORDS`), a person-confidence
+  floor (`pose.min_person_confidence`, today 0.25), and confidence from the
+  detection rather than the indicator constant.
+- The "Version selection" problem below concerned built-in versions; a
+  store model is reinstalled in place, so it no longer blocks this.
+- The model change alone makes the over-firing **worse**. In the
+  2026-11-19 replay (500 frames: 85 surviving fall snapshots + 415 plant
+  frames), yolo11l-pose found 37 % more persons than YOLOv7-w6-pose
+  (977 vs 711), and the decision went from 61 to 77 recorded fires. In 33
+  of the 36 frames only the new model fired, it had found extra people.
+  The firing person's median height was 0.25 of the frame (all persons:
+  0.48). A spot check found a fire on two mounted CCTV cameras detected as
+  "persons". Same root cause, more inputs for it.
+- The staged-fall recall set from the caveat below is still required.
 
 ### Root cause
 
