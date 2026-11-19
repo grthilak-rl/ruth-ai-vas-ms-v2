@@ -8,6 +8,12 @@ logic are imported from its own file, enabled or moved under
 models/.disabled/ for its last release, so this keeps checking against the
 real thing for as long as that file exists.
 
+The shipped manifest anchors on the box's bottom-centre (feet); the
+built-in used the box centre. Parity is checked on the manifest with the
+centre anchor put back (`centre_manifest`), the rule that was proven
+against the built-in; the anchor change is a deliberate difference,
+pinned on its own below.
+
 Also pinned: the new zone settings are off by default (so existing zone
 rules are unchanged), normalised zones, and the `predict` block.
 """
@@ -50,6 +56,14 @@ def _load(path, name):
 
 def manifest():
     return json.loads((MANIFESTS / "geofence.json").read_text())
+
+
+def centre_manifest():
+    """The shipped manifest with the built-in's centre anchor: the parity baseline."""
+    m = manifest()
+    for rule in m["rules"]:
+        rule["zone_anchor"] = "center"
+    return m
 
 
 @pytest.fixture(scope="module")
@@ -186,7 +200,7 @@ def _old_recorded(old, rows, zones, monkeypatch):
 
 
 def _new_recorded(rules_mod, rows, zones, frame=FRAME):
-    m = manifest()
+    m = centre_manifest()
     floor = min(r["min_confidence"] for r in m["rules"])  # the plugin's predict floor
     objects = [
         {"bbox": r[:4], "confidence": r[4], "class_id": 0, "class_name": "person", "violation": False}
@@ -232,7 +246,7 @@ def test_firing_zone_id_matches_builtin(rules_mod, old, monkeypatch):
         old_out = old._run_inference_with_model(np.zeros(FRAME, np.uint8), _OldModel(rows), zones, {})
         objects = [{"bbox": r[:4], "confidence": r[4], "class_id": 0, "class_name": "person",
                     "violation": False} for r in rows]
-        new_out = rules_mod.apply_rules(objects, manifest(), {"zones": zones}, frame_shape=FRAME)
+        new_out = rules_mod.apply_rules(objects, centre_manifest(), {"zones": zones}, frame_shape=FRAME)
         old_zones = [d["zone_id"] for d in old_out["detections"] if d["in_zone"]]
         new_zones = [d["zone_id"] for d in new_out["detections"]]
         assert old_zones == new_zones
@@ -358,7 +372,7 @@ def test_no_predict_block_leaves_predict_args_unchanged(tmp_path, monkeypatch):
 # --------------------------------------------------------------------------
 
 
-def test_geofence_manifest_is_the_builtin_behaviour():
+def test_geofence_manifest_is_the_builtin_behaviour_but_anchored_on_feet():
     m = manifest()
     assert m["model_id"] == "geofence" and m["weights"] == "yolov8n.pt" and m["imgsz"] == 640
     assert m["predict"] == {"iou": 0.5, "classes": ["person"]}
@@ -366,12 +380,37 @@ def test_geofence_manifest_is_the_builtin_behaviour():
     rules = {r["id"]: r for r in m["rules"]}
     assert rules["intrusion"] == {
         "id": "intrusion", "classes": ["person"], "min_confidence": 0.7, "requires_zone": "restricted",
-        "zone_anchor": "center", "zone_point_test": "legacy_ray_cast",
+        "zone_anchor": "bottom_center", "zone_point_test": "legacy_ray_cast",
         "violation_type": "zone_intrusion", "severity": "high"}
     assert rules["exit"] == {
         "id": "exit", "classes": ["person"], "min_confidence": 0.7, "requires_zone": "allowed",
-        "zone_test": "outside", "zone_anchor": "center", "zone_point_test": "legacy_ray_cast",
+        "zone_test": "outside", "zone_anchor": "bottom_center", "zone_point_test": "legacy_ray_cast",
         "violation_type": "zone_exit", "severity": "medium"}
+
+
+def test_geofence_anchor_is_the_feet_a_deliberate_difference_from_the_builtin(rules_mod):
+    """Both rules test the box's bottom-centre. A person whose body
+    overlaps a zone but who stands outside it: the built-in (centre) fired
+    intrusion, geofence does not; for an allowed zone, the built-in did not
+    fire exit, geofence does."""
+    standing_below = [280, 300, 320, 520]  # centre (300, 410) inside SQUARE, feet (300, 520) outside
+    obj = {"bbox": standing_below, "confidence": 0.9, "class_id": 0, "class_name": "person", "violation": False}
+    restricted = {"zones": [{"id": "r", "type": "restricted", "points": SQUARE}]}
+    allowed = {"zones": [{"id": "a", "type": "allowed", "points": SQUARE}]}
+
+    def decide(m, cfg):
+        out = rules_mod.apply_rules([dict(obj)], m, cfg, frame_shape=FRAME)
+        return out["violation_type"] if out["violation_detected"] else None
+
+    assert decide(manifest(), restricted) is None
+    assert decide(centre_manifest(), restricted) == "zone_intrusion"
+    assert decide(manifest(), allowed) == "zone_exit"
+    assert decide(centre_manifest(), allowed) is None
+
+    feet_inside = [280, 200, 320, 400]  # feet (300, 400) inside
+    obj["bbox"] = feet_inside
+    assert decide(manifest(), restricted) == "zone_intrusion"
+    assert decide(manifest(), allowed) is None
 
 
 def test_geofence_manifest_is_valid(ie):

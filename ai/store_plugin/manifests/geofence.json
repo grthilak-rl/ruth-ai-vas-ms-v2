@@ -9,13 +9,13 @@
   "predict": {"iou": 0.5, "classes": ["person"]},
   "rules": [
     {"id": "intrusion", "classes": ["person"], "min_confidence": 0.7,
-     "requires_zone": "restricted", "zone_anchor": "center", "zone_point_test": "legacy_ray_cast",
+     "requires_zone": "restricted", "zone_anchor": "bottom_center", "zone_point_test": "legacy_ray_cast",
      "violation_type": "zone_intrusion", "severity": "high"},
     {"id": "exit", "classes": ["person"], "min_confidence": 0.7,
-     "requires_zone": "allowed", "zone_test": "outside", "zone_anchor": "center", "zone_point_test": "legacy_ray_cast",
+     "requires_zone": "allowed", "zone_test": "outside", "zone_anchor": "bottom_center", "zone_point_test": "legacy_ray_cast",
      "violation_type": "zone_exit", "severity": "medium"}
   ],
   "performance": {"inference_time_hint_ms": 20, "recommended_fps": 2},
   "limits": {"max_memory_mb": 1024, "inference_timeout_ms": 5000},
-  "_migration": "Replaces the built-in geo_fencing (ai/models/geo_fencing/1.0.0), same weights: the stock Ultralytics yolov8n.pt (sha256 f59b3d833e2ff32e194b5bb8e08d211dc7c5bdf144b90d2c8412c47ccfc83b36, the built-in's own file). Persons only, NMS IoU 0.5 and imgsz 640 as the built-in. Zone test as the built-in: box centre, its ray-casting polygon test, 'restricted' zones fire zone_intrusion when inside, 'allowed' zones fire zone_exit when outside. min_confidence 0.7 is the backend's 0.7 session gate the built-in was recorded at. Changes from the built-in, decided 2026-11-19: severity is the rule's (intrusion high, exit medium) instead of computed per frame from person count and confidence; the live overlay shows persons at 0.7 or above (was 0.3); the per-camera conf_threshold override and the legacy tank_corners / geofence_points config keys are not read. Zones are normalised (0-1) by the editor."
+  "_migration": "Replaces the built-in geo_fencing (ai/models/geo_fencing/1.0.0), same weights: the stock Ultralytics yolov8n.pt (sha256 f59b3d833e2ff32e194b5bb8e08d211dc7c5bdf144b90d2c8412c47ccfc83b36, the built-in's own file). Persons only, NMS IoU 0.5 and imgsz 640 as the built-in. Zone test: its ray-casting polygon test, 'restricted' zones fire zone_intrusion when inside, 'allowed' zones fire zone_exit when outside. min_confidence 0.7 is the backend's 0.7 session gate the built-in was recorded at. Changes from the built-in, decided 2026-11-19: the zone anchor is the box's bottom-centre (feet), not its centre (decided later the same day; parity was proven with the centre anchor); severity is the rule's (intrusion high, exit medium) instead of computed per frame from person count and confidence; the live overlay shows persons at 0.7 or above (was 0.3); the per-camera conf_threshold override and the legacy tank_corners / geofence_points config keys are not read. Zones are normalised (0-1) by the editor."
 }

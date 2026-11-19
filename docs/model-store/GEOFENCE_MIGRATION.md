@@ -46,12 +46,19 @@ reserved.
 |---|---|
 | Store plugin `ai/store_plugin/inference.py` | Zone rules can test the box **centre** (`zone_anchor`), fire when **outside** a zone (`zone_test: "outside"`, for "allowed" zones), and use the built-in's exact polygon test (`zone_point_test: "legacy_ray_cast"`). Zones may be normalised (`coords: "normalized"`). Detect models can set NMS IoU and a class filter (`predict`). All off by default: existing models are byte-identical (below). |
 | Installer | Validates the new rule settings (only with `requires_zone`) and `predict` (detect models only; classes must exist and must include every class a rule needs). |
-| Manifest `manifests/geofence.json` | New. Persons only, IoU 0.5, imgsz 640. `intrusion`: `restricted` zones, centre inside, `zone_intrusion`, high. `exit`: `allowed` zones, centre outside, `zone_exit`, medium. Both use the legacy polygon test and `min_confidence` 0.7 (the gate the built-in was recorded at). |
+| Manifest `manifests/geofence.json` | New. Persons only, IoU 0.5, imgsz 640. `intrusion`: `restricted` zones, feet (box bottom-centre) inside, `zone_intrusion`, high. `exit`: `allowed` zones, feet outside, `zone_exit`, medium. (Shipped with the centre anchor at first; changed to the feet the same evening, see below.) Both use the legacy polygon test and `min_confidence` 0.7 (the gate the built-in was recorded at). |
 | Backend | `/models/status` reports each store model's `zone_types`. New flag **`UNIFIED_RUNTIME_IN_USE`** (default true): set to false in compose when the built-ins are retired, and System Health shows the unified runtime as **disabled** (left out of overall health). With the flag on, a runtime with no models is still unhealthy; it is never inferred. It is deliberately not named like the existing `UNIFIED_RUNTIME_ENABLE`, a routing switch that would send built-in models to legacy containers. `POST /api/v1/ai/inference` already routes every installed store model to the store runtime, with its config (zones); now tested for PPE models and geofence. |
 | Frontend: bookmark monitoring | Runs any store model (PPE models, geofence with its zones), drawn with the live store overlay plus the zones. Before, it could run fall, the built-in PPE and the two tank models, and offered geo_fencing without running it. After retirement it keeps PPE (through the store PPE models) and gains geofence. |
 | Frontend | The picker gives any model with zone types a setup button, and enabling it opens the zone editor first. The editor offers the model's zone types and saves normalised zones for store models (pixels for the built-in, so a rollback still works). Live tiles draw the zones of every running model. BL-6: a complete zone is drawn as its polygon; a drag ends when it leaves the image; a saved zone reopens in the matching mode; a mode switch keeps a complete zone; the saved config is read once per opening. |
 
 **Behaviour differences from the built-in:**
+- **Zone anchor: feet, not centre** (changed 2026-11-19, after the deploy).
+  Both rules test the box's bottom-centre (`zone_anchor: "bottom_center"`)
+  where the built-in tested the box centre. A person whose body overlaps a
+  zone but who stands outside it no longer fires intrusion. In an allowed
+  zone, someone standing outside it now fires exit even when their upper
+  body is still over the zone. This is deliberate: the parity below was
+  proven with the centre anchor and does not hold for it.
 - **Severity** is the rule's (intrusion high, exit medium) instead of being
   computed per frame from person count and confidence. Past rows keep what
   they recorded.
@@ -76,6 +83,14 @@ reserved.
 The full `make test` summary is in the final report.
 
 ## Parity
+
+> **Parity is with the centre anchor.** Everything in this section was
+> proven when both rules used `zone_anchor: "center"`. The shipped
+> manifest now uses `"bottom_center"` (feet), a deliberate difference.
+> `test_geofence.py` keeps checking parity on the manifest with the centre
+> anchor put back (`centre_manifest()`), and pins the feet anchor separately.
+> To rerun the replay as it was proven, pass it a copy of `geofence.json`
+> with both anchors set to `"center"`.
 
 **Rule, the same detections** (`test_geofence.py`, against the built-in's own
 file):
@@ -213,3 +228,18 @@ Tests after the deploy: store plugin 169 passed; `make test` all green
 `multi_model::test_g8_publish_before_counter_and_one_counter_write_per_tick`
 is intermittently flaky. It predates this release: 3 failures in 12 runs on
 the pre-change code, 1 in 12 on the new code (BL-37).
+
+## Zone anchor changed to the feet (2026-11-19, evening)
+
+Both rules now use `"zone_anchor": "bottom_center"`. That was the only change.
+
+| Step | Result |
+|---|---|
+| Tests | Store plugin **170 passed**: the parity tests run on `centre_manifest()`; new `test_geofence_anchor_is_the_feet_a_deliberate_difference_from_the_builtin`. |
+| Install | `--check` ok for 12; installed 12 (previous tree `state/enabled-previous-20261119T201210`); `model-store-runtime` restarted. **12/12 ready on `cuda:0`**. |
+| Verify | PPE 38-frame probe **380/380 identical** to before. fall_pose on the 10 frames: **3 fire / 7 don't**, identical. geofence with the lower-half restricted zone: 9 of 38 frames fire, the same 9 as with the centre anchor. |
+| Camera | THILAKCABIN_OUT_DEMO-CAMERA's rug zone had been added at 19:59 to the retired `geo_fencing` (pixel points) and failed every frame with "Model not found: geo_fencing:latest". Moved to `geofence` with the same zone, normalised (frame 1920×1080). |
+
+Rollback of the anchor: set both anchors back to `"center"`, `--check`,
+install the 12, restart `model-store-runtime`. Or restore
+`state/enabled-previous-20261119T201210`.
