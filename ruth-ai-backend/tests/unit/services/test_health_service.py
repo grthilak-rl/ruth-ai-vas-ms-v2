@@ -333,27 +333,91 @@ class TestHealthServiceCheckAll:
 
     @pytest.mark.asyncio
     async def test_check_all_runs_concurrently(self):
-        """Test that check_all runs checks concurrently."""
-        # Each mock has 0.1s latency
+        """check_all runs the component checks concurrently.
+
+        Proven by structure, not by wall-clock time (an elapsed-time bound
+        failed under CPU load, e.g. with live inference running): each
+        mocked check waits at a rendezvous until all three are inside at
+        once. Concurrent checks meet there immediately. Sequential checks
+        never would: the first waits in vain, and the peak stays 1.
+        """
+        gate = _Rendezvous(3)
         service = HealthService(
-            engine=MockEngine(latency=0.1),
-            redis_client=MockRedisClient(latency=0.1),
-            vas_client=MockVASClient(latency=0.1),
+            engine=_GatedEngine(gate),
+            redis_client=_gated(MockRedisClient(), "ping", gate),
+            vas_client=_gated(MockVASClient(), "get_health", gate),
         )
 
-        import time
-        start = time.perf_counter()
-        await service.check_all(
-            db_timeout=1.0,
-            redis_timeout=1.0,
-            vas_timeout=1.0,
-            ai_runtime_timeout=1.0,
+        components = await service.check_all(
+            db_timeout=30.0,
+            redis_timeout=30.0,
+            vas_timeout=30.0,
+            ai_runtime_timeout=30.0,
         )
-        elapsed = time.perf_counter() - start
 
-        # If running concurrently, should take ~0.1s
-        # If sequential, would take ~0.4s
-        assert elapsed < 0.3, f"Checks did not run concurrently: {elapsed}s"
+        assert gate.peak == 3, f"checks did not overlap (peak {gate.peak} of 3 in flight)"
+        assert components["database"].status == "healthy"
+        assert components["redis"].status == "healthy"
+        assert components["vas"].status == "healthy"
+
+
+class _Rendezvous:
+    """Each caller waits until `n` callers are inside at the same time.
+
+    The wait is bounded so a sequential implementation fails the peak
+    assertion instead of hanging; it never delays a concurrent one."""
+
+    def __init__(self, n: int, give_up_after: float = 5.0):
+        self.n = n
+        self.inside = 0
+        self.peak = 0
+        self._all_in = asyncio.Event()
+        self._give_up_after = give_up_after
+
+    async def __call__(self) -> None:
+        self.inside += 1
+        self.peak = max(self.peak, self.inside)
+        if self.inside >= self.n:
+            self._all_in.set()
+        try:
+            await asyncio.wait_for(self._all_in.wait(), timeout=self._give_up_after)
+        except asyncio.TimeoutError:
+            pass
+        finally:
+            self.inside -= 1
+
+
+class _GatedEngine(MockEngine):
+    """MockEngine whose connect() passes through the rendezvous first."""
+
+    def __init__(self, gate: _Rendezvous):
+        super().__init__()
+        self._gate = gate
+
+    def connect(self):
+        inner, gate = super().connect(), self._gate
+
+        class _Ctx:
+            async def __aenter__(self):
+                await gate()
+                return await inner.__aenter__()
+
+            async def __aexit__(self, *exc):
+                return await inner.__aexit__(*exc)
+
+        return _Ctx()
+
+
+def _gated(client, method: str, gate: _Rendezvous):
+    """Make `client.<method>` pass through the rendezvous first."""
+    original = getattr(client, method)
+
+    async def wrapper(*args, **kwargs):
+        await gate()
+        return await original(*args, **kwargs)
+
+    setattr(client, method, wrapper)
+    return client
 
 
 class TestHealthServiceOverallStatus:

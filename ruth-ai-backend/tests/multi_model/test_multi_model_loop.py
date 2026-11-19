@@ -489,8 +489,12 @@ async def test_g10_fastest_first_by_measured_latency_not_entry_order(sm):
         fall, ppe = calls[("fall_detection", frame)], calls[("ppe_detection", frame)]
         assert fall["t"] < ppe["t"]  # fastest first
         assert ppe["t"] >= fall["end"]  # one at a time: never overlapping on the GPU
-        # fall's frame-to-publish on a shared tick ~ its solo latency (10 ms)
-        assert published[("fall_detection", frame)] - fetch_at[frame] < 0.01 + 0.02
-        assert published[("fall_detection", frame)] < ppe["t"] + 0.001  # published before PPE even starts
+        # Fall is published before PPE even starts, so its frame-to-publish
+        # never includes PPE's 120 ms: that ordering is the property.
+        assert published[("fall_detection", frame)] < ppe["t"] + 0.001
+        # Sanity bound only, deliberately generous. A 30 ms bound (fall's
+        # 10 ms + 20 ms) failed under CPU load from live inference: that
+        # measured the scheduler, not the loop.
+        assert published[("fall_detection", frame)] - fetch_at[frame] < 0.5
     assert runtime.max_in_flight["fall_detection"] == 1
     assert runtime.max_in_flight["ppe_detection"] == 1

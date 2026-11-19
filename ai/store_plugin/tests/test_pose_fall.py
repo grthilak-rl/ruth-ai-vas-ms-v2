@@ -196,7 +196,11 @@ def test_manifest_constants_are_the_builtin_ones():
         "compact_body": {"visible_keypoints_above": 10, "y_span_below": 150, "score": 0.7},
     }
     m = manifest()
-    assert m["pose"] == {"min_person_confidence": 0.25, "iou": 0.65}  # old NMS settings
+    # IoU is the old NMS setting. The person floor was the old 0.25 at
+    # migration and is the one calibrated value so far: 0.45 on 2026-11-19
+    # (BL-1 quick fix). The parity tests here feed keypoints directly, so
+    # the floor (applied at predict time) does not enter them.
+    assert m["pose"] == {"min_person_confidence": 0.45, "iou": 0.65}
 
 
 # --------------------------------------------------------------------------
@@ -358,7 +362,7 @@ def _lying_person_frame_px():
 def test_infer_predicts_at_person_floor_and_old_nms_iou(pose_plugin):
     pose_plugin.infer(FRAME)
     call = FakePose.instances[-1].calls[-1]
-    assert call["conf"] == 0.25 and call["iou"] == 0.65 and call["imgsz"] == 640
+    assert call["conf"] == 0.45 and call["iou"] == 0.65 and call["imgsz"] == 640
 
 
 def test_infer_reports_a_fall(pose_plugin):

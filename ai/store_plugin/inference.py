@@ -71,11 +71,32 @@ that the score exceeds, and that rule fires if the score also reaches its
 ``min_confidence``. The violation's ``confidence`` is the fall score; each
 violating detection keeps the person box confidence and adds ``score``.
 
-``coords: "legacy_640"`` evaluates the indicators in the built-in
-fall_detection model's coordinate space (the frame stretched, not
-letterboxed, to 640x640), so the thresholds are the old pixel thresholds
-and the decisions reproduce the old model's on the same keypoints. It is the
-only coordinate mode so far.
+``coords`` sets the space the indicator thresholds are written in:
+
+- ``"legacy_640"``: the built-in fall_detection model's space, the frame
+  stretched (not letterboxed) to 640x640. The thresholds are the old pixel
+  thresholds, and the decisions reproduce the old model's on the same
+  keypoints.
+- ``"person_relative"``: keypoints are divided by the person box's longer
+  side S, in frame pixels. Distance thresholds (``shoulder_hip_dy_below``,
+  ``nose_below_hip_by_more_than``, ``ankle_dx_above``, ``y_span_below``)
+  and ``missing_hip_offset`` are then fractions of S, the same for a near
+  and a far person. ``visible_keypoints_above`` stays a count. The longer
+  side, not the height, because a lying person's box is short.
+
+Optional, all absent by default, and then the result is exactly as before:
+
+- ``pose_fall.indicators.wide_box``: ``{"width_over_height_above": r,
+  "score": s}``. It holds when the person box, in frame pixels, is wider
+  than r times its height. Like every indicator, it is only evaluated
+  when the person has a visible nose, shoulder or hip.
+- ``pose_fall.min_person_size``: a fraction of the frame height. A person
+  whose box's longer side is smaller than this is not evaluated: score
+  0, so no rule fires on them. They stay in ``objects``.
+
+Persistence (alarm only after the fallen pose is held for N seconds) is not
+here: a frame is judged on its own. The backend applies the manifest's
+``persistence.min_seconds`` across frames.
 
 Detection manifests are unaffected: none of this runs unless the task is
 "pose", and their output is pinned by the legacy golden test.
@@ -176,6 +197,20 @@ _L_HIP, _R_HIP, _L_ANKLE, _R_ANKLE = 11, 12, 15, 16
 _LEGACY_SIZE = 640.0
 
 POSE_FALL = "pose_fall"
+COORDS_LEGACY_640 = "legacy_640"
+COORDS_PERSON_RELATIVE = "person_relative"
+
+
+def person_relative_keypoints(
+    keypoints: List[Dict[str, float]], bbox: List[float]
+) -> List[Dict[str, float]]:
+    """Frame pixels -> units of the person's size: divided by the box's
+    longer side, the same factor on both axes. A degenerate box gives no
+    keypoints (score 0)."""
+    size = max(bbox[2] - bbox[0], bbox[3] - bbox[1])
+    if size <= 0:
+        return []
+    return [{"x": k["x"] / size, "y": k["y"] / size, "confidence": k["confidence"]} for k in keypoints]
 
 
 def legacy_640_keypoints(
@@ -188,7 +223,9 @@ def legacy_640_keypoints(
 
 
 def pose_fall_score(
-    keypoints: List[Dict[str, float]], settings: Dict[str, Any]
+    keypoints: List[Dict[str, float]],
+    settings: Dict[str, Any],
+    bbox: Optional[List[float]] = None,
 ) -> Tuple[float, List[str]]:
     """(fall score, indicators that held) for one person.
 
@@ -196,8 +233,10 @@ def pose_fall_score(
     ai/models/fall_detection/1.0.0/inference.py, with its constants read
     from the manifest: same visibility test, same fallbacks, same strict
     comparisons. A parity test runs both on the same keypoints. Thresholds
-    are in whatever space ``keypoints`` are in; ``apply_rules`` passes the
-    legacy 640x640 space.
+    are in whatever space ``keypoints`` are in (see ``coords``).
+
+    ``bbox`` (frame pixels) is only read by the optional ``wide_box``
+    indicator, which the built-in model did not have.
     """
     if len(keypoints) < 17:
         return 0.0, []
@@ -239,6 +278,11 @@ def pose_fall_score(
         ys = [k["y"] for k in keypoints if visible(k)]
         if len(ys) > c["visible_keypoints_above"] and max(ys) - min(ys) < c["y_span_below"]:
             held.append(("compact_body", c["score"]))
+    c = ind.get("wide_box")
+    if c and bbox is not None:
+        width, height = bbox[2] - bbox[0], bbox[3] - bbox[1]
+        if height > 0 and width / height > c["width_over_height_above"]:
+            held.append(("wide_box", c["score"]))
 
     if not held:
         return 0.0, []
@@ -255,11 +299,20 @@ def _pose_band(
     if not pose_rules or obj.get("keypoints") is None:
         return None, 0.0, []
     settings = manifest["pose_fall"]
-    if settings.get("coords") != "legacy_640":
-        raise ValueError(f"pose_fall coords {settings.get('coords')!r} not supported")
-    if frame_shape is None:
+    coords = settings.get("coords")
+    if coords not in (COORDS_LEGACY_640, COORDS_PERSON_RELATIVE):
+        raise ValueError(f"pose_fall coords {coords!r} not supported")
+    size_floor = settings.get("min_person_size")
+    if frame_shape is None and (coords == COORDS_LEGACY_640 or size_floor is not None):
         raise ValueError("pose rules need the frame shape")
-    score, held = pose_fall_score(legacy_640_keypoints(obj["keypoints"], frame_shape), settings)
+    bbox = obj["bbox"]
+    if size_floor is not None and max(bbox[2] - bbox[0], bbox[3] - bbox[1]) < size_floor * frame_shape[0]:
+        return None, 0.0, []
+    if coords == COORDS_LEGACY_640:
+        keypoints = legacy_640_keypoints(obj["keypoints"], frame_shape)
+    else:
+        keypoints = person_relative_keypoints(obj["keypoints"], bbox)
+    score, held = pose_fall_score(keypoints, settings, bbox)
     candidates = [
         r for r in pose_rules if obj["class_name"] in r["classes"] and score > r["score_above"]
     ]
@@ -275,7 +328,8 @@ def apply_rules(
 ) -> Dict[str, Any]:
     """Turn raw detections into the result the backend consumes.
 
-    ``frame_shape`` is only read by pose rules (legacy_640 coordinates)."""
+    ``frame_shape`` is only read by pose rules (``legacy_640`` coordinates
+    and ``min_person_size``)."""
     rules = manifest.get("rules", [])
     zones = (config or {}).get("zones") or []
     pose_rules = [r for r in rules if r.get("type") == POSE_FALL]

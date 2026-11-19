@@ -60,8 +60,12 @@ POSE_FALL_INDICATORS = {
     "head_below_hips": ("nose_below_hip_by_more_than",),
     "legs_spread": ("ankle_dx_above",),
     "compact_body": ("visible_keypoints_above", "y_span_below"),
+    "wide_box": ("width_over_height_above",),
 }
-POSE_COORDS = {"legacy_640"}
+POSE_COORDS = {"legacy_640", "person_relative"}
+#: Longest persistence a manifest may ask for: past this an alarm would be
+#: too late to be useful, so a bigger value is almost certainly a typo.
+MAX_PERSISTENCE_SECONDS = 60
 STORE_UID = STORE_GID = 1000  # owner of the model store (backend container user)
 
 
@@ -197,6 +201,13 @@ def manifest_problems(manifest: Dict[str, Any]) -> List[str]:
     limits = manifest.get("limits", {})
     if not isinstance(limits.get("max_memory_mb"), int):
         p.append("limits.max_memory_mb must be an integer")
+    # Optional, any task: the backend opens a violation only after the
+    # rule has held for this long (a miss resets the clock). Absent = 0.
+    persistence = manifest.get("persistence")
+    if persistence is not None:
+        seconds = persistence.get("min_seconds") if isinstance(persistence, dict) else None
+        if not _is_number(seconds) or not 0 <= seconds <= MAX_PERSISTENCE_SECONDS:
+            p.append(f"persistence.min_seconds must be a number in [0, {MAX_PERSISTENCE_SECONDS}]")
     return p
 
 
@@ -227,6 +238,14 @@ def _pose_problems(manifest: Dict[str, Any]) -> List[str]:
         p.append("pose_fall.keypoint_min_confidence must be in [0, 1)")
     if not _is_number(fall.get("missing_hip_offset")):
         p.append("pose_fall.missing_hip_offset must be a number")
+    elif fall.get("coords") == "person_relative" and not 0 <= fall["missing_hip_offset"] <= 2:
+        p.append(
+            "pose_fall.missing_hip_offset is a fraction of the person's size "
+            "with coords 'person_relative': must be in [0, 2]"
+        )
+    size = fall.get("min_person_size")
+    if size is not None and (not _is_number(size) or not 0 <= size < 1):
+        p.append("pose_fall.min_person_size must be a fraction of the frame height in [0, 1)")
     indicators = fall.get("indicators")
     if not isinstance(indicators, dict) or not indicators:
         return p + ["pose_fall.indicators must be a non-empty object"]
@@ -238,8 +257,21 @@ def _pose_problems(manifest: Dict[str, Any]) -> List[str]:
             p.append(f"pose_fall.indicators.{name} must be an object")
             continue
         for key in POSE_FALL_INDICATORS[name]:
-            if not _is_number(settings.get(key)):
+            value = settings.get(key)
+            if not _is_number(value):
                 p.append(f"pose_fall.indicators.{name}.{key} must be a number")
+            elif (
+                fall.get("coords") == "person_relative"
+                and key != "visible_keypoints_above"
+                and key != "width_over_height_above"
+                and not 0 <= value <= 2
+            ):
+                # Fractions of the person's size; a pixel value left over
+                # from legacy_640 (50, 100, 150) would silently never fire.
+                p.append(
+                    f"pose_fall.indicators.{name}.{key} is a fraction of the person's size "
+                    "with coords 'person_relative': must be in [0, 2]"
+                )
         score = settings.get("score")
         if not _is_number(score) or not 0 < score <= 1:
             p.append(f"pose_fall.indicators.{name}.score must be in (0, 1]")

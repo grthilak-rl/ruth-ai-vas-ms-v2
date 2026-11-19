@@ -31,6 +31,7 @@ import asyncio
 import base64
 import os
 import random
+import time
 from contextlib import asynccontextmanager
 from datetime import datetime, timezone
 from typing import Any, AsyncGenerator, Callable, Dict, Optional
@@ -721,10 +722,14 @@ class InferenceLoopService:
                         }
                     state = self._violation_state[session_id]
 
-                    # Same per-model gate as the multi-model path, so a
-                    # single-model session does not behave differently.
-                    if violation_detected and confidence >= self._violation_threshold(
-                        model_id, confidence_threshold
+                    # Same per-model gate (and persistence) as the
+                    # multi-model path, so a single-model session does not
+                    # behave differently.
+                    if self._qualifies_held(
+                        state,
+                        model_id,
+                        violation_detected
+                        and confidence >= self._violation_threshold(model_id, confidence_threshold),
                     ):
                         # Get the zone ID from detections
                         detections = inference_result.get("detections", [])
@@ -1248,6 +1253,46 @@ class InferenceLoopService:
         info = enabled_store_models().get(model_id)
         return info.min_confidence if info is not None else session_threshold
 
+    def _persistence_seconds(self, model_id: str) -> float:
+        """How long a result must keep qualifying before a violation opens.
+
+        From the store manifest's ``persistence.min_seconds``; 0 for
+        built-in models and for any store model without the block, which is
+        the behaviour before persistence existed.
+        """
+        try:
+            info = enabled_store_models().get(model_id)
+        except Exception:  # noqa: BLE001 - never fail a violation over this lookup
+            return 0.0
+        return info.persistence_seconds if info is not None else 0.0
+
+    def _qualifies_held(
+        self, state: Dict[str, Any], model_id: str, qualifies: bool, now: Optional[float] = None
+    ) -> bool:
+        """Persistence gate, shared by both violation paths.
+
+        ``qualifies`` is this result's own verdict (violation above the
+        threshold). The gate passes once it has been true continuously for
+        the model's persistence time; any non-qualifying result resets the
+        clock. With a persistence time of 0 it returns ``qualifies``
+        unchanged, so the rule logic around it is exactly as before.
+
+        Time is the loop's monotonic clock when the result is processed:
+        frames carry no capture time, and results are processed in order
+        shortly after the frame is fetched.
+        """
+        if not qualifies:
+            state["qualifying_since"] = None
+            return False
+        need = self._persistence_seconds(model_id)
+        if need <= 0:
+            return True
+        now = time.monotonic() if now is None else now
+        since = state.get("qualifying_since")
+        if since is None:
+            state["qualifying_since"] = since = now
+        return now - since >= need
+
     async def _apply_violation_rules(
         self,
         session_id: UUID,
@@ -1276,7 +1321,7 @@ class InferenceLoopService:
         confidence = inference_result.get("confidence", 0.0)
         threshold = self._violation_threshold(model_id, confidence_threshold)
 
-        if violation_detected and confidence >= threshold:
+        if self._qualifies_held(state, model_id, violation_detected and confidence >= threshold):
             detections = inference_result.get("detections", [])
             current_zones = {d.get("zone_id") for d in detections if d.get("in_zone")}
             new_zones = current_zones - state["active_zones"]

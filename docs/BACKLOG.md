@@ -1371,8 +1371,93 @@ is the root-cause fix.
 
 ## BL-1 · fall_detection 1.1.0: confidence floor, size-relative geometry, confidence from detection
 
-**Status:** parked (approved in principle) · **Found:** 2026-10-04 · **Area:**
-AI model, runtime version selection
+**Status:** in progress: floor 0.45 live, options deployed but off, staged session to be scheduled ·
+**Found:** 2026-10-04 · **Area:** AI model, runtime version selection
+
+### Update 2026-11-19 (13:51): deployed: floor 0.45, options code live but off
+
+- **Floor:** approved at **0.45**, not 0.5. That gives more margin for
+  frames of a lying person, and is still above the 0.42 false-alarm
+  maximum. Results at 0.45:
+  - Today's 10 violation frames: the 3 real falls fire, the 7 false alarms
+    don't.
+  - Recordings 12:55:30–13:12: 2 alarms, one real fall per camera (same
+    as 0.5). No frame of the lying person scored 0.45–0.50, so on today's
+    footage the extra margin doesn't change anything.
+  - HPCL replay frames: 72 fires (77 at 0.25, 71 at 0.5). The one
+    difference from 0.5 is a wall-mounted-camera false alarm (flagged
+    row 3, 0.49), which 0.45 keeps.
+- **Deploy:**
+  - Backups: images tagged `pre-fall-floor-20261119-135057`; store tree
+    in `/mnt/storage/ruth-backups/pre-fall-floor-20261119-135057/`; the
+    installer's previous tree is at
+    `state/enabled-previous-20261119T135148`.
+  - Installed all 11 models with the new plugin. Store runtime: 11/11
+    ready on device 0.
+  - Live probes:
+    - PPE 38-frame probe: 380/380 responses identical before and after.
+    - fall_pose on today's 10 frames: 3 fire, 7 don't, matching the
+      hand labels.
+  - Backend rebuilt: the persistence gate is in the running code, and no
+    manifest sets it.
+  - fall_pose stays on DEMO-CAMERA and DEMO-CAMERA2.
+- **Rollback:**
+  - Store: put `state/enabled-previous-20261119T135148` back as
+    `enabled/` and `docker compose restart model-store-runtime`.
+  - Backend: re-tag `pre-fall-floor-20261119-135057` and
+    `up -d ruth-ai-backend`.
+
+### Update 2026-11-19 (afternoon): calibration options built, quick-fix floor proposed
+
+**Decisions (2026-11-19):**
+- Calibration acceptance rule: accept a new setting only if it catches
+  every staged fall the current one catches, and cuts false alarms.
+- A person lying still counts as "person down" and must raise an alarm.
+
+**Behaviour-neutral code release (built and tested, not yet deployed).**
+Every option is off by default, so fall_pose and every other model behave
+exactly as before.
+- Plugin `pose_fall` options:
+  - `coords: "person_relative"`: thresholds as fractions of the person
+    box's longer side.
+  - `indicators.wide_box`: box width over height.
+  - `min_person_size`: longer side as a fraction of the frame height.
+- Backend: manifest `persistence.min_seconds`. A violation opens only
+  after the result has qualified continuously for that long, and a miss
+  resets it. Both violation paths (multi-model and single-model) use the
+  same gate.
+- Installer: validates all of the above, and rejects pixel values left in
+  a `person_relative` manifest.
+- Checks run:
+  - Store plugin: 140 tests (38 new).
+  - `make test`: all green, 837 backend unit tests (27 new).
+  - All 11 installed models run offline with the live plugin and the new
+    one on 500 real frames: **5,500/5,500 outputs byte-identical**
+    (509 violations).
+
+**Quick fix (proposed: `pose.min_person_confidence` 0.25 → 0.5).**
+- **Live 2026-11-19 on DEMO-CAMERA and DEMO-CAMERA2, 12:56–13:08:** 10
+  violations.
+  - 3 were real staged falls, with person-detection confidence 0.94, 0.87
+    and 0.60.
+  - 7 were empty-room false alarms on wall art and door edges, all at
+    0.25–0.42.
+  - Visible keypoints do not separate the two groups (false alarms had
+    10–17, real falls 12–15).
+- **Recordings replayed 12:55:30–13:12 at 2 fps:**
+  - At floor 0.25: 10 violations would be recorded.
+  - At 0.40–0.55: 2, the staged fall on each camera.
+- **Margin is thin for lying people.** On DEMO-CAMERA2 the person lying
+  on the mat scored 0.27–0.39 in some frames; only 2 frames of that fall
+  cleared 0.5.
+- **HPCL replay frames (500):** recorded fires go 77 → 71. The 6 frames
+  dropped are wall-mounted cameras, equipment, a railing, bags, and tiny
+  distant figures inside a vessel (see
+  `docs/eval/2026-11-19-fall-pose-flagged-frames.md`). The other HPCL
+  false alarms are confidently detected workers, which the geometry
+  options must handle.
+
+**Staging:** `docs/eval/fall-staging-sheet.md`.
 
 ### Update 2026-11-19: now applies to fall_pose, not the built-in
 

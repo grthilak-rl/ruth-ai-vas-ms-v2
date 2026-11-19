@@ -6,7 +6,7 @@
   "task": "pose",
   "imgsz": 640,
   "classes": {"0": "person"},
-  "pose": {"min_person_confidence": 0.25, "iou": 0.65},
+  "pose": {"min_person_confidence": 0.45, "iou": 0.65},
   "pose_fall": {
     "coords": "legacy_640",
     "keypoint_min_confidence": 0.3,
@@ -29,5 +29,5 @@
   ],
   "performance": {"inference_time_hint_ms": 36, "recommended_fps": 2},
   "limits": {"max_memory_mb": 2048, "inference_timeout_ms": 5000},
-  "_migration": "Replaces the built-in fall_detection (YOLOv7-w6-pose). The pose_fall block is the old heuristic's constants verbatim, in the old model's 640x640 stretched space (legacy_640): no recalibration. Known to over-fire on small/distant people and person-shaped objects (docs/BACKLOG.md BL-1). Ultralytics yolo11l-pose (v8.3.0 release asset, sha256 61921abe1f2ed930bf28328a16b3162278cdb239a1e8280b6ac827119f13cee0), unmodified: the model change is the only intended difference. Chosen over yolo11x-pose on the 2026-11-19 replay: same agreement with the old model (87.8% vs 87.6% of 500 frames), faster (median 24.9 vs 27.5 ms) and smaller (436 vs 562 MB peak). The fall rule has no display_name on purpose: fall_detected is stored with no type_detail and is shown under the family label 'Fall Detected', as before."
+  "_migration": "Replaces the built-in fall_detection (YOLOv7-w6-pose). The pose_fall block is the old heuristic's constants verbatim, in the old model's 640x640 stretched space (legacy_640): no recalibration. Known to over-fire on small/distant people and person-shaped objects (docs/BACKLOG.md BL-1). Ultralytics yolo11l-pose (v8.3.0 release asset, sha256 61921abe1f2ed930bf28328a16b3162278cdb239a1e8280b6ac827119f13cee0), unmodified: the model change was the only intended difference at migration. Calibration 2026-11-19 (BL-1 quick fix): pose.min_person_confidence 0.25 -> 0.45, dropping empty-room false alarms (wall art, door edges: person confidence 0.25-0.42) while keeping every staged fall seen live (0.60-0.94); evidence in docs/BACKLOG.md BL-1. Chosen over yolo11x-pose on the 2026-11-19 replay: same agreement with the old model (87.8% vs 87.6% of 500 frames), faster (median 24.9 vs 27.5 ms) and smaller (436 vs 562 MB peak). The fall rule has no display_name on purpose: fall_detected is stored with no type_detail and is shown under the family label 'Fall Detected', as before."
 }

@@ -50,6 +50,11 @@ class StoreModelInfo:
     rule_labels: Tuple[Tuple[str, str], ...] = field(default_factory=tuple)
     #: (violation_type, severity) per rule, e.g. ("missing_vest", "critical").
     rule_severities: Tuple[Tuple[str, str], ...] = field(default_factory=tuple)
+    #: Manifest ``persistence.min_seconds``: a violation opens only after
+    #: the model's result has qualified continuously for this long. 0 (the
+    #: default, and the value for anything missing or invalid) opens on
+    #: the first qualifying result, as before.
+    persistence_seconds: float = 0.0
 
     def rule_label(self, violation_type: str) -> Optional[str]:
         """The manifest's display name for a violation type, if it gives one."""
@@ -108,7 +113,20 @@ def _info_from_manifest(model_id: str, version: str, manifest: dict) -> StoreMod
         min_confidence=min(floors) if floors else 1.0,
         rule_labels=rule_labels,
         rule_severities=rule_severities,
+        persistence_seconds=_persistence_seconds(manifest),
     )
+
+
+def _persistence_seconds(manifest: dict) -> float:
+    """``persistence.min_seconds`` if it is a sane number, else 0.
+
+    The installer rejects anything outside [0, 60]; this mirrors that so a
+    hand-edited manifest can never make the backend wait forever."""
+    block = manifest.get("persistence")
+    value = block.get("min_seconds") if isinstance(block, dict) else None
+    if isinstance(value, bool) or not isinstance(value, (int, float)):
+        return 0.0
+    return float(value) if 0 <= value <= 60 else 0.0
 
 
 def read_enabled_models(enabled_root: Path) -> Dict[str, StoreModelInfo]:

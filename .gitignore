@@ -38,6 +38,8 @@ Thumbs.db
 # Logs
 *.log
 logs/
+# make test run logs (scripts/test-all.sh)
+test-logs/
 
 # Test artifacts
 .pytest_cache/
