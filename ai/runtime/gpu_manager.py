@@ -126,6 +126,10 @@ class GPUManager:
         self._torch_available = False
         self._cuda_available = False
         self._status = GPUStatus.UNAVAILABLE
+        # Human-readable reason when the GPU is unavailable (None when available).
+        # Surfaced by /health so a missing GPU is never silent (24 Aug outage).
+        self._unavailable_reason: Optional[str] = None
+        self._last_liveness_check: float = 0.0
 
         # Initialize GPU detection
         self._detect_gpus()
@@ -135,6 +139,7 @@ class GPUManager:
         if not self.enable_gpu:
             logger.info("GPU disabled by configuration")
             self._status = GPUStatus.UNAVAILABLE
+            self._unavailable_reason = "GPU disabled by configuration (ENABLE_GPU=false)"
             return
 
         try:
@@ -165,17 +170,91 @@ class GPUManager:
                     )
 
                 self._status = GPUStatus.AVAILABLE
+                self._unavailable_reason = None
+                if device_count == 0:
+                    self._status = GPUStatus.UNAVAILABLE
+                    self._unavailable_reason = "CUDA reports 0 devices"
             else:
-                logger.warning("PyTorch available but CUDA not available")
                 self._status = GPUStatus.UNAVAILABLE
+                self._unavailable_reason = (
+                    "CUDA not available (no NVIDIA driver/device visible to the "
+                    "container: host driver or kernel module missing, or the "
+                    "container was started without a GPU)"
+                )
+                logger.error(f"GPU expected but unavailable: {self._unavailable_reason}")
 
         except ImportError:
             logger.warning("PyTorch not installed, GPU support disabled")
             self._status = GPUStatus.UNAVAILABLE
+            self._unavailable_reason = "PyTorch not installed"
 
         except Exception as e:
             logger.error(f"Error detecting GPUs: {e}", exc_info=True)
             self._status = GPUStatus.ERROR
+            self._unavailable_reason = f"GPU detection error: {e}"
+
+    # Seconds between NVML liveness re-checks (health endpoints call this often).
+    LIVENESS_CHECK_INTERVAL_S = 15.0
+
+    @property
+    def gpu_expected(self) -> bool:
+        """True when this runtime is configured to run on a GPU (ENABLE_GPU=true)."""
+        return self.enable_gpu
+
+    @property
+    def unavailable_reason(self) -> Optional[str]:
+        """Why the GPU is unavailable, or None if it is available."""
+        return None if self.is_available else (
+            self._unavailable_reason or f"GPU status: {self._status.value}"
+        )
+
+    def check_liveness(self, force: bool = False) -> bool:
+        """
+        Re-verify that a GPU detected at startup is still reachable.
+
+        Startup detection is cached; a GPU can still disappear later (Xid
+        "fallen off the bus", driver unloaded). Uses NVML when available and
+        is throttled to LIVENESS_CHECK_INTERVAL_S. Once lost, the GPU stays
+        marked ERROR until the runtime restarts (CUDA contexts are gone anyway).
+
+        Returns:
+            Current is_available value
+        """
+        import time
+
+        if not self.is_available:
+            return False
+        now = time.monotonic()
+        if not force and now - self._last_liveness_check < self.LIVENESS_CHECK_INTERVAL_S:
+            return True
+        self._last_liveness_check = now
+
+        try:
+            import pynvml
+        except ImportError:
+            return True  # No NVML in this image: rely on startup detection
+
+        try:
+            pynvml.nvmlInit()
+            try:
+                count = pynvml.nvmlDeviceGetCount()
+                for device_id in self._devices:
+                    pynvml.nvmlDeviceGetHandleByIndex(device_id)
+            finally:
+                try:
+                    pynvml.nvmlShutdown()
+                except Exception:
+                    pass
+            if count < len(self._devices):
+                raise RuntimeError(
+                    f"NVML sees {count} device(s), {len(self._devices)} expected"
+                )
+            return True
+        except Exception as e:
+            self._status = GPUStatus.ERROR
+            self._unavailable_reason = f"GPU lost at runtime: {e}"
+            logger.error(f"GPU liveness check failed: {e}")
+            return False
 
     @property
     def is_available(self) -> bool:
@@ -447,6 +526,9 @@ class GPUManager:
         with self._lock:
             return {
                 "status": self._status.value,
+                "expected": self.gpu_expected,
+                "reason": self.unavailable_reason,
+                "fallback_to_cpu": self.fallback_to_cpu,
                 "torch_available": self._torch_available,
                 "cuda_available": self._cuda_available,
                 "device_count": len(self._devices),

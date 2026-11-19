@@ -62,6 +62,21 @@ logger = None
 
 
 @asynccontextmanager
+def _record_load_failure(registry, model_id: str, version: str, error: str) -> None:
+    """Mark a failed load FAILED/UNHEALTHY (with its error) so /health reports it.
+
+    Previously a failed load left the version DISCOVERED/UNKNOWN, which /health
+    counted as neither healthy nor unhealthy: the runtime said "healthy".
+    """
+    try:
+        registry.update_state(model_id, version, LoadState.FAILED, error=error)
+        registry.update_health(model_id, version, HealthStatus.UNHEALTHY)
+    except Exception as e:  # never let bookkeeping break startup
+        logger.warning("Could not mark failed model in registry", extra={
+            "model_id": model_id, "version": version, "error": str(e)
+        })
+
+
 async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     """Application lifecycle manager - handles startup and shutdown."""
     global logger
@@ -271,9 +286,11 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
                             "version": version,
                             "error": error_msg
                         })
+                        _record_load_failure(registry, model_id, version, error_msg)
                 except Exception as e:
                     if config.metrics_enabled:
                         set_model_load_status(model_id, version, loaded=False)
+                    _record_load_failure(registry, model_id, version, str(e))
 
                     logger.error("Model load exception", extra={
                         "model_id": model_id,

@@ -5,6 +5,112 @@ investigation. Newest first.
 
 ---
 
+## BL-26 · `events` table: written by nothing since 2026-08-01; retire it
+
+**Status:** backlog · **Raised:** 2026-11-19 (gloves_2 bare-hand test)
+
+- **State.** 13,318 rows, 13 MB, created 2026-07-24 → 2026-08-01 21:51 UTC.
+  All of them are from `fall-detection-yolov8` / `ppe-detection-yolov8`, the
+  default model ids of the old browser-side helpers. Nothing has been
+  written since.
+- **Why it stopped.** Violations are now created by the backend inference
+  loop: `inference_loop._create_violation` writes a `violations` row
+  directly, with no `Event` row. The only writers left are
+  `EventIngestionService` and `POST /internal/events`. Their one caller is
+  `frontend/src/services/api.ts` `reportFallEvent` / `reportPPEEvent`,
+  which nothing imports. No design doc records the change, but the code
+  path makes "violations only" the de facto design.
+- **What still reads it.** None of these readers is needed, but each must
+  be removed before the table can go:
+  1. `GET /api/v1/violations/{id}` → `count_events_for_violation`, which
+     fills `event_count`. It is always 0 for current violations, and the
+     frontend never reads it. `get_events_for_violation` has no caller.
+  2. `GET /api/v1/events` and `GET /api/v1/events/{id}`
+     (`app/api/v1/events.py`). No frontend caller, and no requests in the
+     backend log since its 2026-11-18 21:13 UTC start.
+  3. Settings → Project per-project counts: `project_service` maps
+     `"events": Event`, and `SettingsProjectTab.tsx` labels it. This is the
+     only place a user sees the stale rows.
+  4. NLP chat (`ruth-ai-nlp-chat`). Its SQL prompt, canned queries and
+     default table allow-list include `events`, so "how many events" would
+     answer from the stale table. Chat is disabled in this deployment
+     (`NLP_CHAT_ENABLED: "false"`).
+  5. Schema: `project_tag.py` and `project_scope.py` list it, and the FKs
+     `events.violation_id` / `events.stream_session_id` (ON DELETE SET
+     NULL) point at the live tables.
+- **Removal.**
+  1. Drop readers 1–4, the `/internal/events` route,
+     `EventIngestionService`, the two frontend helpers, `schemas/event.py`
+     and the `Event` model with its relationships.
+  2. Then add an Alembic migration that dumps the table and drops it, and
+     leaves the `event_type` enum alone if anything else uses it.
+  3. Keep the dump with the other pre-deploy dumps in
+     `/mnt/storage/ruth-backups/`.
+
+---
+
+## BL-25 · Runtime per-model `inference_count` / `error_count` are never incremented
+
+**Status:** backlog · **Raised:** 2026-11-19 (GPU-detection deploy) · **Severity:** low (misleading counters)
+
+- **Symptom.** `GET /health?verbose=true` shows `inference_count: 0` and
+  `error_count: 0` for every model, while the same runtime logs about 1,400
+  inferences a minute (store runtime, 2026-11-19).
+- **Root cause.** `ModelRegistry.record_inference()` and `record_error()`
+  (ai/runtime/registry.py:530, :545) exist, but nothing calls them.
+  `server/routes/inference.py` only updates the Prometheus counter
+  `inference_requests_total` (`observability/metrics.py`), so Prometheus is
+  correct.
+- **Knock-on.** `runtime/reporting.py:498` sets each capability's status to
+  ACTIVE only when `inference_count > 0`. Every model is therefore published
+  to the Ruth backend as IDLE.
+- **Fix.**
+  - In `submit_inference`, call `registry.record_inference(model_id,
+    version)` next to `record_inference(..., "success")`, and
+    `registry.record_error(...)` on the failed path. It is a cheap
+    write-locked increment.
+  - Then check whether anything acts on IDLE vs ACTIVE before relying on it.
+  - Test: one inference raises `inference_count` in `/health?verbose=true`.
+
+---
+
+## BL-24 · Session `inference_fps` (10) is not the rate actually inferred (VAS frame tap: 2 fps)
+
+**Status:** backlog · **Raised:** 2026-11-19 (gloves_2 bare-hand test)
+
+- **What happens.**
+  - Sessions default to `inference_fps = 10`, but VAS writes the frame tap
+    at `VAS_FRAME_TAP_FPS`, default 2 (`vas-ms-v2/backend/app/services/
+    rtsp_pipeline.py`). It is unset in the deployment and is global, not
+    per camera.
+  - Each model's interval is also floored by the GPU budget (BL-10). The
+    loop asks for more than the tap supplies, so it re-reads the same frame
+    or waits.
+  - Measured on 2026-11-19: exactly 2.0 fps per model on all three demo
+    cameras.
+- **Why it matters.**
+  - The setting misleads anyone tuning detection.
+  - In the gloves_2 test, DEMO-CAMERA crossed 0.70 for about 0.2 s (2
+    frames at 10 fps in the recording). The 2 fps tap sampled neither, so no
+    violation.
+  - Short events (a bare hand, a fall) can fall between samples.
+- **Options.**
+  1. **Show the real rate.** The backend already counts `frames_processed`
+     per session. Expose the measured fps per session and model, and show it
+     next to the configured value on the Cameras page. Cap the editable
+     value at the tap rate, or label it "max".
+  2. **Make the tap rate configurable per camera.** Add a VAS device or
+     stream field that overrides `VAS_FRAME_TAP_FPS` in the ffmpeg
+     `fps=` filter (this needs a pipeline restart for that camera). Ruth
+     could then set it from the session's `inference_fps`.
+- **Costs and risks.**
+  - A higher tap rate costs JPEG encode CPU per camera in VAS.
+  - It costs GPU time per model, which BL-10's budget will throttle anyway.
+  - Frame-tap stall rates could change (BL-12).
+  - Do (1) first.
+
+---
+
 ## BL-18 · Legacy API integration tests (`ruth-ai-backend/tests/integration`) are not run
 
 **Status:** backlog · **Raised:** 2026-11-19 (test suites green)

@@ -20,6 +20,11 @@ const STATUS_MESSAGES: Record<GlobalStatus, { title: string; message: string }> 
     message:
       'AI detection may be slower or less accurate. Video monitoring continues normally.',
   },
+  unhealthy: {
+    title: 'System Fault',
+    message:
+      'A critical service is down and AI detection may not be running. Your administrator should check System Health.',
+  },
   offline: {
     title: 'System Offline',
     message:

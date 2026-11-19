@@ -75,6 +75,23 @@ class AIRuntimeDetails(ComponentDetails):
     hardware_type: str | None = Field(
         None, description="Hardware type (cpu, cuda, tensorrt, jetson)"
     )
+    # Live probe of the runtime's /health (not just the push registry), so a
+    # dead runtime or a missing GPU cannot hide behind a stale "healthy".
+    reachable: bool | None = Field(
+        None, description="Whether the runtime answered its /health probe"
+    )
+    gpu_expected: bool | None = Field(
+        None, description="Runtime is configured to use a GPU (ENABLE_GPU=true)"
+    )
+    gpu_reason: str | None = Field(
+        None, description="Why the GPU is unavailable, as reported by the runtime"
+    )
+    reasons: list[str] | None = Field(
+        None, description="Runtime-reported reasons for a non-healthy status"
+    )
+    models_on_cpu: list[str] | None = Field(
+        None, description="Models running on CPU although a GPU is expected"
+    )
 
 
 class VASDetails(ComponentDetails):

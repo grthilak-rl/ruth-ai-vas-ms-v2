@@ -46,6 +46,10 @@ class ModelHealth(BaseModel):
     health: str
     inference_count: int = 0
     error_count: int = 0
+    device: Optional[str] = Field(
+        default=None, description='Device the model runs on ("cuda:0", "cpu"); None if not loaded'
+    )
+    error: Optional[str] = Field(default=None, description="Last load/state error, if any")
 
 
 class HealthResponse(BaseModel):
@@ -58,6 +62,14 @@ class HealthResponse(BaseModel):
     models_degraded: int = Field(description="Number of degraded models")
     models_unhealthy: int = Field(description="Number of unhealthy models")
     models_ready: int = Field(description="Number of models ready for inference")
+
+    # Why status is not "healthy" (machine-readable prefix + detail), e.g.
+    # "gpu_unavailable: CUDA not available ...". Empty when healthy.
+    reasons: List[str] = Field(default_factory=list)
+
+    # GPU summary: always populated (cheap). gpu_expected = ENABLE_GPU=true.
+    gpu_expected: Optional[bool] = None
+    gpu_reason: Optional[str] = None
 
     # Phase 3: Extended health info
     gpu_available: Optional[bool] = None
@@ -120,10 +132,52 @@ async def health_check(
     models_degraded = sum(1 for v in all_versions if v.health == HealthStatus.DEGRADED)
     models_unhealthy = sum(1 for v in all_versions if v.health == HealthStatus.UNHEALTHY)
 
+    # GPU summary + per-model device. A GPU runtime running without its GPU
+    # must never report "healthy" (24 Aug outage: silent CPU fallback).
+    reasons: List[str] = []
+    gpu_manager = getattr(request.app.state, "gpu_manager", None)
+    gpu_expected: Optional[bool] = None
+    gpu_available: Optional[bool] = None
+    gpu_reason: Optional[str] = None
+    if gpu_manager:
+        gpu_expected = bool(gpu_manager.gpu_expected)
+        gpu_available = bool(gpu_manager.check_liveness())
+        gpu_reason = gpu_manager.unavailable_reason
+        if gpu_expected and not gpu_available:
+            reasons.append(f"gpu_unavailable: {gpu_reason}")
+
+    sandbox_manager = get_sandbox_manager()
+
+    def _device(v) -> Optional[str]:
+        if not sandbox_manager:
+            return None
+        sandbox = sandbox_manager.get_sandbox(v.model_id, v.version)
+        return getattr(getattr(sandbox, "loaded_model", None), "device", None)
+
+    devices = {(v.model_id, v.version): _device(v) for v in all_versions}
+
+    failed = [v for v in all_versions if v.state in (LoadState.FAILED, LoadState.ERROR)]
+    if failed:
+        # Group by error: when the GPU is missing every model fails the same way.
+        by_error: Dict[str, List[str]] = {}
+        for v in failed:
+            err = getattr(v, "last_error", None) or "unknown error"
+            by_error.setdefault(err, []).append(f"{v.model_id}:{v.version}")
+        reasons.append("models_failed: " + "; ".join(
+            f"{', '.join(ids)} ({err})" for err, ids in by_error.items()
+        ))
+    if gpu_expected:
+        on_cpu = [f"{m}:{ver}" for (m, ver), d in devices.items() if d == "cpu"]
+        if on_cpu:
+            reasons.append("models_on_cpu: " + ", ".join(on_cpu))
+
     # Determine overall status
     if models_loaded == 0:
         overall_status = "unhealthy"
-    elif models_unhealthy > 0 or models_degraded > 0:
+        reasons.append("no_models: no models discovered")
+    elif models_ready == 0:
+        overall_status = "unhealthy"  # nothing can serve inference
+    elif models_unhealthy > 0 or models_degraded > 0 or reasons:
         overall_status = "degraded"
     else:
         overall_status = "healthy"
@@ -140,17 +194,18 @@ async def health_check(
         models_degraded=models_degraded,
         models_unhealthy=models_unhealthy,
         models_ready=models_ready,
+        reasons=reasons,
+        gpu_expected=gpu_expected,
+        gpu_available=gpu_available,
+        gpu_reason=gpu_reason,
     )
 
     # Add extended information if verbose
     if verbose:
         # GPU information
-        gpu_manager = getattr(request.app.state, "gpu_manager", None)
         if gpu_manager:
-            gpu_manager.update_device_stats()
-            gpu_stats = gpu_manager.get_stats()
+            gpu_stats = gpu_manager.get_stats()  # refreshes device stats
 
-            response.gpu_available = gpu_stats["status"] == "available"
             response.gpu_device_count = gpu_stats["device_count"]
 
             # GPU devices
@@ -177,6 +232,8 @@ async def health_check(
                 health=v.health.value,
                 inference_count=v.inference_count,
                 error_count=v.error_count,
+                device=devices.get((v.model_id, v.version)),
+                error=getattr(v, "last_error", None),
             )
             for v in all_versions
         ]

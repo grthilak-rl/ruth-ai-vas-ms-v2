@@ -17,11 +17,13 @@ import './SystemStatusIndicator.css';
  * |---------------|------------------|------------------|
  * | healthy       | "All Systems OK" | Green dot (●)    |
  * | degraded      | "Degraded"       | Yellow dot (◐)   |
+ * | unhealthy     | "System Fault"   | Red dot (●)      |
  * | offline       | "Offline"        | Red dot (○)      |
  */
 const STATUS_CONFIG: Record<GlobalStatus, { dot: string; className: string }> = {
   healthy: { dot: '●', className: 'system-status--healthy' },
   degraded: { dot: '◐', className: 'system-status--degraded' },
+  unhealthy: { dot: '●', className: 'system-status--unhealthy' },
   offline: { dot: '○', className: 'system-status--offline' },
 };
 

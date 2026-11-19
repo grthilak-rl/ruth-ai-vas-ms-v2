@@ -208,10 +208,11 @@ class ModelLoader:
             },
         )
 
-        # Step 0: Determine device (GPU allocation if available)
-        device = self._allocate_device(descriptor)
-
         try:
+            # Step 0: Determine device (GPU allocation if available). Inside the
+            # try so a refused CPU fallback becomes a normal failed load.
+            device = self._allocate_device(descriptor)
+
             # Step 1: Import inference module
             infer_func = self._import_inference(descriptor)
 
@@ -713,10 +714,15 @@ class ModelLoader:
         Allocate a device for the model.
 
         If a GPUManager is available, attempts to allocate GPU memory.
-        Falls back to CPU if GPU is unavailable or allocation fails.
+        Falls back to CPU if GPU is unavailable or allocation fails, unless
+        the GPU is expected (ENABLE_GPU=true) and GPU_FALLBACK_TO_CPU=false:
+        then the load fails loudly instead of silently running on CPU.
 
         Args:
             descriptor: Model version descriptor
+
+        Raises:
+            LoadError: GPU expected, unavailable/insufficient, fallback disabled
 
         Returns:
             Device string ("cpu", "cuda:0", etc.)
@@ -740,8 +746,38 @@ class ModelLoader:
         version = descriptor.version
         qualified_id = descriptor.qualified_id
 
+        # Defaults keep the historical fallback behaviour for managers/mocks
+        # that predate these attributes.
+        strict = bool(getattr(self.gpu_manager, "gpu_expected", False)) and not getattr(
+            self.gpu_manager, "fallback_to_cpu", True
+        )
+
+        def refuse_cpu(reason: str) -> LoadError:
+            return load_error(
+                code=ErrorCode.LOAD_OUT_OF_MEMORY
+                if self.gpu_manager.is_available
+                else ErrorCode.LOAD_MISSING_DEPENDENCY,
+                message=(
+                    f"GPU required but {reason}; CPU fallback disabled "
+                    f"(GPU_FALLBACK_TO_CPU=false)"
+                ),
+                model_id=model_id,
+                version=version,
+                path=descriptor.directory_path,
+                required_mb=required_mb,
+            )
+
+        if strict and not self.gpu_manager.is_available:
+            raise refuse_cpu(
+                f"unavailable: {self.gpu_manager.unavailable_reason}"
+            )
+
         # Check if we can allocate GPU memory
         if not self.gpu_manager.can_allocate(model_id, required_mb):
+            if strict:
+                raise refuse_cpu(
+                    f"has insufficient free memory for {required_mb:.0f}MB"
+                )
             logger.info(
                 "GPU memory insufficient, using CPU",
                 extra={
@@ -769,6 +805,8 @@ class ModelLoader:
             return device
 
         except RuntimeError as e:
+            if strict:
+                raise refuse_cpu(f"allocation failed: {e}") from e
             # Allocation failed, fall back to CPU
             logger.warning(
                 "GPU allocation failed, falling back to CPU",

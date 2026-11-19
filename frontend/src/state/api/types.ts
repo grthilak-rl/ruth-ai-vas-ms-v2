@@ -84,6 +84,16 @@ export interface AIRuntimeHealthDetails {
   gpu_available?: boolean;
   /** Hardware type (cpu, gpu, jetson) */
   hardware_type?: string;
+  /** Whether the backend's live /health probe reached the runtime */
+  reachable?: boolean;
+  /** Runtime is configured to use a GPU */
+  gpu_expected?: boolean;
+  /** Why the GPU is unavailable (runtime-reported) */
+  gpu_reason?: string;
+  /** Runtime-reported reasons for a non-healthy status */
+  reasons?: string[];
+  /** Models running on CPU although a GPU is expected */
+  models_on_cpu?: string[];
 }
 
 /**

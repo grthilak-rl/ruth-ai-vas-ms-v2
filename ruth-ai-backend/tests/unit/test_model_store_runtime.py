@@ -310,12 +310,22 @@ async def test_health_uses_builtin_runtime_not_store(monkeypatch):
         "unified-runtime-abc": reg("unified-runtime-abc", "healthy", ["fall_detection"]),
     }
     monkeypatch.setattr(ai_runtime, "_registered_runtimes", registry)
+    # check_ai_runtime also live-probes the built-in runtime; stub it healthy
+    # so this test stays about registry selection.
+    async def healthy_probe(self, timeout_seconds):
+        return True, {"status": "healthy", "gpu_expected": True, "gpu_available": True}, None
+
+    monkeypatch.setattr(HealthService, "_probe_ai_runtime", healthy_probe)
     result = await HealthService().check_ai_runtime()
     assert result.status == "healthy"
     assert result.details["runtime_id"] == "unified-runtime-abc"
 
+    # Only the store runtime registered: the built-in one counts as not
+    # registered (store health is never used). Probe OK -> degraded.
     monkeypatch.setattr(ai_runtime, "_registered_runtimes", {"model-store-runtime": registry["model-store-runtime"]})
-    assert (await HealthService().check_ai_runtime()).status == "unhealthy"
+    result = await HealthService().check_ai_runtime()
+    assert result.status == "degraded"
+    assert "not registered yet" in result.error
 
 
 # --------------------------------------------------------------------------

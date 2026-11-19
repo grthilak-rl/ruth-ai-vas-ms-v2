@@ -7,7 +7,7 @@ import type { HealthResponse } from '../api';
 /**
  * Global status derived from health response (F6 §4.2)
  */
-export type GlobalStatus = 'healthy' | 'degraded' | 'offline';
+export type GlobalStatus = 'healthy' | 'degraded' | 'unhealthy' | 'offline';
 
 /**
  * Health Query Hook
@@ -36,7 +36,12 @@ export function useHealthQuery() {
  * |--------------------------------------------|------------------|
  * | status = "healthy"                         | "healthy"        |
  * | status = "degraded"                        | "degraded"       |
- * | status = "unhealthy"                       | "degraded"       |
+ * | status = "unhealthy"                       | "unhealthy" (red)|
+ *
+ * "unhealthy" used to collapse into "degraded" (yellow). Since 2026-11 it is
+ * red: the backend only reports unhealthy for real outages (database down,
+ * AI Runtime unreachable, GPU missing), and a yellow dot hid the 24 Aug GPU
+ * outage in plain sight.
  * | API call fails                             | "offline"        |
  */
 export function deriveGlobalStatus(
@@ -51,7 +56,10 @@ export function deriveGlobalStatus(
     return 'healthy';
   }
 
-  // Both 'degraded' and 'unhealthy' from backend show as 'degraded' in UI
+  if (data.status === 'unhealthy') {
+    return 'unhealthy';
+  }
+
   return 'degraded';
 }
 
@@ -64,6 +72,8 @@ export function getGlobalStatusDisplay(status: GlobalStatus): string {
       return 'All Systems OK';
     case 'degraded':
       return 'Degraded';
+    case 'unhealthy':
+      return 'System Fault';
     case 'offline':
       return 'Offline';
   }

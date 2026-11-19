@@ -216,6 +216,36 @@ class HealthService:
                 error=f"Redis error: {type(e).__name__}",
             )
 
+    # Upper bound for the live /health probe of the built-in AI runtime.
+    AI_RUNTIME_PROBE_TIMEOUT_SECONDS = 5.0
+
+    async def _probe_ai_runtime(
+        self, timeout_seconds: float
+    ) -> tuple[bool, dict[str, Any], str | None]:
+        """GET the unified runtime's /health?verbose=true.
+
+        Returns (reachable, body, error). Never raises. Any HTTP response with
+        a JSON body counts as reachable (the runtime answers 503 while it is
+        still initialising); connection errors and timeouts do not.
+        """
+        url = f"{self._settings.unified_runtime_url}/health"
+        try:
+            async with httpx.AsyncClient(timeout=timeout_seconds) as client:
+                response = await client.get(url, params={"verbose": "true"})
+            try:
+                body = response.json()
+            except ValueError:
+                return False, {}, f"HTTP {response.status_code} with non-JSON body"
+            if response.status_code >= 500 and "status" not in body:
+                body = {"status": "unhealthy", "reasons": [str(body.get("detail", body))]}
+            return True, body if isinstance(body, dict) else {}, None
+        except httpx.TimeoutException:
+            return False, {}, f"no response within {timeout_seconds:.0f}s"
+        except httpx.HTTPError as e:
+            return False, {}, f"{type(e).__name__}: {e}" if str(e) else type(e).__name__
+        except Exception as e:  # never let the probe break health checks
+            return False, {}, f"{type(e).__name__}: {e}"
+
     async def check_ai_runtime(
         self,
         timeout_seconds: float = 10.0,
@@ -246,45 +276,110 @@ class HealthService:
         start_time = time.perf_counter()
 
         try:
-            # Check registered runtimes from internal registry
-            if not _registered_runtimes:
-                return ComponentHealth(
-                    status="unhealthy",
-                    error="No AI Runtimes registered",
-                )
-
-            latency_ms = int((time.perf_counter() - start_time) * 1000)
-
-            # Get first registered runtime (usually only one)
-            runtime = next(iter(_registered_runtimes.values()))
+            # First registered runtime (usually only one). The registry is in
+            # memory: right after this backend restarts it is empty until the
+            # runtime's next capability publish (<= ~60 s). An empty registry
+            # alone is therefore not an outage; the live probe below decides.
+            runtime = next(iter(_registered_runtimes.values()), None)
 
             # Extract model IDs from runtime
             models_loaded: list[str] = []
-            for model in runtime.models:
+            for model in (runtime.models if runtime else []):
                 model_id = model.get("model_id")
                 if model_id:
                     models_loaded.append(model_id)
 
+            # Live probe. The registry only holds the last pushed state, so a
+            # runtime that crashed (or never restarted after a reboot) would
+            # otherwise stay "healthy" here, and the runtime's own push never
+            # considered the GPU at all.
+            probe_ok, probe, probe_error = await self._probe_ai_runtime(
+                min(timeout_seconds, self.AI_RUNTIME_PROBE_TIMEOUT_SECONDS)
+            )
+            latency_ms = int((time.perf_counter() - start_time) * 1000)
+
+            if not probe_ok:
+                details = AIRuntimeDetails(
+                    runtime_id=runtime.runtime_id if runtime else None,
+                    models_loaded=models_loaded or None,
+                    reachable=False,
+                ).model_dump(exclude_none=True)
+                return ComponentHealth(
+                    status="unhealthy",
+                    latency_ms=latency_ms,
+                    error=f"AI Runtime unreachable: {probe_error}"
+                    + ("" if runtime else " (and not registered)"),
+                    details=details,
+                )
+
+            if runtime is None:
+                # Not registered yet: take what we can from the probe.
+                models_loaded = [
+                    m["model_id"]
+                    for m in (probe.get("models") or [])
+                    if isinstance(m, dict) and m.get("model_id") and m.get("state") == "ready"
+                ]
+
+            gpu_available = probe.get("gpu_available")
+            # Runtimes older than the gpu_expected field are GPU deployments.
+            gpu_expected = probe.get("gpu_expected", True)
+            reasons = [r for r in (probe.get("reasons") or []) if isinstance(r, str)]
+            models_on_cpu = [
+                f"{m.get('model_id')}:{m.get('version')}"
+                for m in (probe.get("models") or [])
+                if isinstance(m, dict) and m.get("device") == "cpu"
+            ] if gpu_expected else []
+
             details = AIRuntimeDetails(
-                runtime_id=runtime.runtime_id,
-                models_loaded=models_loaded if models_loaded else None,
-                gpu_available=None,  # Not tracked in registry yet
-                hardware_type=None,
+                runtime_id=runtime.runtime_id if runtime else probe.get("runtime_id"),
+                models_loaded=models_loaded or None,
+                gpu_available=gpu_available,
+                hardware_type=(
+                    "cuda" if gpu_available else ("cpu" if gpu_available is False else None)
+                ),
+                reachable=True,
+                gpu_expected=gpu_expected,
+                gpu_reason=probe.get("gpu_reason"),
+                reasons=reasons or None,
+                models_on_cpu=models_on_cpu or None,
             ).model_dump(exclude_none=True)
 
-            # Determine status based on runtime health
+            # Worst of: GPU state, live probe status, pushed registry status.
             status: HealthStatus = "healthy"
             error: str | None = None
 
-            if runtime.runtime_health == "unhealthy":
+            if gpu_expected and gpu_available is False:
                 status = "unhealthy"
-                error = "AI Runtime unhealthy"
-            elif runtime.runtime_health == "degraded":
+                error = (
+                    "GPU unavailable - AI inference is not running on the GPU"
+                    + (f": {probe['gpu_reason']}" if probe.get("gpu_reason") else "")
+                )
+            elif probe.get("status") == "unhealthy":
+                status = "unhealthy"
+                error = "AI Runtime unhealthy" + (f": {'; '.join(reasons)}" if reasons else "")
+            elif models_on_cpu:
                 status = "degraded"
-                error = "AI Runtime degraded"
-            elif runtime.runtime_health == "unknown":
+                error = f"Models running on CPU: {', '.join(models_on_cpu)}"
+            elif probe.get("status") == "degraded":
                 status = "degraded"
-                error = "AI Runtime health unknown"
+                error = "AI Runtime degraded" + (f": {'; '.join(reasons)}" if reasons else "")
+
+            if status == "healthy" and runtime is None:
+                status = "degraded"
+                error = (
+                    "AI Runtime not registered yet (live probe OK; it "
+                    "re-registers within ~60 s of a backend restart)"
+                )
+            elif status == "healthy":
+                if runtime.runtime_health == "unhealthy":
+                    status = "unhealthy"
+                    error = "AI Runtime unhealthy"
+                elif runtime.runtime_health == "degraded":
+                    status = "degraded"
+                    error = "AI Runtime degraded"
+                elif runtime.runtime_health == "unknown":
+                    status = "degraded"
+                    error = "AI Runtime health unknown"
 
             return ComponentHealth(
                 status=status,

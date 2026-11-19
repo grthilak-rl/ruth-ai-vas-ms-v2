@@ -1,7 +1,8 @@
 import { useMemo } from 'react';
-import type { Device, HealthResponse, ModelStatusInfo } from '../../state';
+import type { AIRuntimeHealthDetails, Device, HealthResponse, ModelStatusInfo } from '../../state';
 import { formatUptime } from '../../state';
 import { ServiceStatusCard, type ServiceHealthStatus } from './ServiceStatusCard';
+import { getAIRuntimeAlert } from './aiRuntimeStatus';
 import { MonitoringCoverage } from './MonitoringCoverage';
 import { AutoResumeCard } from './AutoResumeCard';
 import { FootageRetentionCard } from './FootageRetentionCard';
@@ -110,6 +111,11 @@ export function SystemHealthView({
     [models]
   );
 
+  const aiRuntimeAlert = useMemo(
+    () => getAIRuntimeAlert(health.components?.ai_runtime),
+    [health.components]
+  );
+
   const systemStatusLabel = getSystemStatusLabel(systemStatus);
   const systemStatusIcon = getSystemStatusIcon(systemStatus);
   const uptimeDisplay = formatUptime(health.uptime_seconds);
@@ -146,6 +152,20 @@ export function SystemHealthView({
           )}
         </div>
       </div>
+
+      {/* AI detection down: GPU missing or runtime unreachable. Its own banner,
+          first on the page, because inference silently degrading to CPU (or
+          stopping) hid the 24 Aug GPU outage. */}
+      {aiRuntimeAlert && (
+        <div
+          className="system-health-view__banner system-health-view__banner--offline system-health-view__banner--ai"
+          role="alert"
+        >
+          <p>
+            <strong>{aiRuntimeAlert.title}</strong> {aiRuntimeAlert.detail}
+          </p>
+        </div>
+      )}
 
       {/* Warning Banner (if degraded/offline) */}
       {systemStatus !== 'healthy' && (
@@ -184,7 +204,11 @@ export function SystemHealthView({
           <ServiceStatusCard
             serviceName="AI Runtime"
             status={serviceStatuses.aiRuntime}
-            description={getAIRuntimeDescription(serviceStatuses.aiRuntime, builtInCounts)}
+            description={getAIRuntimeDescription(
+              serviceStatuses.aiRuntime,
+              builtInCounts,
+              health.components?.ai_runtime?.details as AIRuntimeHealthDetails | undefined
+            )}
             lastUpdated={health.timestamp}
             expandable={true}
             serviceType="ai_runtime"
@@ -328,9 +352,13 @@ function getBackendDescription(status: ServiceHealthStatus): string {
 
 function getAIRuntimeDescription(
   status: ServiceHealthStatus,
-  counts: { healthy: number; total: number }
+  counts: { healthy: number; total: number },
+  details?: AIRuntimeHealthDetails
 ): string {
   if (status === 'offline') {
+    if (details?.gpu_available === false && details.gpu_expected !== false && details.reachable !== false) {
+      return 'GPU not available. Detection is unavailable.';
+    }
     return 'AI Runtime is not responding. Detection is unavailable.';
   }
   if (status === 'degraded') {

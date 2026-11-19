@@ -228,10 +228,26 @@ function getDetailItems(
               value: aiDetails.models_loaded.join(', '),
             });
           }
+          if (aiDetails.reachable === false) {
+            items.push({ label: 'Reachable', value: 'No - runtime not responding' });
+          }
           if (aiDetails.gpu_available != null) {
             items.push({
               label: 'GPU Available',
-              value: aiDetails.gpu_available ? 'Yes' : 'No',
+              value: aiDetails.gpu_available
+                ? 'Yes'
+                : aiDetails.gpu_expected === false
+                  ? 'No (CPU deployment)'
+                  : 'NO - GPU expected but missing',
+            });
+          }
+          if (aiDetails.gpu_reason && aiDetails.gpu_available === false) {
+            items.push({ label: 'GPU Problem', value: aiDetails.gpu_reason });
+          }
+          if (aiDetails.models_on_cpu?.length) {
+            items.push({
+              label: 'Models on CPU',
+              value: aiDetails.models_on_cpu.join(', '),
             });
           }
           if (aiDetails.hardware_type) {
