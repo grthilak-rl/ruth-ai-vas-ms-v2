@@ -20,6 +20,12 @@ The rules that matter are the ones about *not* acting:
 What remains — a camera whose video is live, whose dependencies are up,
 and which still will not start — is a real per-camera fault, and after
 two of those it is parked and retried on a capped backoff.
+
+A resume starts only installed models. A saved model that is not installed
+(a retired built-in, say) is left out, named in the intent's ``last_error``
+and reported as unavailable (System Health, the tile, the top-nav alert);
+the saved list itself is never changed. If none is installed, the resume
+fails and counts like any other failure.
 """
 
 from __future__ import annotations
@@ -42,6 +48,7 @@ from app.models import (
     StreamSession,
     StreamState,
 )
+from app.services.model_availability import unavailable_models
 from app.services.inference_intent import (
     InferenceIntentService,
     is_parked,
@@ -87,6 +94,8 @@ class ReconcileOutcome:
         self.parked: list[str] = []
         self.suspended: list[str] = []
         self.unsuspended: list[str] = []
+        #: "camera: model" for saved models left out because not installed.
+        self.left_out: list[str] = []
         self.dependency_error: Optional[str] = None
 
     def as_dict(self) -> dict[str, Any]:
@@ -100,6 +109,7 @@ class ReconcileOutcome:
             "parked": self.parked,
             "suspended": self.suspended,
             "unsuspended": self.unsuspended,
+            "left_out": self.left_out,
             "dependency_error": self.dependency_error,
         }
 
@@ -288,10 +298,15 @@ class InferenceReconciler:
 
                 if intent.device_id in running:
                     # Healthy. Clear any failure history so a camera that
-                    # recovered does not stay parked.
+                    # recovered does not stay parked; keep naming saved
+                    # models that are not installed while they still are not.
+                    missing = await unavailable_models(_model_ids(intent))
+                    note = _left_out_note(missing)
                     if intent.consecutive_failures:
                         intent.consecutive_failures = 0
-                        intent.last_error = None
+                    if intent.last_error != note:
+                        intent.last_error = note
+                    out.left_out += [f"{name}: {m}" for m in missing]
                     continue
 
                 # Just-changed intent: the picker writes intent then starts
@@ -321,16 +336,21 @@ class InferenceReconciler:
                     out.parked.append(name)
                     continue
 
-                error = await self._resume(db, intent, device)
+                missing = await unavailable_models(_model_ids(intent))
+                error = await self._resume(db, intent, device, skip=set(missing))
                 await intents_service.record_attempt(intent, error=error)
                 if error is None:
                     out.resumed.append(name)
                     self._resume_log.append((now, name))
+                    if missing:
+                        intent.last_error = _left_out_note(missing)
+                        out.left_out += [f"{name}: {m}" for m in missing]
                     logger.info(
                         "Resumed inference automatically",
                         device=name,
                         device_id=str(intent.device_id),
-                        models=[e.get("model_id") for e in (intent.models or [])],
+                        models=[m for m in _model_ids(intent) if m not in missing],
+                        left_out=sorted(missing),
                     )
                 else:
                     out.failed.append(name)
@@ -401,12 +421,20 @@ class InferenceReconciler:
             )
 
     async def _resume(
-        self, db: AsyncSession, intent: DeviceInferenceIntent, device: Device
+        self,
+        db: AsyncSession,
+        intent: DeviceInferenceIntent,
+        device: Device,
+        skip: frozenset[str] | set[str] = frozenset(),
     ) -> Optional[str]:
-        """Start the desired models. Returns an error string, or None."""
-        entries = list(intent.models or [])
-        if not entries:
+        """Start the desired models, except ``skip`` (not installed).
+        Returns an error string, or None."""
+        saved = list(intent.models or [])
+        if not saved:
             return "desired active but no models recorded"
+        entries = [e for e in saved if e.get("model_id") not in skip]
+        if not entries:
+            return "none of the saved models is installed: " + ", ".join(sorted(skip))
         try:
             stream_service = self._stream_service_for(db)
             first = entries[0]
@@ -438,6 +466,17 @@ class InferenceReconciler:
             {"camera": name, "at": t.isoformat()}
             for t, name in sorted(self._resume_log, reverse=True)
         ]
+
+
+def _model_ids(intent: DeviceInferenceIntent) -> list[str]:
+    return [e.get("model_id") for e in (intent.models or []) if e.get("model_id")]
+
+
+def _left_out_note(missing: dict) -> Optional[str]:
+    """The intent's last_error for saved models that are not installed."""
+    if not missing:
+        return None
+    return "Not started, not installed: " + "; ".join(e.message for e in missing.values())
 
 
 _reconciler: Optional[InferenceReconciler] = None

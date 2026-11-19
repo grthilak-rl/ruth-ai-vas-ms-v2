@@ -60,6 +60,7 @@ from app.services.violation_severity import resolve_severity
 from app.integrations.unified_runtime.router import RuntimeRouter
 from app.integrations.vas import VASClient
 
+from app.services.camera_model_status import tracker as model_status_tracker
 logger = get_logger(__name__)
 
 
@@ -670,19 +671,30 @@ class InferenceLoopService:
                 # actually delivering rather than a number we guessed.
                 async with self._slots_for(model_id):
                     inference_started = asyncio.get_event_loop().time()
-                    result = await self._runtime_router.submit_inference(
-                        model_id=model_id,
-                        stream_id=UUID(vas_stream_id) if vas_stream_id else session_id,
-                        device_id=device_id,
-                        model_version=model_version,
-                        timestamp=datetime.now(timezone.utc),
-                        priority=5,
-                        metadata={"session_id": str(session_id)},
-                        config=self._request_config(model_id, device_id, model_config),
-                    )
+                    try:
+                        result = await self._runtime_router.submit_inference(
+                            model_id=model_id,
+                            stream_id=UUID(vas_stream_id) if vas_stream_id else session_id,
+                            device_id=device_id,
+                            model_version=model_version,
+                            timestamp=datetime.now(timezone.utc),
+                            priority=5,
+                            metadata={"session_id": str(session_id)},
+                            config=self._request_config(model_id, device_id, model_config),
+                        )
+                    except Exception as e:
+                        model_status_tracker.record_failure(device_id, model_id, str(e) or type(e).__name__)
+                        raise
                     self._budget.record_latency(
                         model_id,
                         asyncio.get_event_loop().time() - inference_started,
+                    )
+
+                if result.get("status") == "success" and result.get("result"):
+                    model_status_tracker.record_success(device_id, model_id)
+                else:
+                    model_status_tracker.record_failure(
+                        device_id, model_id, str(result.get("error") or "no usable result")
                     )
 
                 # Check for violations with debouncing
@@ -1381,9 +1393,14 @@ class InferenceLoopService:
                 raise
             except Exception as e:
                 outcomes[i] = e
+                model_status_tracker.record_failure(device_id, model_id, str(e) or type(e).__name__)
                 continue
             published = self._publish_model_result(device_id, model_id, model_id == primary, result)
             outcomes[i] = published
+            if published:
+                model_status_tracker.record_success(device_id, model_id)
+            else:
+                model_status_tracker.record_failure(device_id, model_id, str(result.get("error") or "no usable result"))
             if published:
                 rule_tasks.append((
                     model_id,

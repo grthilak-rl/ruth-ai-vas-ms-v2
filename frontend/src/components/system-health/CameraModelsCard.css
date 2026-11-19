@@ -1,0 +1,44 @@
+/* Camera models: quiet when every model works, loud when one does not. */
+.camera-models {
+  padding: 0.875rem 1.125rem;
+  margin-bottom: 1.25rem;
+  background-color: #fff;
+  border: 1px solid #e0e0e0;
+  border-left-width: 4px;
+  border-radius: 8px;
+}
+
+.camera-models--ok { border-left-color: #1e7e34; }
+.camera-models--warn {
+  background-color: #fff8f7;
+  border-color: #f5c6c2;
+  border-left-color: #d93025;
+}
+
+.camera-models__headline {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem 1rem;
+  align-items: baseline;
+  justify-content: space-between;
+}
+
+.camera-models__label { font-size: 0.875rem; font-weight: 600; color: #1a1a1a; }
+.camera-models__summary { font-size: 0.875rem; color: #555; }
+.camera-models--warn .camera-models__summary { color: #b3261e; font-weight: 500; }
+
+.camera-models__error {
+  margin: 0.625rem 0 0 0;
+  font-size: 0.8125rem;
+  color: #8a6d00;
+}
+
+.camera-models__list {
+  margin: 0.75rem 0 0 0;
+  padding: 0.75rem 0 0 1.25rem;
+  border-top: 1px solid #f5c6c2;
+  font-size: 0.8125rem;
+  line-height: 1.6;
+  color: #333;
+  overflow-wrap: anywhere;
+}

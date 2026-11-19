@@ -210,13 +210,17 @@ async def _run_pipeline(
         sampling_fps=sampling_fps,
     )
 
-    # Step 3: per-frame inference via the unified runtime.
+    # Step 3: per-frame inference on the runtime that serves the model: the
+    # store runtime for store models, the unified runtime otherwise (same
+    # routing as live inference and /ai/inference).
+    from app.api.v1.ai import runtime_url_for
+
     stream_id = uuid.uuid5(_ANALYSIS_STREAM_NAMESPACE, str(analysis_id))
     timeline: list[dict[str, float]] = []
     frames_skipped = 0
     started_at = time.monotonic()
 
-    async with UnifiedRuntimeClient() as runtime:
+    async with UnifiedRuntimeClient(runtime_url=runtime_url_for(model_id)) as runtime:
         for ts_seconds, jpeg_bytes in frames:
             try:
                 response = await runtime.submit_inference(
@@ -291,6 +295,13 @@ async def _run_pipeline(
 # ---------------------------------------------------------------------------
 # Result-shape adapter.
 # ---------------------------------------------------------------------------
+
+
+#: Models whose results carry a fill level, the only thing this pipeline
+#: summarises. Submitting any other model is refused (422
+#: model_not_supported) rather than run to a certain "no fill data" failure;
+#: detection models are BL-38.
+FILL_LEVEL_MODELS = frozenset({"tank_overflow_monitoring"})
 
 
 def _extract_fill_percentage(model_id: str, result: dict[str, Any]) -> float | None:

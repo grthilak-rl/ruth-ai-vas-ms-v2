@@ -1,0 +1,58 @@
+/* Top-nav alert: a camera model is failing or not installed. */
+.camera-models-alert {
+  position: relative;
+  flex-shrink: 0;
+}
+
+.camera-models-alert__button {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.375rem;
+  padding: 0.375rem 0.75rem;
+  border: 1px solid #f5c6c2;
+  border-radius: 4px;
+  background-color: #fdecea;
+  color: #b3261e;
+  font-size: 0.875rem;
+  font-weight: 600;
+  white-space: nowrap;
+  cursor: pointer;
+}
+
+.camera-models-alert__button:hover { background-color: #fadbd7; }
+.camera-models-alert__button:focus-visible {
+  outline: 2px solid #b3261e;
+  outline-offset: 2px;
+}
+
+.camera-models-alert__panel {
+  position: absolute;
+  right: 0;
+  top: calc(100% + 0.375rem);
+  z-index: 1000;
+  width: min(26rem, calc(100vw - 2rem));
+  padding: 0.75rem 1rem;
+  background: #fff;
+  border: 1px solid #e0e0e0;
+  border-radius: 6px;
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.12);
+}
+
+.camera-models-alert__list {
+  margin: 0;
+  padding-left: 1.125rem;
+  font-size: 0.8125rem;
+  line-height: 1.6;
+  color: #333;
+  overflow-wrap: anywhere;
+}
+
+.camera-models-alert__hint {
+  margin: 0.5rem 0 0;
+  font-size: 0.75rem;
+  color: #666;
+}
+
+@media (max-width: 640px) {
+  .camera-models-alert__button { font-size: 0.75rem; padding: 0.25rem 0.5rem; }
+}

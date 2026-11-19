@@ -2,6 +2,7 @@ import { NavLink } from 'react-router-dom';
 import { useIsSupervisor } from '../../state';
 import { useBrand } from '../../state/brand/brand';
 import { SystemStatusIndicator } from './SystemStatusIndicator';
+import { CameraModelsAlert } from './CameraModelsAlert';
 import { AlertsBadge } from './AlertsBadge';
 import './TopNav.css';
 
@@ -121,6 +122,7 @@ export function TopNav() {
       </nav>
 
       <div className="top-nav__status">
+        <CameraModelsAlert />
         <SystemStatusIndicator />
       </div>
     </header>

@@ -11,10 +11,16 @@ existing reader of a session (devices list, /detections/latest, analytics,
 
 Legacy sessions (models IS NULL, started via POST /start-inference) are
 converted on their first edit here: their single model becomes models[0].
+
+The saved list (intent) can hold models the session does not: a resume
+starts only installed models and leaves the rest saved, untouched. Operator
+edits carry those entries forward, so changing another model never drops
+them silently; removing one deletes it from the saved list.
 """
 
 import contextlib
 from dataclasses import dataclass
+from datetime import datetime, timezone
 from typing import Any
 from uuid import UUID
 
@@ -94,12 +100,47 @@ class SessionModelsService:
         if entries:
             await intents.set_active(
                 device_id,
-                entries,
+                await self._with_saved_unavailable(intents, device_id, entries),
                 inference_fps=getattr(session, "inference_fps", None),
                 confidence_threshold=getattr(session, "confidence_threshold", None),
             )
         else:
             await intents.set_off(device_id)
+
+    async def _with_saved_unavailable(
+        self, intents, device_id: UUID, entries: list[dict[str, Any]]
+    ) -> list[dict[str, Any]]:
+        """``entries`` plus the saved entries a resume left out because they
+        are not installed (kept until the operator removes them)."""
+        from app.services.model_availability import unavailable_models
+
+        intent = await intents.get(device_id)
+        have = {e["model_id"] for e in entries}
+        left = [dict(e) for e in (intent.models or []) if e.get("model_id") not in have] if intent else []
+        if not left:
+            return entries
+        missing = await unavailable_models(e["model_id"] for e in left)
+        return entries + [e for e in left if e["model_id"] in missing]
+
+    async def _remove_saved(self, device_id: UUID, model_id: str) -> bool:
+        """Delete a model that is only in the saved list. False if it is not there."""
+        from app.services.inference_intent import InferenceIntentService
+
+        intents = InferenceIntentService(self._db)
+        intent = await intents.get(device_id)
+        saved = list(intent.models or []) if intent else []
+        if not any(e.get("model_id") == model_id for e in saved):
+            return False
+        remaining = [dict(e) for e in saved if e.get("model_id") != model_id]
+        if remaining:
+            intent.models = remaining
+            intent.updated_at = datetime.now(timezone.utc)
+            intent.updated_by = "operator"
+        else:
+            await intents.set_off(device_id)
+        await self._db.flush()
+        logger.info("Removed saved model", device_id=str(device_id), model_id=model_id)
+        return True
 
     def _write(self, session: StreamSession, entries: list[dict[str, Any]]) -> None:
         """Store the list, mirror models[0] into the legacy columns, bump revision."""
@@ -190,6 +231,10 @@ class SessionModelsService:
         session = await self._locked_active_session(device_id)
         entries = session_entries(session)
         if session is None or not any(e["model_id"] == model_id for e in entries):
+            # Not running, but possibly saved (a resume left it out because it
+            # is not installed): removing it deletes it from the saved list.
+            if await self._remove_saved(device_id, model_id):
+                return session
             raise SessionModelError(404, "model_not_active", f"{model_id} is not running on this camera")
         remaining = [e for e in entries if e["model_id"] != model_id]
         if not remaining:

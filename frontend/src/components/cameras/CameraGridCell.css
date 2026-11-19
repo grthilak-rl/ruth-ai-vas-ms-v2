@@ -212,3 +212,24 @@
   background-color: #b3261e;
   font-weight: 600;
 }
+
+/* Models on this camera that are failing or not installed. */
+.camera-grid-cell__model-problems {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.25rem;
+  padding: 0.25rem 0.75rem 0;
+}
+
+.camera-grid-cell__model-problem {
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  padding: 0.125rem 0.5rem;
+  border-radius: 0.25rem;
+  background: #fee2e2;
+  color: #b91c1c;
+  font-size: 0.7rem;
+  font-weight: 600;
+}

@@ -5,6 +5,7 @@ import { ServiceStatusCard, type ServiceHealthStatus } from './ServiceStatusCard
 import { getAIRuntimeAlert } from './aiRuntimeStatus';
 import { MonitoringCoverage } from './MonitoringCoverage';
 import { AutoResumeCard } from './AutoResumeCard';
+import { CameraModelsCard } from './CameraModelsCard';
 import { FootageRetentionCard } from './FootageRetentionCard';
 import { CameraFeeds } from './CameraFeeds';
 import {
@@ -185,6 +186,7 @@ export function SystemHealthView({
       {/* Feeds first: a camera with no video can't be monitored at all. */}
       <CameraFeeds devices={devices} isLoading={devicesLoading} />
       <MonitoringCoverage devices={devices} isLoading={devicesLoading} />
+      <CameraModelsCard component={health.components?.camera_models} />
       <AutoResumeCard />
       <FootageRetentionCard />
 

@@ -5,6 +5,44 @@ investigation. Newest first.
 
 ---
 
+## BL-39 · System Health header reads "healthy" while overall health is degraded
+
+**Status:** backlog · **Raised:** 2026-11-20 (camera models release)
+
+`SystemHealthView` derives its header from `health.status`, but only
+`unhealthy` changes it: `degraded` falls through to "healthy". So a
+degraded component, such as the new "Camera models" (a model failing or not
+installed) or an unreachable model store runtime, leaves the page header
+green while its own card is red. The top-nav status indicator does show
+degraded.
+
+- **Fix:** map `degraded` to the header's degraded state (and banner) in
+  `components/system-health/SystemHealthView.tsx` (`systemStatus` memo);
+  add a test for each overall status.
+
+---
+
+## BL-38 · Bookmark analyses for detection (store) models
+
+**Status:** backlog · **Raised:** 2026-11-20
+
+Bookmark analyses summarise tank fill levels only (`_extract_fill_percentage`,
+threshold crossings, fill stats). The one model that reported a fill level,
+`tank_overflow_monitoring`, is retired, so no installed model can be
+analysed today. Since 2026-11-20 submitting any other model is refused with
+422 `model_not_supported` (`FILL_LEVEL_MODELS` in
+`bookmark_analysis_worker.py`), rather than running to "no fill data".
+
+- **Already in place:** the installed-model check, and the worker routes
+  each model to its runtime (store models to the store runtime).
+- **Needed for detection models:** a summary of per-frame violations (a
+  timeline of violation intervals, counts per type, peak frames), a result
+  view in the frontend (today tank-only), and a form that offers store
+  models with their zones (`NewAnalysisForm` allows only the tank model).
+- No analysis has ever been run (both tables empty on 2026-11-19).
+
+---
+
 ## BL-37 · Flaky test: multi_model g8 (frames_processed counter)
 
 **Status:** backlog · **Raised:** 2026-11-19 (geofence release tests)

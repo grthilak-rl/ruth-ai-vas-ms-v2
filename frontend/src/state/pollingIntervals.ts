@@ -30,10 +30,18 @@ export const POLLING_INTERVALS = {
   ALERTS_BADGE: 30 * 1000,
 
   /**
-   * Model status polling interval.
-   * 60s — once models are loaded by the runtime they stay loaded.
+   * Model status polling interval (the installed-model list).
+   * 30s — the Cameras picker reads this list, so a deploy that retires or
+   * installs a model reaches an open tab within half a minute.
    */
-  MODELS_STATUS: 60 * 1000,
+  MODELS_STATUS: 30 * 1000,
+
+  /**
+   * Per-camera model list polling interval (GET /devices/{id}/models).
+   * 30s — carries each model's status, so a model failing for 60 s shows
+   * on the tile within 90 s at most.
+   */
+  CAMERA_MODELS: 30 * 1000,
 
   /**
    * Live detection overlay polling interval.

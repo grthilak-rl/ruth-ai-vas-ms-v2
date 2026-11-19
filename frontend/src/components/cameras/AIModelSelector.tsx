@@ -38,6 +38,11 @@ export interface AIModel {
   pending?: boolean;
   /** Why the model can't be enabled here (shown under its row). */
   disabledReason?: string;
+  /** Runs or is saved on the camera but is not installed: the row offers
+   *  Remove instead of a toggle. */
+  removable?: boolean;
+  /** A running model that is failing: why (shown under its row). */
+  problem?: string;
 }
 
 interface AIModelSelectorProps {
@@ -218,7 +223,9 @@ export function AIModelSelector({
                     key={model.id}
                     className={`ai-model-selector__item ${
                       isDisabled ? 'ai-model-selector__item--disabled' : ''
-                    }${model.disabledReason ? ' ai-model-selector__item--with-reason' : ''}`}
+                    }${model.disabledReason || model.problem ? ' ai-model-selector__item--with-reason' : ''}${
+                      model.removable ? ' ai-model-selector__item--removable' : ''
+                    }`}
                   >
                     <label className="ai-model-selector__item-content">
                       <input
@@ -241,6 +248,22 @@ export function AIModelSelector({
                     </label>
                     {model.disabledReason && (
                       <p className="ai-model-selector__item-reason">{model.disabledReason}</p>
+                    )}
+                    {model.problem && (
+                      <p className="ai-model-selector__item-reason ai-model-selector__item-reason--problem">
+                        {model.problem}
+                      </p>
+                    )}
+                    {model.removable && (
+                      <button
+                        type="button"
+                        className="ai-model-selector__remove-btn"
+                        onClick={() => onModelToggle(model.id, false)}
+                        disabled={busy}
+                        aria-label={`Remove ${model.name}`}
+                      >
+                        Remove
+                      </button>
                     )}
                     {model.requiresGeofencing && !isDisabled && (
                       <button

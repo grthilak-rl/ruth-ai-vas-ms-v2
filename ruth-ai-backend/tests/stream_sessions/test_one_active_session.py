@@ -50,6 +50,23 @@ class SlowVAS:
         return SimpleNamespace(v2_stream_id=str(uuid.uuid4()))
 
 
+@pytest.fixture(autouse=True)
+def _builtins_installed(monkeypatch):
+    """start-inference refuses models that are not installed. These tests
+    start built-ins, so run a deployment with them on the unified runtime."""
+    from app.services import model_availability as ma
+
+    async def catalog():
+        return [{"model_id": m} for m in ("fall_detection", "ppe_detection")]
+
+    monkeypatch.setattr(ma, "enabled_store_models", lambda: {})
+    monkeypatch.setattr(ma, "get_unified_runtime_config", lambda: SimpleNamespace(unified_runtime_in_use=True))
+    monkeypatch.setattr(ma, "_refresh_catalog", catalog)
+    ma._cache.update(models=None, expires_at=0.0)
+    yield
+    ma._cache.update(models=None, expires_at=0.0)
+
+
 @pytest.fixture
 async def session_factory():
     engine = create_async_engine(DATABASE_URL)

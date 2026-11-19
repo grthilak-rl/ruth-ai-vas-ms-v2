@@ -11,9 +11,11 @@ import {
   enabledModelIdsFor,
   executeToggle,
   modelDisplayName,
+  modelProblemsFor,
   pickerModels,
   planToggle,
   ppeOverlapWarning,
+  savedModelIdsFor,
   toAIModel,
   type ToggleAction,
 } from '../pickerState';
@@ -247,5 +249,98 @@ describe('uploaded (model store) models in the picker', () => {
     expect(ppeOverlapWarning(available, ['ppe_detection', 'hard_hat', 'safety_vest'])).toBe(
       'PPE Detection and Hard Hat, Safety Vest both report missing PPE: each missing item will raise two violations.'
     );
+  });
+});
+
+
+describe('models that are not installed or not working', () => {
+  // 2026-11-19: a tab opened before the deploy added the retired geo_fencing;
+  // the picker had no row for it, so it could be neither seen nor removed.
+  const installed = [
+    { ...status('gloves_2'), display_name: 'Gloves 2', source: 'store' },
+    { ...status('fall_pose'), display_name: 'Fall Detection', source: 'store' },
+    { ...status('geofence'), display_name: 'Geo-Fencing', source: 'store' },
+  ] as unknown as ModelStatusInfo[];
+  const ZONE = { zones: [{ id: 'zone_1' }] };
+
+  function withStatus(
+    entries: Array<{ model_id: string; status?: 'running' | 'failing' | 'unavailable'; message?: string; replacement?: string }>,
+    notStarted: Array<{ model_id: string; message: string }> = []
+  ): CameraModelsResponse {
+    const r = modelsResponse(entries.map((e) => ({ model_id: e.model_id, config: e.model_id.startsWith('geo') ? ZONE : null })));
+    r.models = r.models.map((m, i) => ({
+      ...m,
+      status: entries[i].status ?? 'running',
+      message: entries[i].message ?? null,
+      replacement: entries[i].replacement ?? null,
+    }));
+    r.not_started = notStarted.map((e) => ({
+      model_id: e.model_id, model_version: null, config: null, fps_override: null, target_fps: 2,
+      status: 'unavailable', reason: 'model_retired', message: e.message,
+    }));
+    return r;
+  }
+
+  it('a running retired model gets an unavailable row with Remove', () => {
+    const server = withStatus([
+      { model_id: 'gloves_2' },
+      { model_id: 'geo_fencing', status: 'unavailable', message: 'geo_fencing is retired; use geofence', replacement: 'geofence' },
+    ]);
+    const rows = pickerModels(installed, ['gloves_2', 'geo_fencing'], null, server);
+    expect(rows.map((r) => r.id)).toEqual(['gloves_2', 'fall_pose', 'geofence', 'geo_fencing']);
+    expect(rows.at(-1)).toEqual({
+      id: 'geo_fencing', name: 'Geo Fencing', state: 'unavailable', removable: true, pending: false,
+      disabledReason: 'geo_fencing is retired; use geofence',
+    });
+  });
+
+  it('before the server says why, a running model nobody lists is still shown', () => {
+    const rows = pickerModels(installed, ['gloves_2', 'geo_fencing']);
+    expect(rows.find((r) => r.id === 'geo_fencing')).toMatchObject({
+      state: 'unavailable', removable: true, disabledReason: 'geo_fencing is not available on this system',
+    });
+  });
+
+  it('a saved model that was not started gets a row too, and Remove targets it', () => {
+    const server = withStatus([{ model_id: 'gloves_2' }], [{ model_id: 'ppe_detection', message: 'ppe_detection is retired' }]);
+    const rows = pickerModels(installed, ['gloves_2'], null, server);
+    expect(rows.find((r) => r.id === 'ppe_detection')).toMatchObject({ state: 'unavailable', removable: true });
+    const s = streaming({ ai_enabled: true, models: ['gloves_2'] });
+    expect(savedModelIdsFor(s, server)).toEqual(['gloves_2', 'ppe_detection']);
+    expect(planToggle(false, 'ppe_detection', savedModelIdsFor(s, server))).toEqual({ kind: 'remove' });
+  });
+
+  it('a failing model keeps its row, marked degraded, with the reason', () => {
+    const server = withStatus([{ model_id: 'fall_pose', status: 'failing', message: 'No result for 2 min 0 s: timeout' }]);
+    const row = pickerModels(installed, ['fall_pose'], null, server).find((r) => r.id === 'fall_pose');
+    expect(row).toMatchObject({ state: 'degraded', problem: 'No result for 2 min 0 s: timeout' });
+    expect(row?.removable).toBeUndefined();
+  });
+
+  it('rows are unchanged when every model runs', () => {
+    const server = withStatus([{ model_id: 'gloves_2' }]);
+    expect(pickerModels(installed, ['gloves_2'], null, server)).toEqual(pickerModels(installed, ['gloves_2']));
+  });
+
+  it('tile chips: one per failing or unavailable model, with the server message', () => {
+    const server = withStatus(
+      [
+        { model_id: 'gloves_2' },
+        { model_id: 'fall_pose', status: 'failing', message: 'No result for 1 min 5 s: timeout' },
+        { model_id: 'geo_fencing', status: 'unavailable', message: 'geo_fencing is retired; use geofence' },
+      ],
+      [{ model_id: 'ppe_detection', message: 'ppe_detection is retired' }]
+    );
+    expect(modelProblemsFor(server, installed)).toEqual([
+      { modelId: 'fall_pose', name: 'Fall Detection', status: 'failing', message: 'No result for 1 min 5 s: timeout' },
+      { modelId: 'geo_fencing', name: 'Geo Fencing', status: 'unavailable', message: 'geo_fencing is retired; use geofence' },
+      { modelId: 'ppe_detection', name: 'Ppe Detection', status: 'unavailable', message: 'ppe_detection is retired' },
+    ]);
+    expect(modelProblemsFor(withStatus([{ model_id: 'gloves_2' }]), installed)).toEqual([]);
+    expect(modelProblemsFor(undefined, installed)).toEqual([]);
+  });
+
+  it('an older backend without status fields shows no chips', () => {
+    expect(modelProblemsFor(modelsResponse([{ model_id: 'gloves_2' }]), installed)).toEqual([]);
   });
 });

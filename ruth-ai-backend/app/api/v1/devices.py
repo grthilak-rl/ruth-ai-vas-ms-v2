@@ -25,6 +25,7 @@ from app.core.cache import (
     cache_set_json,
     devices_list_cache_key,
 )
+from app.api.v1.model_guard import require_installed_model
 from app.core.logging import get_logger
 from app.deps import DBSession, DeviceServiceDep, StreamServiceDep, VASClientDep
 from app.integrations.vas import VASError, VASNotFoundError
@@ -446,8 +447,10 @@ async def get_device(
     responses={
         404: {"model": ErrorResponse, "description": "Device not found"},
         409: {"model": ErrorResponse, "description": "Stream already active"},
+        422: {"model": ErrorResponse, "description": "model_retired (names the replacement) or model_not_installed"},
         500: {"model": ErrorResponse, "description": "Failed to start stream"},
         502: {"model": ErrorResponse, "description": "VAS error"},
+        503: {"model": ErrorResponse, "description": "AI runtime unreachable; the model cannot be checked"},
     },
 )
 async def start_inference(
@@ -475,6 +478,10 @@ async def start_inference(
     # Use defaults if no request body
     if request is None:
         request = InferenceStartRequest()
+
+    # Never start a session on a model that is not installed: it would fail
+    # on every frame while the session reads as live.
+    await require_installed_model(request.model_id)
 
     # Check for existing active session (idempotency)
     existing_session = await stream_service.get_active_session_for_device(device_id)

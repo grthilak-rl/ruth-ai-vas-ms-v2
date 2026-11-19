@@ -26,6 +26,33 @@ DATABASE_URL = os.environ.get("MULTI_MODEL_TEST_DATABASE_URL")
 pytestmark = pytest.mark.skipif(not DATABASE_URL, reason="MULTI_MODEL_TEST_DATABASE_URL not set")
 
 
+BUILTINS = ["fall_detection", "ppe_detection", "geo_fencing"]
+
+
+@pytest.fixture(autouse=True)
+def installed(monkeypatch):
+    """These tests run a deployment with the built-ins on the unified runtime
+    (in use), so their IDs are installed. ``installed(store, in_use, unified)``
+    reconfigures it."""
+    from types import SimpleNamespace
+
+    from app.services import model_availability as ma
+
+    def apply(store=(), in_use=True, unified=BUILTINS):
+        monkeypatch.setattr(ma, "enabled_store_models", lambda: {m: object() for m in store})
+        monkeypatch.setattr(ma, "get_unified_runtime_config", lambda: SimpleNamespace(unified_runtime_in_use=in_use))
+
+        async def catalog():
+            return [{"model_id": m} for m in unified]
+
+        monkeypatch.setattr(ma, "_refresh_catalog", catalog)
+        ma._cache.update(models=None, expires_at=0.0)
+
+    apply()
+    yield apply
+    ma._cache.update(models=None, expires_at=0.0)
+
+
 @pytest.fixture
 async def sm():
     engine = create_async_engine(DATABASE_URL)
@@ -144,3 +171,76 @@ async def test_detections_endpoint(client, device_id, monkeypatch):
     monkeypatch.setattr(il, "get_inference_loop", lambda: Loop())
     body = (await client.get(url)).json()
     assert [d["model_id"] for d in body["detections"]] == ["fall_detection"]
+
+
+# ---------------------------------------------------------------------------
+# Models that are not installed (built-ins retired: unified runtime not in use)
+# ---------------------------------------------------------------------------
+
+
+async def test_stale_tab_add_of_a_retired_model_is_refused_and_starts_nothing(client, sm, device_id, installed):
+    installed(store=["geofence", "hard_hat"], in_use=False)
+    zone = {"zones": [{"id": "zone_1", "type": "restricted", "points": [[830, 892], [1163, 916], [1247, 1057]]}]}
+    r = await client.post(f"/api/v1/devices/{device_id}/models", json={"model_id": "geo_fencing", "config": zone})
+    assert r.status_code == 422
+    assert r.json()["detail"]["error"] == "model_retired" and r.json()["detail"]["replacement"] == "geofence"
+    async with sm() as db:
+        assert (await db.execute(select(StreamSession).where(StreamSession.device_id == device_id))).first() is None
+    started = await client.post(f"/api/v1/devices/{device_id}/start-inference", json={"model_id": "geo_fencing"})
+    assert started.status_code == 422
+
+
+async def test_saved_model_left_out_is_reported_and_removable(client, sm, device_id, installed, monkeypatch):
+    """A camera resumed without its retired model: the API shows it as not
+    started (unavailable), System Health's statuses include it, and Remove
+    deletes it from the saved list only."""
+    from app.models import DeviceInferenceIntent
+    from app.services import camera_model_status as cms
+
+    installed(store=["fall_detection"], in_use=False)  # an installed model to run
+    base = f"/api/v1/devices/{device_id}/models"
+    assert (await client.post(base, json={"model_id": "fall_detection"})).status_code == 201
+    async with sm() as db:
+        intent = (await db.execute(
+            select(DeviceInferenceIntent).where(DeviceInferenceIntent.device_id == device_id))).scalar_one()
+        intent.models = intent.models + [{"model_id": "ppe_detection", "model_version": None, "config": None}]
+        await db.commit()
+
+    listed = (await client.get(base)).json()
+    assert [(m["model_id"], m["status"]) for m in listed["models"]] == [("fall_detection", "running")]
+    assert [(m["model_id"], m["status"], m["reason"]) for m in listed["not_started"]] == [
+        ("ppe_detection", "unavailable", "model_retired")]
+
+    async with sm() as db:
+        statuses = await cms.camera_model_statuses(db)
+    assert [(s.model_id, s.status, s.in_session) for s in statuses if s.device_id == device_id] == [
+        ("fall_detection", "running", True), ("ppe_detection", "unavailable", False)]
+
+    # An operator edit keeps it saved; Remove deletes it, and only it.
+    assert (await client.patch(f"{base}/fall_detection", json={"fps_override": 1.0})).status_code == 200
+    async with sm() as db:
+        intent = (await db.execute(
+            select(DeviceInferenceIntent).where(DeviceInferenceIntent.device_id == device_id))).scalar_one()
+        assert [e["model_id"] for e in intent.models] == ["fall_detection", "ppe_detection"]
+    removed = await client.delete(f"{base}/ppe_detection")
+    assert removed.status_code == 200 and removed.json()["not_started"] == []
+    assert [m["model_id"] for m in removed.json()["models"]] == ["fall_detection"]
+    async with sm() as db:
+        intent = (await db.execute(
+            select(DeviceInferenceIntent).where(DeviceInferenceIntent.device_id == device_id))).scalar_one()
+        assert [e["model_id"] for e in intent.models] == ["fall_detection"]
+
+
+async def test_failing_model_shows_in_the_api(client, device_id, installed, monkeypatch):
+    from app.services import camera_model_status as cms
+
+    clock = {"t": 1000.0}
+    tracker = cms.CameraModelTracker(clock=lambda: clock["t"])
+    monkeypatch.setattr(cms, "tracker", tracker)
+    base = f"/api/v1/devices/{device_id}/models"
+    await client.post(base, json={"model_id": "fall_detection"})
+    tracker.record_failure(device_id, "fall_detection", "Model not found: fall_detection:latest")
+    clock["t"] += 61
+    m = (await client.get(base)).json()["models"][0]
+    assert m["status"] == "failing" and m["reason"] == "inference_failing"
+    assert "Model not found" in m["message"] and m["failing_since"]

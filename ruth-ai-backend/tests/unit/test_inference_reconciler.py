@@ -36,6 +36,17 @@ def _project_running(monkeypatch):
 
     monkeypatch.setattr("app.services.project_lifecycle.site_state", no_project)
 
+
+@pytest.fixture(autouse=True)
+def _all_models_installed(monkeypatch):
+    """Every saved model is installed unless a test says otherwise (the
+    not-installed cases are in test_installed_model_check.py)."""
+
+    async def none_missing(_ids):
+        return {}
+
+    monkeypatch.setattr("app.services.inference_reconciler.unavailable_models", none_missing)
+
 NOW = datetime(2026, 10, 19, 12, 0, tzinfo=timezone.utc)
 
 

@@ -136,6 +136,21 @@ class ModelStoreRuntimeDetails(ComponentDetails):
     )
 
 
+class CameraModelsDetails(ComponentDetails):
+    """Camera models health details: every model on every camera that runs
+    or should run, and the ones that are not working."""
+
+    cameras: int = Field(0, description="Cameras with a live session or an active intent")
+    models: int = Field(0, description="Models on those cameras")
+    failing: int = Field(0, description="Models with no result for 60 s")
+    unavailable: int = Field(0, description="Models that are not installed (retired or never installed)")
+    problems: list[dict[str, Any]] = Field(
+        default_factory=list,
+        description="One entry per failing or unavailable model: device_id, camera, model_id, status, "
+        "in_session, reason, message, replacement, failing_since, errors",
+    )
+
+
 class NLPChatDetails(ComponentDetails):
     """NLP Chat Service health check details."""
 

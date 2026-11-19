@@ -11,12 +11,14 @@ model-config, detections/latest) are unchanged. Like them, these routes carry
 no authentication.
 """
 
+from datetime import datetime
 from typing import Any
 from uuid import UUID
 
 from fastapi import APIRouter, HTTPException, Response, status
 from pydantic import BaseModel, Field
 
+from app.api.v1.model_guard import MODEL_GUARD_RESPONSES, require_installed_model
 from app.core.cache import DEVICES_LIST_CACHE_KEYS, cache_delete
 from app.deps import DBSession, StreamServiceDep
 from app.services.exceptions import (
@@ -56,6 +58,14 @@ class ModelEntryOut(BaseModel):
     config: dict[str, Any] | None = None
     fps_override: float | None = None
     target_fps: float = Field(description="Rate asked for before the GPU budget applies")
+    status: str = Field(
+        default="running",
+        description="running; failing (no result for 60 s); unavailable (not installed: retired or never installed)",
+    )
+    reason: str | None = Field(default=None, description="model_retired / model_not_installed / inference_failing")
+    message: str | None = None
+    replacement: str | None = Field(default=None, description="What replaced a retired model")
+    failing_since: datetime | None = None
 
 
 class DeviceModelsOut(BaseModel):
@@ -63,6 +73,11 @@ class DeviceModelsOut(BaseModel):
     session_id: UUID | None
     models_revision: int
     models: list[ModelEntryOut]
+    not_started: list[ModelEntryOut] = Field(
+        default_factory=list,
+        description="Saved models a resume left out because they are not installed (status unavailable); "
+        "DELETE removes them from the saved list",
+    )
 
 
 class DetectionOut(BaseModel):
@@ -79,18 +94,40 @@ class DeviceDetectionsOut(BaseModel):
     detections: list[DetectionOut]
 
 
-def _out(device_id: UUID, session) -> DeviceModelsOut:
+_ENTRY_KEYS = ("model_id", "model_version", "config", "fps_override")
+
+
+async def _out(device_id: UUID, session, db) -> DeviceModelsOut:
+    from app.services.camera_model_status import camera_model_statuses
+    from app.services.inference_intent import InferenceIntentService
     from app.services.inference_loop import TARGET_FPS
 
+    statuses = {
+        (s.model_id, s.in_session): s for s in await camera_model_statuses(db, device_id=device_id)
+    }
+
+    def entry(e: dict, in_session: bool) -> ModelEntryOut:
+        s = statuses.get((e["model_id"], in_session))
+        extra = {}
+        if s is not None:
+            extra = dict(status=s.status, reason=s.reason, message=s.message,
+                         replacement=s.replacement, failing_since=s.failing_since)
+        return ModelEntryOut(**{k: e.get(k) for k in _ENTRY_KEYS}, target_fps=desired_fps(e, TARGET_FPS), **extra)
+
+    running = session_entries(session)
+    running_ids = {e["model_id"] for e in running}
+    intent = await InferenceIntentService(db).get(device_id)
+    saved = [dict(e) for e in (intent.models or [])] if intent is not None else []
+    not_started = [
+        entry(e, False) for e in saved
+        if e.get("model_id") not in running_ids and (e.get("model_id"), False) in statuses
+    ]
     return DeviceModelsOut(
         device_id=device_id,
         session_id=session.id if session else None,
         models_revision=session.models_revision if session else 0,
-        models=[
-            ModelEntryOut(**{k: e.get(k) for k in ("model_id", "model_version", "config", "fps_override")},
-                          target_fps=desired_fps(e, TARGET_FPS))
-            for e in session_entries(session)
-        ],
+        models=[entry(e, True) for e in running],
+        not_started=not_started,
     )
 
 
@@ -101,14 +138,14 @@ def _http(exc: SessionModelError) -> HTTPException:
 @router.get("/devices/{device_id}/models", response_model=DeviceModelsOut, summary="Models on a camera")
 async def list_models(device_id: UUID, streams: StreamServiceDep, db: DBSession) -> DeviceModelsOut:
     session = await SessionModelsService(streams, db).get(device_id)
-    return _out(device_id, session)
+    return await _out(device_id, session, db)
 
 
 @router.post(
     "/devices/{device_id}/models",
     response_model=DeviceModelsOut,
     summary="Add a model to a camera",
-    responses={200: {"description": "Already running"}, 201: {"description": "Added"}},
+    responses={200: {"description": "Already running"}, 201: {"description": "Added"}, **MODEL_GUARD_RESPONSES},
 )
 async def add_model(
     device_id: UUID,
@@ -117,6 +154,9 @@ async def add_model(
     streams: StreamServiceDep,
     db: DBSession,
 ) -> DeviceModelsOut:
+    # A retired or uninstalled model is refused (422), whatever the caller
+    # believes is installed: a tab opened before a deploy keeps its old list.
+    await require_installed_model(body.model_id)
     # Uploaded models whose every rule needs a zone can raise nothing without
     # one: refuse them until zones are drawn (fails closed for API callers
     # too, not just the picker). Built-in models are never affected.
@@ -144,7 +184,7 @@ async def add_model(
     await db.commit()
     await cache_delete(*DEVICES_LIST_CACHE_KEYS)
     response.status_code = status.HTTP_201_CREATED if outcome.changed else status.HTTP_200_OK
-    return _out(device_id, outcome.session)
+    return await _out(device_id, outcome.session, db)
 
 
 @router.patch(
@@ -168,13 +208,13 @@ async def update_model(
         raise _http(exc)
     await db.commit()
     await cache_delete(*DEVICES_LIST_CACHE_KEYS)
-    return _out(device_id, session)
+    return await _out(device_id, session, db)
 
 
 @router.delete(
     "/devices/{device_id}/models/{model_id}",
     response_model=DeviceModelsOut,
-    summary="Remove one model from a camera (the last one stops inference)",
+    summary="Remove one model from a camera (the last one stops inference); also removes a saved model that was not started",
 )
 async def remove_model(
     device_id: UUID,
@@ -188,7 +228,7 @@ async def remove_model(
         raise _http(exc)
     await db.commit()
     await cache_delete(*DEVICES_LIST_CACHE_KEYS)
-    return _out(device_id, session)
+    return await _out(device_id, session, db)
 
 
 @router.get(

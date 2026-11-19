@@ -14,7 +14,11 @@
 import type { AIModel } from './AIModelSelector';
 import type { DeviceStreaming } from '../../state/api/types';
 import type { ModelStatusInfo } from '../../state/api/types';
-import { activeModelIds, type CameraModelsResponse } from '../../state/api/devices.api';
+import {
+  activeModelIds,
+  type CameraModelEntry,
+  type CameraModelsResponse,
+} from '../../state/api/devices.api';
 import type { ModelConfig } from '../../types/geofencing';
 
 /** Models whose picker row has a setup button (zones / tank corners). */
@@ -117,15 +121,109 @@ export function ppeOverlapWarning(
   return `PPE Detection and ${names} both report missing PPE: each missing item will raise two violations.`;
 }
 
-/** Picker rows: every healthy or degraded runtime model. */
+/**
+ * Model ids the camera's saved list holds: the running ones plus saved
+ * models a resume left out because they are not installed (`not_started`).
+ * A picker Remove acts on any of these.
+ */
+export function savedModelIdsFor(
+  streaming: DeviceStreaming,
+  models?: CameraModelsResponse
+): string[] {
+  const ids = enabledModelIdsFor(streaming, models);
+  for (const m of models?.not_started ?? []) {
+    if (!ids.includes(m.model_id)) ids.push(m.model_id);
+  }
+  return ids;
+}
+
+/** A model on a camera that is not working: the tile's red chip. */
+export interface ModelProblem {
+  modelId: string;
+  name: string;
+  status: 'failing' | 'unavailable';
+  message: string;
+}
+
+function nameFor(modelId: string, available: readonly ModelStatusInfo[]): string {
+  const m = available.find((a) => a.model_id === modelId);
+  return m?.display_name ?? modelDisplayName(modelId);
+}
+
+function problemMessage(entry: CameraModelEntry): string {
+  if (entry.message) return entry.message;
+  return entry.status === 'failing' ? 'No result for over a minute' : `${entry.model_id} is not installed`;
+}
+
+/**
+ * Failing or unavailable models on a camera, from the server's per-camera
+ * list (running models first, then saved ones that were not started).
+ */
+export function modelProblemsFor(
+  models: CameraModelsResponse | undefined,
+  available: readonly ModelStatusInfo[]
+): ModelProblem[] {
+  if (!models) return [];
+  const out: ModelProblem[] = [];
+  for (const entry of [...models.models, ...(models.not_started ?? [])]) {
+    if (entry.status === 'failing' || entry.status === 'unavailable') {
+      out.push({
+        modelId: entry.model_id,
+        name: nameFor(entry.model_id, available),
+        status: entry.status,
+        message: problemMessage(entry),
+      });
+    }
+  }
+  return out;
+}
+
+/**
+ * Picker rows: every healthy or degraded runtime model, then one
+ * "unavailable" row with a Remove button for each model the camera runs
+ * or has saved that is not installed (retired, or never installed). Those
+ * had no row at all before, so they could be neither seen nor removed.
+ * A running model that is failing keeps its row, marked degraded, with
+ * the reason under it.
+ */
 export function pickerModels(
   available: ModelStatusInfo[],
   enabledIds: readonly string[],
-  pendingModelId?: string | null
+  pendingModelId?: string | null,
+  cameraModels?: CameraModelsResponse
 ): AIModel[] {
-  return available
-    .filter((m) => m.health === 'healthy' || m.health === 'degraded')
-    .map((m) => toAIModel(m, enabledIds.includes(m.model_id), m.model_id === pendingModelId));
+  const usable = available.filter((m) => m.health === 'healthy' || m.health === 'degraded');
+  const entries = new Map<string, CameraModelEntry>();
+  for (const e of [...(cameraModels?.models ?? []), ...(cameraModels?.not_started ?? [])]) {
+    entries.set(e.model_id, e);
+  }
+  const rows = usable
+    .filter((m) => entries.get(m.model_id)?.status !== 'unavailable')
+    .map((m) => {
+      const row = toAIModel(m, enabledIds.includes(m.model_id), m.model_id === pendingModelId);
+      const entry = entries.get(m.model_id);
+      if (entry?.status === 'failing' && row.state !== 'unavailable') {
+        row.state = 'degraded';
+        row.problem = problemMessage(entry);
+      }
+      return row;
+    });
+  const listed = new Set(rows.map((r) => r.id));
+  const leftovers = [...enabledIds, ...(cameraModels?.not_started ?? []).map((e) => e.model_id)];
+  for (const modelId of leftovers) {
+    if (listed.has(modelId)) continue;
+    listed.add(modelId);
+    const entry = entries.get(modelId);
+    rows.push({
+      id: modelId,
+      name: nameFor(modelId, available),
+      state: 'unavailable',
+      removable: true,
+      pending: modelId === pendingModelId,
+      disabledReason: entry ? problemMessage(entry) : `${modelId} is not available on this system`,
+    });
+  }
+  return rows;
 }
 
 export type ToggleAction =

@@ -162,6 +162,30 @@ export interface ModelStoreRuntimeHealthDetails {
   last_success_at?: string;
 }
 
+/** One failing or unavailable model in `components.camera_models.details`. */
+export interface CameraModelProblem {
+  device_id: string;
+  camera: string;
+  model_id: string;
+  status: 'failing' | 'unavailable';
+  /** False: a saved model a resume left out because it is not installed. */
+  in_session: boolean;
+  reason: string | null;
+  message: string | null;
+  replacement?: string;
+  failing_since?: string;
+  errors?: number;
+}
+
+/** `components.camera_models.details`. */
+export interface CameraModelsHealthDetails {
+  cameras?: number;
+  models?: number;
+  failing?: number;
+  unavailable?: number;
+  problems?: CameraModelProblem[];
+}
+
 export interface HealthComponents {
   database?: ComponentHealth;
   redis?: ComponentHealth;
@@ -170,6 +194,8 @@ export interface HealthComponents {
   nlp_chat?: ComponentHealth;
   /** Absent on backends without the model store runtime check. */
   model_store_runtime?: ComponentHealth;
+  /** Every model on every camera working? Absent on older backends. */
+  camera_models?: ComponentHealth;
 }
 
 /**

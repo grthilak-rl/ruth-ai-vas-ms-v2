@@ -1,6 +1,7 @@
 import { useMemo } from 'react';
 import { LiveVideoPlayer } from '../video/LiveVideoPlayer';
 import { AIModelSelector, type AIModel } from './AIModelSelector';
+import type { ModelProblem } from './pickerState';
 import { deviceDisplayName } from '../../state';
 import { CameraNamingEditor } from './CameraNamingEditor';
 import type { Device } from '../../state';
@@ -58,6 +59,8 @@ interface CameraGridCellProps {
   pickerWarning?: string | null;
   /** Auto-resume has given up on this camera for now (BL-11 A). */
   recoveryFailed?: boolean;
+  /** Models on this camera that are failing or not installed: red chips. */
+  modelProblems?: readonly ModelProblem[];
 }
 
 export function CameraGridCell({
@@ -77,6 +80,7 @@ export function CameraGridCell({
   onPickerOpen,
   pickerError = null,
   pickerWarning = null,
+  modelProblems = [],
 }: CameraGridCellProps) {
   const statusIndicator = useMemo(() => {
     switch (status) {
@@ -240,6 +244,23 @@ export function CameraGridCell({
           {statusIndicator.icon} {statusIndicator.label}
         </span>
       </div>
+
+      {/* Models that are not working. A model failing on every frame used to
+          leave the tile reading "Detection Active" (geo_fencing, 22 minutes). */}
+      {modelProblems.length > 0 && (
+        <div className="camera-grid-cell__model-problems" data-testid="model-problems">
+          {modelProblems.map((p) => (
+            <span
+              key={p.modelId}
+              className="camera-grid-cell__model-problem"
+              title={p.message}
+              role="status"
+            >
+              ✖ {p.name}: {p.status === 'unavailable' ? 'not installed' : 'not running'}
+            </span>
+          ))}
+        </div>
+      )}
 
       {/* AI Controls */}
       <div className="camera-grid-cell__controls">

@@ -35,7 +35,8 @@ import {
 } from '../../utils/viewingPaneLayout';
 import { GridLayoutPicker } from '../viewing-pane/GridLayoutPicker';
 import { usePaneLayout } from '../viewing-pane/usePaneLayout';
-import { fetchModelsStatus, type ModelStatusInfo } from '../../state/api/models.api';
+import type { ModelStatusInfo } from '../../state/api/models.api';
+import { useModelsStatusQuery } from '../../state/hooks/useModelsStatusQuery';
 import { type CameraModelsResponse, getCameraStatus as getSharedCameraStatus } from '../../state/api/devices.api';
 import { ApiError } from '../../state/api/errors';
 import { queryKeys } from '../../state/queryKeys';
@@ -49,9 +50,11 @@ import {
   configsFor,
   enabledModelIdsFor,
   executeToggle,
+  modelProblemsFor,
   pickerModels,
   planToggle,
   ppeOverlapWarning,
+  savedModelIdsFor,
   type ToggleAction,
 } from './pickerState';
 import { useDeviceSync } from '../../state/hooks/useDeviceSync';
@@ -137,9 +140,16 @@ export function CameraMonitoringDashboard({
     setSelectedCameraIds(visibleCameraIds(cells, layout));
   }, []);
 
-  // Available AI models from backend
-  const [availableModels, setAvailableModels] = useState<ModelStatusInfo[]>([]);
-  const [modelsLoading, setModelsLoading] = useState(true);
+  // Available AI models from backend, on the shared polling hook (30 s, and
+  // refetched when the tab regains focus). This page used to read the list
+  // once on mount, so a tab left open across a deploy kept offering models
+  // that had been retired.
+  const modelsStatusQuery = useModelsStatusQuery();
+  const modelsLoading = modelsStatusQuery.isLoading;
+  const availableModels = useMemo<ModelStatusInfo[]>(
+    () => modelsStatusQuery.data?.models ?? [],
+    [modelsStatusQuery.data]
+  );
 
   // Pull any cameras added in VAS since Ruth's backend last synced, so the
   // grid and Camera Selector reflect the VAS devices page without a
@@ -151,23 +161,6 @@ export function CameraMonitoringDashboard({
   useEffect(() => {
     void syncNow();
   }, [syncNow]);
-
-  // Fetch available models from backend
-  useEffect(() => {
-    async function loadModels() {
-      try {
-        setModelsLoading(true);
-        const response = await fetchModelsStatus();
-        setAvailableModels(response.models);
-      } catch (error) {
-        console.error('[CameraMonitoring] Failed to fetch models:', error);
-        setAvailableModels([]);
-      } finally {
-        setModelsLoading(false);
-      }
-    }
-    loadModels();
-  }, []);
 
   // Seed positions once, when nothing is saved: first run, or a browser from
   // before positions existed (seedGridCells reproduces what it showed then).
@@ -269,7 +262,9 @@ export function CameraMonitoringDashboard({
     const camera = cameras.find((c) => c.id === cameraId);
     if (!camera || pendingModel[cameraId]) return;
 
-    const action = planToggle(enabled, modelId, runningModelIds(camera), config);
+    // Saved ids too: Remove on a saved model that was not started (not
+    // installed) deletes it from the camera's saved list.
+    const action = planToggle(enabled, modelId, savedModelIdsFor(camera.streaming, serverModels[cameraId]), config);
     if (action.kind === 'noop') return;
 
     setPendingModel((prev) => ({ ...prev, [cameraId]: modelId }));
@@ -288,7 +283,7 @@ export function CameraMonitoringDashboard({
     } finally {
       setPendingModel((prev) => ({ ...prev, [cameraId]: undefined }));
     }
-  }, [cameras, pendingModel, runningModelIds, addModelMutation, updateModelMutation, removeModelMutation, queryClient]);
+  }, [cameras, pendingModel, serverModels, addModelMutation, updateModelMutation, removeModelMutation, queryClient]);
 
   // Refresh one camera's server state when its picker opens: another
   // operator may have changed it since the last fetch.
@@ -347,9 +342,9 @@ export function CameraMonitoringDashboard({
       if (modelsLoading || availableModels.length === 0) {
         return [];
       }
-      return pickerModels(availableModels, runningModelIds(camera), pendingModel[camera.id]);
+      return pickerModels(availableModels, runningModelIds(camera), pendingModel[camera.id], serverModels[camera.id]);
     },
-    [availableModels, modelsLoading, runningModelIds, pendingModel]
+    [availableModels, modelsLoading, runningModelIds, pendingModel, serverModels]
   );
 
   // Get detection status for a camera
@@ -672,6 +667,7 @@ export function CameraMonitoringDashboard({
               onPickerOpen={handlePickerOpen}
               pickerError={pickerErrors[cell.camera.id]}
               pickerWarning={ppeOverlapWarning(availableModels, runningModelIds(cell.camera))}
+              modelProblems={modelProblemsFor(serverModels[cell.camera.id], availableModels)}
             />
           );
         })}

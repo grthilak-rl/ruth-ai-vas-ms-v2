@@ -282,6 +282,9 @@ def test_read_enabled_models(tmp_path):
 async def test_zone_gate_refuses_store_models_that_need_a_zone(monkeypatch):
     info = StoreModelInfo("harness", "1.0.0", "Harness", ("missing_harness",), True, False)
     monkeypatch.setattr(device_models_api, "enabled_store_models", lambda: {"harness": info})
+    from app.services import model_availability
+
+    monkeypatch.setattr(model_availability, "enabled_store_models", lambda: {"harness": info})
     body = device_models_api.ModelEntryIn(model_id="harness")
     with pytest.raises(HTTPException) as exc:
         await device_models_api.add_model(uuid.uuid4(), body, None, None, None)

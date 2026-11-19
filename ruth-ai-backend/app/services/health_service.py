@@ -26,6 +26,7 @@ from app.integrations.vas import VASClient
 from app.integrations.vas.exceptions import VASError
 from app.schemas.health import (
     AIRuntimeDetails,
+    CameraModelsDetails,
     ComponentHealth,
     DatabaseDetails,
     HealthResponse,
@@ -411,6 +412,57 @@ class HealthService:
                 error=f"AI Runtime error: {type(e).__name__}",
             )
 
+    async def check_camera_models(self, timeout_seconds: float = 5.0) -> ComponentHealth:
+        """Is every model on every camera working?
+
+        A model can fail on every frame while its session reads as live (the
+        retired geo_fencing did for 22 minutes on 2026-11-19, with everything
+        here healthy). Status mapping:
+
+        * every model running -> ``healthy``
+        * any model failing (no result for 60 s) or unavailable (not
+          installed, including saved models a resume left out) -> ``degraded``
+        * the check itself cannot run -> ``degraded`` with the error
+
+        Degraded, not unhealthy: one camera's model is a real problem for
+        that camera, not an outage of the core system.
+        """
+        from app.core.database import get_session_factory
+        from app.services.camera_model_status import STATUS_RUNNING, camera_model_statuses
+
+        start = time.perf_counter()
+        factory = get_session_factory()
+        if factory is None:
+            return ComponentHealth(status="degraded", error="database not initialised")
+        try:
+            async with factory() as db:
+                statuses = await asyncio.wait_for(camera_model_statuses(db), timeout=timeout_seconds)
+        except Exception as e:  # noqa: BLE001 - a health check never raises
+            return ComponentHealth(
+                status="degraded",
+                latency_ms=int((time.perf_counter() - start) * 1000),
+                error=f"Camera model check failed: {type(e).__name__}: {e}"[:300],
+            )
+        problems = [s for s in statuses if s.status != STATUS_RUNNING]
+        details = CameraModelsDetails(
+            cameras=len({s.device_id for s in statuses}),
+            models=len(statuses),
+            failing=sum(s.status == "failing" for s in problems),
+            unavailable=sum(s.status == "unavailable" for s in problems),
+            problems=[s.as_dict() for s in problems],
+        )
+        latency = int((time.perf_counter() - start) * 1000)
+        if not problems:
+            return ComponentHealth(status="healthy", latency_ms=latency, details=details.model_dump())
+        first = problems[0]
+        more = f" (+{len(problems) - 1} more)" if len(problems) > 1 else ""
+        return ComponentHealth(
+            status="degraded",
+            latency_ms=latency,
+            error=f"{first.camera}: {first.model_id} {first.status}: {first.message}{more}",
+            details=details.model_dump(),
+        )
+
     async def check_model_store_runtime(self) -> ComponentHealth:
         """Check the model store runtime (uploaded models).
 
@@ -728,6 +780,7 @@ class HealthService:
             # Own timeout lives in the probe (PROBE_TIMEOUT_SECONDS); it
             # never raises, so it cannot delay or break the others.
             self.check_model_store_runtime(),
+            self.check_camera_models(),
             return_exceptions=True,
         )
 
@@ -741,6 +794,7 @@ class HealthService:
             "vas",
             "nlp_chat",
             "model_store_runtime",
+            "camera_models",
         ]
         for name, result in zip(component_names, results):
             if isinstance(result, Exception):

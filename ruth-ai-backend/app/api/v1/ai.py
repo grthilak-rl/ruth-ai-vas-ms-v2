@@ -11,6 +11,7 @@ from uuid import uuid4
 from fastapi import APIRouter, HTTPException, status
 from pydantic import BaseModel, Field
 
+from app.api.v1.model_guard import MODEL_GUARD_RESPONSES, require_installed_model
 from app.core.logging import get_logger
 from app.integrations.unified_runtime import UnifiedRuntimeClient
 from app.integrations.unified_runtime.config import get_unified_runtime_config
@@ -54,6 +55,7 @@ def runtime_url_for(model_id: str) -> Optional[str]:
     summary="Submit AI inference request",
     description="Submit a base64-encoded frame for AI model inference. Used by frontend for client-side frame extraction.",
     response_model=Dict[str, Any],
+    responses=MODEL_GUARD_RESPONSES,
 )
 async def submit_inference(request: InferenceRequest) -> Dict[str, Any]:
     """
@@ -70,8 +72,13 @@ async def submit_inference(request: InferenceRequest) -> Dict[str, Any]:
         Model inference results
 
     Raises:
-        HTTPException: If model not found or inference fails
+        HTTPException: 422 if the model is retired or not installed, 500 if
+        inference fails
     """
+    # A retired or uninstalled model is the caller's mistake: 422 naming the
+    # replacement, not a 500 from the runtime's "Model not found".
+    await require_installed_model(request.model_id)
+
     try:
         logger.info(
             "Received inference request",

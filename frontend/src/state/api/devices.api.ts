@@ -400,12 +400,24 @@ export function activeModelIds(streaming: DeviceStreaming | null | undefined): s
   return streaming.model_id ? [streaming.model_id] : [];
 }
 
+/** Whether a camera model works: running; failing (no result for 60 s);
+ *  unavailable (not installed: retired or never installed). */
+export type CameraModelStatus = 'running' | 'failing' | 'unavailable';
+
 export interface CameraModelEntry {
   model_id: string;
   model_version: string | null;
   config: ModelConfig | null;
   fps_override: number | null;
   target_fps: number;
+  /** Absent from backends before the status field: treat as running. */
+  status?: CameraModelStatus;
+  /** model_retired / model_not_installed / inference_failing */
+  reason?: string | null;
+  message?: string | null;
+  /** What replaced a retired model. */
+  replacement?: string | null;
+  failing_since?: string | null;
 }
 
 export interface CameraModelsResponse {
@@ -413,6 +425,9 @@ export interface CameraModelsResponse {
   session_id: string | null;
   models_revision: number;
   models: CameraModelEntry[];
+  /** Saved models a resume left out because they are not installed;
+   *  DELETE removes them from the saved list. */
+  not_started?: CameraModelEntry[];
 }
 
 /** GET /api/v1/devices/{id}/models */

@@ -131,6 +131,9 @@ export function cameraModelsQueryOptions(deviceId: string, enabled: boolean = tr
     queryFn: () => fetchCameraModels(deviceId),
     enabled,
     staleTime: 0,
+    // Polled so a model that starts failing (or is found not installed)
+    // reaches the tile and picker without a reload.
+    refetchInterval: POLLING_INTERVALS.CAMERA_MODELS,
     retry: false,
   };
 }

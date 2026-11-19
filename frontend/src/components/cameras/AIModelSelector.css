@@ -243,3 +243,35 @@
   outline: 2px solid var(--color-primary, #3b82f6);
   outline-offset: 1px;
 }
+/* A running model that is failing: the reason, in red. */
+.ai-model-selector__item-reason--problem {
+  color: #b91c1c;
+}
+
+/* A model that runs or is saved here but is not installed. */
+.ai-model-selector__remove-btn {
+  flex-shrink: 0;
+  margin-left: auto;
+  padding: 0.25rem 0.625rem;
+  border: 1px solid #dc2626;
+  border-radius: 0.25rem;
+  background: #ffffff;
+  color: #b91c1c;
+  font-size: 0.75rem;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.ai-model-selector__remove-btn:hover:not(:disabled) {
+  background: #fee2e2;
+}
+
+.ai-model-selector__remove-btn:focus-visible {
+  outline: 2px solid #dc2626;
+  outline-offset: 1px;
+}
+
+.ai-model-selector__remove-btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}

@@ -6,6 +6,7 @@ from types import SimpleNamespace
 import pytest
 
 from app.api.v1 import ai
+from app.services import model_availability
 
 STORE_URL = "http://model-store-runtime:8000"
 
@@ -23,6 +24,11 @@ def configure(monkeypatch):
             monkeypatch.setattr(ai, "enabled_store_models", boom)
         else:
             monkeypatch.setattr(ai, "enabled_store_models", lambda: {m: object() for m in installed})
+            # The endpoint's installed-model check reads the same store.
+            monkeypatch.setattr(model_availability, "enabled_store_models",
+                                lambda: {m: object() for m in installed})
+            monkeypatch.setattr(model_availability, "get_unified_runtime_config",
+                                lambda: SimpleNamespace(unified_runtime_in_use=False))
     return apply
 
 
@@ -98,9 +104,8 @@ async def test_store_detect_models_reach_the_store_runtime_with_config(configure
 
 
 def test_retired_builtins_still_route_to_the_unified_runtime(configure):
-    """Unchanged: a retired built-in id is not a store model, so a stale
-    client asking for it gets the unified runtime's 'not found', not a
-    misroute."""
+    """A retired built-in id is not a store model, so routing alone never
+    misroutes it; the endpoint refuses it before routing (below)."""
     configure(STORE_URL, ["hard_hat", "geofence"])
     assert ai.runtime_url_for("ppe_detection") is None
     assert ai.runtime_url_for("geo_fencing") is None
