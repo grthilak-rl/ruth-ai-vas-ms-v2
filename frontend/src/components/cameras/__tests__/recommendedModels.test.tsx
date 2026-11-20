@@ -1,9 +1,9 @@
 // @vitest-environment jsdom
 /**
- * Recommended models and notes in the camera picker (Settings -> AI Models):
- * recommended rows first with a badge, every model's latest visible note
- * under it, and a pointer to the recommended model on the others. Notes an
- * admin marked internal never reach the picker (the server leaves them out).
+ * Recommended models in the camera picker (Settings -> AI Models): the
+ * recommended rows come first with a badge, and that is all. Notes, and
+ * pointers to the recommended model, stay on the model's page so the
+ * picker list stays compact.
  */
 
 import { act } from 'react';
@@ -11,7 +11,7 @@ import { createRoot } from 'react-dom/client';
 import { describe, expect, it, vi } from 'vitest';
 import { AIModelSelector } from '../AIModelSelector';
 import type { ModelStatusInfo } from '../../../state/api/types';
-import { formatNote, pickerModels } from '../pickerState';
+import { pickerModels } from '../pickerState';
 
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 
@@ -43,28 +43,21 @@ describe('recommended models in the picker', () => {
     expect(rows[2].recommendedFor).toBeUndefined();
   });
 
-  it('points a non-recommended model at the recommended one, and leaves it selectable', () => {
+  it('adds no note or pointer to any row; non-recommended models stay selectable', () => {
     const rows = pickerModels(AVAILABLE, []);
-    const noGoggles = rows.find((r) => r.id === 'no_goggles')!;
-    expect(noGoggles.alternative).toBe('Recommended for Missing goggles: Goggles 3');
-    expect(noGoggles.state).toBe('inactive');
-    expect(rows.find((r) => r.id === 'fall_pose')!.alternative).toBeUndefined();
-    expect(rows.find((r) => r.id === 'goggles_3')!.alternative).toBeUndefined();
-  });
-
-  it("shows each model's latest note as one dated line", () => {
-    const goggles = pickerModels(AVAILABLE, []).find((r) => r.id === 'goggles_3')!;
-    expect(goggles.note).toBe('24 Oct 2026 · HPCL: Best on the bare-face frame');
-    expect(formatNote({ body: 'x', observed_on: '2026-11-20', project_name: null })).toBe('20 Nov 2026: x');
+    for (const row of rows) {
+      expect(Object.keys(row)).not.toContain('note');
+      expect(Object.keys(row)).not.toContain('alternative');
+    }
+    expect(rows.find((r) => r.id === 'no_goggles')!.state).toBe('inactive');
   });
 
   it('changes nothing when no model is recommended', () => {
     const plain = AVAILABLE.map((m) => ({ ...m, recommended_for: [] }));
     expect(pickerModels(plain, []).map((r) => r.id)).toEqual(['no_goggles', 'hard_hat', 'goggles_3', 'fall_pose']);
-    expect(pickerModels(plain, []).every((r) => !r.alternative)).toBe(true);
   });
 
-  it('renders the badge, the pointer and the note', () => {
+  it('renders only the badge: no note, no pointer, rows stay one line', () => {
     const container = document.createElement('div');
     document.body.appendChild(container);
     const root = createRoot(container);
@@ -76,10 +69,9 @@ describe('recommended models in the picker', () => {
     const badges = container.querySelectorAll('.ai-model-selector__badge');
     expect(badges).toHaveLength(2);
     expect((badges[0] as HTMLElement).title).toBe('Recommended for Missing hard hat');
-    expect(container.querySelector('.ai-model-selector__item-alternative')?.textContent).toBe(
-      'Recommended for Missing goggles: Goggles 3'
-    );
-    expect(container.querySelector('.ai-model-selector__item-note')?.textContent).toContain('HPCL: Best on the bare-face frame');
+    expect(container.textContent).not.toContain('Best on the bare-face frame');
+    expect(container.textContent).not.toContain('Recommended for Missing goggles: Goggles 3');
+    expect(container.querySelectorAll('.ai-model-selector__item--with-reason')).toHaveLength(0);
     const names = [...container.querySelectorAll('.ai-model-selector__model-name')].map((n) => n.textContent);
     expect(names.slice(0, 2)).toEqual(['Hard Hat', 'Goggles 3']);
 

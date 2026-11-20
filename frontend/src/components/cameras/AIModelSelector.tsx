@@ -45,11 +45,6 @@ export interface AIModel {
   problem?: string;
   /** Violation labels an admin recommends this model for ("Missing hard hat"). */
   recommendedFor?: string[];
-  /** Its latest note visible to operators, ready to show ("17 Oct 2026 · HPCL: ..."). */
-  note?: string;
-  /** Another model is recommended for what this one detects ("Recommended for
-   *  Missing hard hat: Hard Hat"). */
-  alternative?: string;
 }
 
 interface AIModelSelectorProps {
@@ -231,7 +226,7 @@ export function AIModelSelector({
                     className={`ai-model-selector__item ${
                       isDisabled ? 'ai-model-selector__item--disabled' : ''
                     }${
-                      model.disabledReason || model.problem || model.note || model.alternative
+                      model.disabledReason || model.problem
                         ? ' ai-model-selector__item--with-reason'
                         : ''
                     }${
@@ -268,10 +263,7 @@ export function AIModelSelector({
                     {model.disabledReason && (
                       <p className="ai-model-selector__item-reason">{model.disabledReason}</p>
                     )}
-                    {model.alternative && (
-                      <p className="ai-model-selector__item-alternative">{model.alternative}</p>
-                    )}
-                    {model.note && <p className="ai-model-selector__item-note">{model.note}</p>}
+
                     {model.problem && (
                       <p className="ai-model-selector__item-reason ai-model-selector__item-reason--problem">
                         {model.problem}

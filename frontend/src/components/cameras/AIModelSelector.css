@@ -287,18 +287,3 @@
   background-color: #d1fae5;
   border-radius: 999px;
 }
-
-/* The model's latest note (an admin's observation), and a pointer to the
-   recommended model when this one is not it. */
-.ai-model-selector__item-note,
-.ai-model-selector__item-alternative {
-  flex-basis: 100%;
-  margin: 0.25rem 0 0;
-  font-size: 0.7rem;
-  line-height: 1.35;
-  color: var(--color-text-secondary, #6b7280);
-}
-
-.ai-model-selector__item-alternative {
-  color: #065f46;
-}
