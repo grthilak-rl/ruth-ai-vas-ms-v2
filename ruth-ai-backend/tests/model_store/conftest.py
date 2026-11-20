@@ -5,7 +5,7 @@ SELECT ... FOR UPDATE are Postgres features), given as:
 
     MODEL_STORE_TEST_DATABASE_URL=postgresql+asyncpg://user:pass@host:5432/db
 
-Only the three model_store_* tables are created there; the tests are skipped
+Only the model store tables (and projects, which notes name) are created there; the tests are skipped
 when the variable is unset. Limits are shrunk so files are a few KB.
 """
 
@@ -20,13 +20,28 @@ from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 from app.core.admin_auth import get_admin_auth_config, issue_admin_token
 from app.deps.db import get_db
 from app.main import create_application
-from app.models.model_store import ModelStoreFile, ModelStoreModel, ModelStoreUpload
+from app.models.model_store import (
+    ModelNote,
+    ModelRecommendation,
+    ModelStoreFile,
+    ModelStoreModel,
+    ModelStoreUpload,
+)
+from app.models.project import Project
 from app.services.model_store import get_model_store, service
 from app.services.model_store.storage import ModelStore
 from tests.unit.test_admin_auth import USERNAME, make_config
 
 DATABASE_URL = os.environ.get("MODEL_STORE_TEST_DATABASE_URL")
-TABLES = [ModelStoreModel.__table__, ModelStoreFile.__table__, ModelStoreUpload.__table__]
+TABLES = [
+    ModelStoreModel.__table__,
+    ModelStoreFile.__table__,
+    ModelStoreUpload.__table__,
+    ModelNote.__table__,
+    ModelRecommendation.__table__,
+    # Notes name a project (no foreign key); projects has no dependencies.
+    Project.__table__,
+]
 
 pytestmark = pytest.mark.skipif(
     not DATABASE_URL, reason="MODEL_STORE_TEST_DATABASE_URL not set"
@@ -41,7 +56,10 @@ async def session_factory():
     async with engine.begin() as conn:
         await conn.run_sync(lambda c: ModelStoreModel.metadata.create_all(c, tables=TABLES))
         await conn.execute(
-            text("TRUNCATE model_store_uploads, model_store_files, model_store_models CASCADE")
+            text(
+                "TRUNCATE model_recommendations, model_notes, model_store_uploads, "
+                "model_store_files, model_store_models, projects CASCADE"
+            )
         )
     yield async_sessionmaker(engine, expire_on_commit=False)
     await engine.dispose()

@@ -1,6 +1,6 @@
 """Schemas for /api/v1/admin/model-store."""
 
-from datetime import datetime
+from datetime import date, datetime
 from typing import Literal
 from uuid import UUID
 
@@ -57,6 +57,10 @@ class StoreModelSummary(BaseModel):
     #: Its model ID is in the store's enabled/ tree: the runtime serves it,
     #: so the draft and its files cannot be deleted.
     installed: bool = False
+    #: Violation types its installed manifest raises ([] when not installed).
+    violation_types: list[str] = []
+    #: Violation types it is the active recommended model for.
+    recommended_for: list[str] = []
     file_count: int
     total_bytes: int
     # Step 2: every file is simply "uploaded"; introspection arrives in Step 3.
@@ -133,3 +137,70 @@ class ChunkAck(BaseModel):
 class UploadComplete(BaseModel):
     upload_id: UUID
     file: StoreFile
+
+
+# =============================================================================
+# Notes and recommendations
+# =============================================================================
+
+
+class ModelNoteOut(BaseModel):
+    id: UUID
+    model_pk: UUID
+    observed_on: date
+    body: str
+    project_id: UUID | None
+    project_name: str | None
+    source: str | None
+    #: Shown on the model page only, never in the camera picker.
+    internal: bool
+    created_by: str
+    created_at: datetime
+    edited_by: str | None
+    updated_at: datetime
+    #: Violation types this note is the active recommendation reason for.
+    reason_for: list[str] = []
+
+
+class ModelNoteList(BaseModel):
+    notes: list[ModelNoteOut]
+
+
+class ModelNoteCreate(BaseModel):
+    body: str = Field(min_length=1, max_length=2000)
+    observed_on: date
+    project_id: UUID | None = None
+    source: str | None = Field(default=None, max_length=500)
+    internal: bool = False
+
+
+class ModelNoteUpdate(BaseModel):
+    """Only the fields sent change; send project_id/source null to clear them."""
+
+    body: str | None = Field(default=None, min_length=1, max_length=2000)
+    observed_on: date | None = None
+    project_id: UUID | None = None
+    source: str | None = Field(default=None, max_length=500)
+    internal: bool | None = None
+
+
+class RecommendationOut(BaseModel):
+    violation_type: str
+    label: str
+    model_pk: UUID
+    model_id: str
+    display_name: str
+    #: False when the model is no longer installed: kept, not shown as recommended.
+    active: bool
+    note: ModelNoteOut
+    set_by: str
+    set_at: datetime
+
+
+class RecommendationList(BaseModel):
+    recommendations: list[RecommendationOut]
+
+
+class RecommendationSet(BaseModel):
+    model_pk: UUID
+    note_id: UUID

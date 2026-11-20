@@ -248,7 +248,7 @@ def load_installer():
     return module
 
 
-@pytest.mark.parametrize("name", ["hard_hat", "safety_vest", "gloves", "goggles", "harness", "no_goggles", "gloves_2", "goggles_2", "fall_pose", "geofence"])
+@pytest.mark.parametrize("name", ["hard_hat", "safety_vest", "gloves", "goggles", "harness", "no_goggles", "gloves_2", "goggles_2", "fall_pose", "geofence", "harness_3"])
 def test_shipped_manifests_are_valid(name):
     """Unknown top-level keys (`diagnostics`, `_trial`) must not be rejected."""
     assert load_installer().manifest_problems(manifest(name)) == []
@@ -329,7 +329,7 @@ def drop_diagnostics(m):
     m.pop("diagnostics", None)
 
 
-TRIAL = {"goggles", "gloves", "harness", "no_goggles", "gloves_2", "goggles_2"}
+TRIAL = {"goggles", "gloves", "harness", "no_goggles", "gloves_2", "goggles_2", "harness_3"}
 NOT_IN_TRIAL = ["hard_hat", "safety_vest"]
 
 
@@ -348,7 +348,7 @@ def test_which_models_are_in_trial_mode():
         assert "_trial" not in manifest(name)
 
 
-@pytest.mark.parametrize("name", ["hard_hat", "safety_vest", "gloves", "goggles", "harness", "no_goggles", "gloves_2", "goggles_2", "fall_pose", "geofence"])
+@pytest.mark.parametrize("name", ["hard_hat", "safety_vest", "gloves", "goggles", "harness", "no_goggles", "gloves_2", "goggles_2", "fall_pose", "geofence", "harness_3"])
 def test_every_shipped_model_gates_violations_at_0_7(name):
     """The manifest floor is now the violation gate (backend side too).
 
@@ -768,3 +768,17 @@ def test_goggles_2_is_flagged_as_a_mid_training_checkpoint():
     assert m["classes"] == {"0": "no-goggles"}
     assert m["weights"] == "goggles2.pt"
     assert "MID-TRAINING CHECKPOINT" in m["_trial"]
+
+
+def test_harness_3_manifest_matches_its_weights():
+    """harness_3 (installed 2026-11-20) was written from its weights' own metadata:
+    RT-DETR, detect, trained at 640, classes 'harness' and 'no harness'."""
+    m = manifest("harness_3")
+    assert (m["task"], m["imgsz"], m["weights"]) == ("detect", 640, "best.pt")
+    assert m["classes"] == {"0": "harness", "1": "no harness"}
+    (rule,) = m["rules"]
+    assert rule["classes"] == ["no harness"]
+    assert (rule["violation_type"], rule["severity"], rule["min_confidence"]) == ("missing_harness", "critical", 0.7)
+    assert m["display_name"] == "Harness 3"
+    # Same RT-DETR budget as gloves_2, the other RT-DETR at 640.
+    assert (m["performance"], m["limits"]) == (manifest("gloves_2")["performance"], manifest("gloves_2")["limits"])

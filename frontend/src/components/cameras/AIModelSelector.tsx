@@ -43,6 +43,13 @@ export interface AIModel {
   removable?: boolean;
   /** A running model that is failing: why (shown under its row). */
   problem?: string;
+  /** Violation labels an admin recommends this model for ("Missing hard hat"). */
+  recommendedFor?: string[];
+  /** Its latest note visible to operators, ready to show ("17 Oct 2026 · HPCL: ..."). */
+  note?: string;
+  /** Another model is recommended for what this one detects ("Recommended for
+   *  Missing hard hat: Hard Hat"). */
+  alternative?: string;
 }
 
 interface AIModelSelectorProps {
@@ -223,7 +230,11 @@ export function AIModelSelector({
                     key={model.id}
                     className={`ai-model-selector__item ${
                       isDisabled ? 'ai-model-selector__item--disabled' : ''
-                    }${model.disabledReason || model.problem ? ' ai-model-selector__item--with-reason' : ''}${
+                    }${
+                      model.disabledReason || model.problem || model.note || model.alternative
+                        ? ' ai-model-selector__item--with-reason'
+                        : ''
+                    }${
                       model.removable ? ' ai-model-selector__item--removable' : ''
                     }`}
                   >
@@ -236,6 +247,14 @@ export function AIModelSelector({
                         className="ai-model-selector__checkbox"
                       />
                       <span className="ai-model-selector__model-name">{model.name}</span>
+                      {model.recommendedFor && model.recommendedFor.length > 0 && (
+                        <span
+                          className="ai-model-selector__badge"
+                          title={`Recommended for ${model.recommendedFor.join(', ')}`}
+                        >
+                          Recommended
+                        </span>
+                      )}
                       {model.pending ? (
                         <span className="ai-model-selector__state ai-model-selector__state--pending">
                           … Applying
@@ -249,6 +268,10 @@ export function AIModelSelector({
                     {model.disabledReason && (
                       <p className="ai-model-selector__item-reason">{model.disabledReason}</p>
                     )}
+                    {model.alternative && (
+                      <p className="ai-model-selector__item-alternative">{model.alternative}</p>
+                    )}
+                    {model.note && <p className="ai-model-selector__item-note">{model.note}</p>}
                     {model.problem && (
                       <p className="ai-model-selector__item-reason ai-model-selector__item-reason--problem">
                         {model.problem}

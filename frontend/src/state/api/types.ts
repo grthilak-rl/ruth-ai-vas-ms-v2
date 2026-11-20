@@ -692,6 +692,26 @@ export interface ModelStatusInfo {
 
   /** Reports missing PPE, like the built-in ppe_detection */
   reports_ppe?: boolean;
+
+  /** Violation types its rules raise, e.g. ['missing_hardhat'] */
+  violation_types?: string[];
+
+  /** Display label per violation type ('missing_hardhat' -> 'Missing hard hat') */
+  violation_type_labels?: Record<string, string>;
+
+  /** Violation types an admin recommends this model for */
+  recommended_for?: string[];
+
+  /** Newest note an admin has not marked internal */
+  latest_note?: ModelLatestNote;
+}
+
+/** A model's newest non-internal note, as the camera picker shows it. */
+export interface ModelLatestNote {
+  body: string;
+  /** YYYY-MM-DD */
+  observed_on: string;
+  project_name?: string | null;
 }
 
 /**

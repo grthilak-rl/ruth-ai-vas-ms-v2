@@ -39,6 +39,13 @@ MODEL_STORE_ROUTES = [
     ("PUT", f"{BASE}/uploads/{U}/chunks/0"),
     ("POST", f"{BASE}/uploads/{U}/complete"),
     ("DELETE", f"{BASE}/uploads/{U}"),
+    ("GET", f"{BASE}/models/{U}/notes"),
+    ("POST", f"{BASE}/models/{U}/notes"),
+    ("PATCH", f"{BASE}/notes/{U}"),
+    ("DELETE", f"{BASE}/notes/{U}"),
+    ("GET", f"{BASE}/recommendations"),
+    ("PUT", f"{BASE}/recommendations/{U}"),
+    ("DELETE", f"{BASE}/recommendations/{U}"),
 ]
 
 

@@ -32,7 +32,13 @@ from app.models.inference_intent import (
     INTENT_SUSPENDED,
     DeviceInferenceIntent,
 )
-from app.models.model_store import ModelStoreFile, ModelStoreModel, ModelStoreUpload
+from app.models.model_store import (
+    ModelNote,
+    ModelRecommendation,
+    ModelStoreFile,
+    ModelStoreModel,
+    ModelStoreUpload,
+)
 from app.models.project import (
     PROJECT_START_LOCK_KEY,
     PROJECT_STATE_ACTIVE,
@@ -95,6 +101,8 @@ __all__ = [
     "ModelStoreModel",
     "ModelStoreFile",
     "ModelStoreUpload",
+    "ModelNote",
+    "ModelRecommendation",
     # Projects
     "Project",
     "PROJECT_STATE_ACTIVE",

@@ -544,3 +544,51 @@ def test_admin_runtime_column_unreachable_for_every_row():
 
 def test_admin_runtime_column_absent_when_store_not_configured():
     assert _runtime_for("hard_hat", _probe(configured=False, reachable=False)) is None
+
+
+# --- model notes and recommendations in the picker data ---------------------
+
+
+async def test_store_entries_carry_recommendation_and_latest_public_note(status_env, monkeypatch):
+    from datetime import date
+
+    from app.services.model_store import notes as model_notes
+
+    installed = {
+        "hard_hat": StoreModelInfo("hard_hat", "1.0.0", "Hard Hat", (), False, True, violation_types=("missing_hardhat",)),
+        "safety_vest": StoreModelInfo("safety_vest", "1.0.0", "Safety Vest", (), False, True, violation_types=("missing_vest",)),
+        "gloves": StoreModelInfo("gloves", "1.0.0", "Gloves", (), False, True, violation_types=("missing_gloves",)),
+    }
+    monkeypatch.setattr(models_api, "enabled_store_models", lambda: installed)
+
+    async def recs(db):
+        return {"hard_hat": ["missing_hardhat"]}
+
+    async def latest(db, ids):
+        assert set(ids) == set(installed)
+        return {"gloves": model_notes.LatestNote("Inert at HPCL", date(2026, 10, 17), "HPCL")}
+
+    monkeypatch.setattr(model_notes, "active_recommendations", recs)
+    monkeypatch.setattr(model_notes, "latest_public_notes", latest)
+    status_env(STORE_URL)
+    store = {m["model_id"]: m for m in as_json(await models_api.get_models_status(FakeDB()))["models"][3:]}
+
+    assert store["hard_hat"]["recommended_for"] == ["missing_hardhat"]
+    assert store["hard_hat"]["violation_type_labels"] == {"missing_hardhat": "Missing hard hat"}
+    assert "latest_note" not in store["hard_hat"]  # none: omitted, not null
+    assert store["gloves"]["recommended_for"] == []
+    assert store["gloves"]["latest_note"] == {"body": "Inert at HPCL", "observed_on": "2026-10-17", "project_name": "HPCL"}
+
+
+async def test_unreadable_notes_never_break_the_model_list(status_env, monkeypatch):
+    from app.services.model_store import notes as model_notes
+
+    async def broken(*args):
+        raise RuntimeError("relation model_notes does not exist")
+
+    monkeypatch.setattr(model_notes, "active_recommendations", broken)
+    status_env(STORE_URL)
+    out = as_json(await models_api.get_models_status(FakeDB()))
+    store = out["models"][3:]
+    assert [m["model_id"] for m in store] == ["hard_hat", "safety_vest", "gloves"]
+    assert all(m["recommended_for"] == [] and "latest_note" not in m for m in store)

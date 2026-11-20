@@ -289,6 +289,10 @@ export interface StoreModelSummary {
   model_id_editable: boolean;
   /** In the store's enabled/ tree: the runtime serves it, so the draft and its files cannot be deleted. */
   installed?: boolean;
+  /** Violation types its installed manifest raises ([] when not installed). */
+  violation_types?: string[];
+  /** Violation types it is the active recommended model for. */
+  recommended_for?: string[];
   file_count: number;
   total_bytes: number;
   status: 'no_files' | 'uploaded';
@@ -346,6 +350,93 @@ export function updateStoreModel(
   return adminFetch<StoreModelDetail>(`${STORE}/models/${modelPk}`, {
     method: 'PATCH',
     body: JSON.stringify(changes),
+  });
+}
+
+// --- Notes and recommendations -------------------------------------------
+
+export interface ModelNote {
+  id: string;
+  model_pk: string;
+  /** YYYY-MM-DD */
+  observed_on: string;
+  body: string;
+  project_id: string | null;
+  project_name: string | null;
+  source: string | null;
+  /** Shown on the model page only, never in the camera picker. */
+  internal: boolean;
+  created_by: string;
+  created_at: string;
+  edited_by: string | null;
+  updated_at: string;
+  /** Violation types this note is the active recommendation reason for. */
+  reason_for: string[];
+}
+
+export interface ModelNoteInput {
+  body: string;
+  observed_on: string;
+  project_id: string | null;
+  source: string | null;
+  internal: boolean;
+}
+
+export interface ModelRecommendation {
+  violation_type: string;
+  label: string;
+  model_pk: string;
+  model_id: string;
+  display_name: string;
+  /** False when the model is no longer installed: kept, not shown as recommended. */
+  active: boolean;
+  note: ModelNote;
+  set_by: string;
+  set_at: string;
+}
+
+export function listModelNotes(modelPk: string): Promise<ModelNote[]> {
+  return adminFetch<{ notes: ModelNote[] }>(`${STORE}/models/${modelPk}/notes`).then((r) => r.notes);
+}
+
+export function createModelNote(modelPk: string, note: ModelNoteInput): Promise<ModelNote> {
+  return adminFetch<ModelNote>(`${STORE}/models/${modelPk}/notes`, {
+    method: 'POST',
+    body: JSON.stringify(note),
+  });
+}
+
+export function updateModelNote(noteId: string, note: Partial<ModelNoteInput>): Promise<ModelNote> {
+  return adminFetch<ModelNote>(`${STORE}/notes/${noteId}`, {
+    method: 'PATCH',
+    body: JSON.stringify(note),
+  });
+}
+
+export function deleteModelNote(noteId: string): Promise<void> {
+  return adminFetch<void>(`${STORE}/notes/${noteId}`, { method: 'DELETE' });
+}
+
+export function listRecommendations(): Promise<ModelRecommendation[]> {
+  return adminFetch<{ recommendations: ModelRecommendation[] }>(`${STORE}/recommendations`).then(
+    (r) => r.recommendations
+  );
+}
+
+export function setRecommendation(
+  violationType: string,
+  modelPk: string,
+  noteId: string
+): Promise<ModelRecommendation[]> {
+  return adminFetch<{ recommendations: ModelRecommendation[] }>(
+    `${STORE}/recommendations/${encodeURIComponent(violationType)}`,
+    { method: 'PUT', body: JSON.stringify({ model_pk: modelPk, note_id: noteId }) }
+  ).then((r) => r.recommendations);
+}
+
+export function clearRecommendation(violationType: string): Promise<void> {
+  return adminFetch<void>(`${STORE}/recommendations/${encodeURIComponent(violationType)}`, {
+    method: 'DELETE',
   });
 }
 

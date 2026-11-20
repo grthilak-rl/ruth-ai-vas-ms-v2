@@ -9,12 +9,13 @@ import {
   type StoreFile,
 } from './adminApi';
 import { DraftEditForm } from './DraftEditForm';
+import { ModelNotesSection, ModelRecommendationSection } from './ModelNotes';
 import { ModelUploader } from './ModelUploader';
 import { formatBytes, formatDateTime } from './format';
 import './AdminPages.css';
 
 /**
- * One uploaded model: rename, files, uploads, delete.
+ * One uploaded model: rename, recommendation, notes, files, uploads, delete.
  *
  * Path: /settings/models/:modelPk — a drill-down from the AI Models tab,
  * still behind RequireAdminToken because, unlike the tabs, there is
@@ -141,6 +142,9 @@ export function ModelDetailPage() {
             : 'Delete failed'}
         </p>
       )}
+
+      <ModelRecommendationSection model={data} />
+      <ModelNotesSection model={data} />
 
       <ModelUploader modelPk={modelPk} activeUploads={data.active_uploads} onChanged={refresh} />
 

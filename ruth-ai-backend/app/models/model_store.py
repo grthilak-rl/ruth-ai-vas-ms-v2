@@ -8,16 +8,24 @@ app/api/v1/admin reads or writes these tables.
                        a tombstone, so the id is never handed out again.
 - model_store_files    weight files that finished uploading into a draft.
 - model_store_uploads  chunked upload sessions (staging area).
+- model_notes          dated observations about a model (admin-written).
+                       Keyed by the model's row, which outlives install,
+                       uninstall and Delete, so notes are never orphaned.
+- model_recommendations  the recommended model per violation type, with
+                       the note that explains why. History is kept: a
+                       replaced or cleared recommendation gets cleared_at.
 
 States are plain strings validated in the service layer rather than Postgres
 enums, so later steps can add states without ALTER TYPE.
 """
 
 import uuid
-from datetime import datetime
+from datetime import date, datetime
 
 from sqlalchemy import (
     BigInteger,
+    Boolean,
+    Date,
     DateTime,
     ForeignKey,
     Index,
@@ -132,3 +140,71 @@ class ModelStoreUpload(Base, TimestampMixin):
         nullable=True,
     )
     created_by: Mapped[str | None] = mapped_column(Text, nullable=True)
+
+
+class ModelNote(Base, TimestampMixin):
+    """A dated observation about a model ("HPCL: fires on scaffold planks").
+
+    ``internal`` notes show on the model page only, never in the camera
+    picker. ``project_id`` names a project without a foreign key, so these
+    tables stay creatable on their own (projects are ended, never deleted).
+    """
+
+    __tablename__ = "model_notes"
+    __table_args__ = (Index("ix_model_notes_model_observed", "model_pk", "observed_on"),)
+
+    id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), primary_key=True, default=generate_uuid
+    )
+    model_pk: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("model_store_models.id", ondelete="CASCADE"),
+        nullable=False,
+    )
+    observed_on: Mapped[date] = mapped_column(Date, nullable=False)
+    body: Mapped[str] = mapped_column(Text, nullable=False)
+    project_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), nullable=True)
+    source: Mapped[str | None] = mapped_column(Text, nullable=True)
+    internal: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, default=False, server_default=text("false")
+    )
+    created_by: Mapped[str] = mapped_column(Text, nullable=False)
+    edited_by: Mapped[str | None] = mapped_column(Text, nullable=True)
+    deleted_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    deleted_by: Mapped[str | None] = mapped_column(Text, nullable=True)
+
+
+class ModelRecommendation(Base):
+    """The recommended model for one violation type, and why (a note).
+
+    At most one active row per violation type (partial unique index).
+    """
+
+    __tablename__ = "model_recommendations"
+    __table_args__ = (
+        Index(
+            "ix_model_recommendations_active_type",
+            "violation_type",
+            unique=True,
+            postgresql_where=text("cleared_at IS NULL"),
+        ),
+    )
+
+    id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), primary_key=True, default=generate_uuid
+    )
+    violation_type: Mapped[str] = mapped_column(String(64), nullable=False)
+    model_pk: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("model_store_models.id", ondelete="CASCADE"),
+        nullable=False,
+    )
+    note_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("model_notes.id", ondelete="RESTRICT"),
+        nullable=False,
+    )
+    set_by: Mapped[str] = mapped_column(Text, nullable=False)
+    set_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    cleared_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    cleared_by: Mapped[str | None] = mapped_column(Text, nullable=True)

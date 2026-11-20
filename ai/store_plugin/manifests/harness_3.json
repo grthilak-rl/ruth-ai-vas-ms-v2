@@ -1,0 +1,18 @@
+{
+  "manifest_version": 1,
+  "model_id": "harness_3",
+  "display_name": "Harness 3",
+  "weights": "best.pt",
+  "task": "detect",
+  "imgsz": 640,
+  "classes": {"0": "harness", "1": "no harness"},
+  "rules": [
+    {"id": "missing_harness", "classes": ["no harness"], "min_confidence": 0.7,
+     "violation_type": "missing_harness", "severity": "critical",
+     "display_name": "Missing harness"}
+  ],
+  "performance": {"inference_time_hint_ms": 65, "recommended_fps": 2},
+  "limits": {"max_memory_mb": 2048, "inference_timeout_ms": 5000},
+  "_trial": "TEMPORARY observation block, 2026-11-20. Finished export (epoch -1, optimizer stripped), uploaded as best.pt (sha256 0c181b1e...3e4b) to draft harness_3: RT-DETR (rtdetr-l) at imgsz 640, ultralytics 8.4.182, trained 2026-11-15 for 40 epochs on harness3.v2i.yolov8, two classes 'harness' and 'no harness'; val mAP50 0.895, mAP50-95 0.625, P 0.851, R 0.840 (all classes; val losses NaN). Performance/limits copied from gloves_2, the other RT-DETR at imgsz 640. Not yet judged on site frames. Raises missing_harness like 'harness' and 'harness_2': never run more than one of the three on a camera (nothing enforces that; the picker does not warn). Remove this block and diagnostics once judged.",
+  "diagnostics": {"summary_log_sample": 1.0, "predict_floor": 0.01}
+}

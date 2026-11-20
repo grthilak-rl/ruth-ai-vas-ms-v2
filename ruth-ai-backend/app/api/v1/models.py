@@ -27,6 +27,8 @@ from app.integrations.unified_runtime.client import (
     UnifiedRuntimeConnectionError,
 )
 from app.integrations.unified_runtime.config import get_unified_runtime_config
+from app.schemas.models import ModelLatestNote
+from app.services.model_store import notes as model_notes
 from app.services.model_store.enabled import enabled_store_models
 from app.services.model_store.ids import RESERVED_MODEL_IDS
 from app.services.model_store.runtime_probe import (
@@ -311,6 +313,7 @@ async def _store_model_statuses(
         return []
 
     installed = enabled_store_models()
+    recommended, latest = await _picker_notes(db, installed)
     entries: list[ModelStatusInfo] = []
     for model_info in probe.models:
         model_id = model_info.get("model_id")
@@ -362,9 +365,47 @@ async def _store_model_statuses(
                 all_rules_need_zone=info.all_rules_need_zone,
                 zone_types=list(info.zone_types),
                 reports_ppe=info.reports_ppe,
+                violation_types=list(info.violation_types),
+                violation_type_labels={
+                    vt: model_notes.violation_type_label(vt) for vt in info.violation_types
+                },
+                recommended_for=recommended.get(model_id, []),
+                **(
+                    {"latest_note": ModelLatestNote(
+                        body=latest[model_id].body,
+                        observed_on=latest[model_id].observed_on,
+                        project_name=latest[model_id].project_name,
+                    )}
+                    if model_id in latest
+                    else {}
+                ),
             )
         )
     return entries
+
+
+async def _picker_notes(db, installed) -> tuple[dict, dict]:
+    """Recommendations and latest public notes for the picker.
+
+    Never fails the model list: if the notes tables cannot be read (a
+    migration not yet applied, say) the entries simply carry none.
+    """
+    async def read() -> tuple[dict, dict]:
+        return (
+            await model_notes.active_recommendations(db),
+            await model_notes.latest_public_notes(db, installed.keys()),
+        )
+
+    try:
+        # A savepoint, so a failed read cannot abort the request's
+        # transaction and take the camera counts after it down too.
+        if hasattr(db, "begin_nested"):
+            async with db.begin_nested():
+                return await read()
+        return await read()
+    except Exception as exc:  # noqa: BLE001 - notes are optional decoration
+        logger.warning("Model notes unavailable for /models/status", error=str(exc))
+        return {}, {}
 
 
 def _api_status(runtime_state: str, cameras_active: int) -> str:

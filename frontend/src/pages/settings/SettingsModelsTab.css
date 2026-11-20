@@ -272,3 +272,16 @@
 .models-tab__rate-note {
   color: #666;
 }
+
+/* Recommended by an admin for a violation type. */
+.models-tab__badge {
+  display: inline-block;
+  margin-top: 0.25rem;
+  margin-right: 0.375rem;
+  padding: 0.0625rem 0.5rem;
+  font-size: 0.75rem;
+  font-weight: 500;
+  color: #065f46;
+  background-color: #d1fae5;
+  border-radius: 999px;
+}

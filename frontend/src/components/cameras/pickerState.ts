@@ -13,7 +13,7 @@
 
 import type { AIModel } from './AIModelSelector';
 import type { DeviceStreaming } from '../../state/api/types';
-import type { ModelStatusInfo } from '../../state/api/types';
+import type { ModelLatestNote, ModelStatusInfo } from '../../state/api/types';
 import {
   activeModelIds,
   type CameraModelEntry,
@@ -97,10 +97,65 @@ export function toAIModel(model: ModelStatusInfo, isEnabled: boolean, isPending:
     pending: isPending,
   };
   if (zoneTypes.length > 0) row.zoneTypes = zoneTypes;
+  const recommended = model.recommended_for ?? [];
+  if (recommended.length > 0) {
+    row.recommendedFor = recommended.map((vt) => violationLabel(model, vt));
+  }
+  if (model.latest_note) row.note = formatNote(model.latest_note);
   if (blockedForZones) {
     row.disabledReason = `Needs a zone for every rule (${(model.zone_required_rules ?? []).join(', ')}) — available with zone setup`;
   }
   return row;
+}
+
+/** "missing_hardhat" -> the server's label, else "Missing hardhat". */
+function violationLabel(model: ModelStatusInfo, violationType: string): string {
+  const label = model.violation_type_labels?.[violationType];
+  if (label) return label;
+  const words = violationType.replace(/_/g, ' ');
+  return words.charAt(0).toUpperCase() + words.slice(1);
+}
+
+const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+
+/** "2026-10-17" -> "17 Oct 2026", without a timezone shifting the day. */
+function formatNoteDate(isoDate: string): string {
+  const [y, m, d] = isoDate.split('-').map(Number);
+  if (!y || !m || !d) return isoDate;
+  return `${d} ${MONTHS[m - 1]} ${y}`;
+}
+
+/** A latest note as one line: "17 Oct 2026 · HPCL: Fires on scaffold planks". */
+export function formatNote(note: ModelLatestNote): string {
+  const when = formatNoteDate(note.observed_on);
+  const where = note.project_name ? ` · ${note.project_name}` : '';
+  return `${when}${where}: ${note.body}`;
+}
+
+/**
+ * Recommended models first (stable otherwise), and, on a model that detects
+ * something another model is recommended for, a pointer to that model.
+ */
+function applyRecommendations(rows: AIModel[], available: readonly ModelStatusInfo[]): AIModel[] {
+  const recommendedBy = new Map<string, ModelStatusInfo>();
+  for (const m of available) {
+    for (const vt of m.recommended_for ?? []) recommendedBy.set(vt, m);
+  }
+  if (recommendedBy.size === 0) return rows;
+  const byId = new Map(available.map((m) => [m.model_id, m]));
+  for (const row of rows) {
+    const model = byId.get(row.id);
+    if (!model) continue;
+    const pointers = (model.violation_types ?? [])
+      .filter((vt) => recommendedBy.has(vt) && recommendedBy.get(vt)!.model_id !== model.model_id)
+      .map((vt) => {
+        const other = recommendedBy.get(vt)!;
+        return `Recommended for ${violationLabel(model, vt)}: ${other.display_name ?? modelDisplayName(other.model_id)}`;
+      });
+    if (pointers.length > 0) row.alternative = pointers.join(' · ');
+  }
+  const first = rows.filter((r) => (r.recommendedFor?.length ?? 0) > 0);
+  return [...first, ...rows.filter((r) => !first.includes(r))];
 }
 
 /**
@@ -208,6 +263,8 @@ export function pickerModels(
       }
       return row;
     });
+  const ordered = applyRecommendations(rows, usable);
+  rows.splice(0, rows.length, ...ordered);
   const listed = new Set(rows.map((r) => r.id));
   const leftovers = [...enabledIds, ...(cameraModels?.not_started ?? []).map((e) => e.model_id)];
   for (const modelId of leftovers) {

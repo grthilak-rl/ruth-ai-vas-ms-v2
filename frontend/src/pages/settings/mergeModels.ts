@@ -240,3 +240,20 @@ export const UPLOADED_STATE_HINT: Record<UploadedState, string> = {
     'The store runtime did not respond, so the real state of this model is ' +
     'unknown. It may still be running.',
 };
+
+/** Violation labels this model is recommended for ("Missing hard hat"). */
+export function recommendedLabels(model: MergedModel): string[] {
+  const types = model.status?.recommended_for ?? model.store?.recommended_for ?? [];
+  return types.map((vt) => {
+    const label = model.status?.violation_type_labels?.[vt];
+    if (label) return label;
+    const words = vt.replace(/_/g, ' ');
+    return words.charAt(0).toUpperCase() + words.slice(1);
+  });
+}
+
+/** Recommended models first; otherwise the order is unchanged. */
+export function recommendedFirst(models: MergedModel[]): MergedModel[] {
+  const first = models.filter((m) => recommendedLabels(m).length > 0);
+  return [...first, ...models.filter((m) => !first.includes(m))];
+}

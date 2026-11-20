@@ -2,7 +2,12 @@ import { useMemo, useState, type FormEvent } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { Link, useNavigate, useOutletContext } from 'react-router-dom';
 import { useModelsStatusQuery } from '../../state';
-import { AdminApiError, createStoreModel, listStoreModels } from '../admin/adminApi';
+import {
+  AdminApiError,
+  createStoreModel,
+  listRecommendations,
+  listStoreModels,
+} from '../admin/adminApi';
 import { useAdminSession } from '../admin/useAdminSession';
 import { formatBytes, formatDateTime } from '../admin/format';
 import { InlineAdminSignIn } from './InlineAdminSignIn';
@@ -12,6 +17,8 @@ import {
   UPLOADED_STATE_HINT,
   UPLOADED_STATE_LABEL,
   type MergedModel,
+  recommendedFirst,
+  recommendedLabels,
 } from './mergeModels';
 import './SettingsModelsTab.css';
 
@@ -75,6 +82,11 @@ function UploadedRow({ model }: { model: MergedModel }) {
             model.displayName
           )}
           <div className="models-tab__model-id">{model.model_id}</div>
+          {recommendedLabels(model).map((label) => (
+            <span key={label} className="models-tab__badge">
+              Recommended: {label}
+            </span>
+          ))}
         </td>
         <td className="models-tab__mono">{status?.version ?? '—'}</td>
         <td>
@@ -128,6 +140,15 @@ export function SettingsModelsTab() {
 
   // Open endpoint: always queried, signed in or not.
   const status = useModelsStatusQuery();
+  const recommendations = useQuery({
+    queryKey: ['admin', 'model-store', 'recommendations'],
+    queryFn: listRecommendations,
+    enabled: isSignedIn,
+    retry: false,
+  });
+  const inactiveRecommendations = isSignedIn
+    ? (recommendations.data ?? []).filter((r) => !r.active)
+    : [];
 
   // Admin endpoint: only when a token exists. `enabled` means this query
   // stops and restarts cleanly as the session comes and goes, instead of
@@ -233,6 +254,13 @@ export function SettingsModelsTab() {
         </p>
       )}
 
+      {inactiveRecommendations.map((r) => (
+        <p key={r.violation_type} className="models-tab__warning" role="status">
+          No installed recommended model for {r.label}: {r.display_name} is recommended but not
+          installed. Install it again, or recommend another model from its page.
+        </p>
+      ))}
+
       {/* ---------------- Built-in ---------------- */}
       <section className="models-tab__section">
         <h2 className="models-tab__section-title">Built-in models</h2>
@@ -282,7 +310,7 @@ export function SettingsModelsTab() {
               </tr>
             </thead>
             <tbody>
-              {merged.uploaded.map((model) => (
+              {recommendedFirst(merged.uploaded).map((model) => (
                 <UploadedRow key={model.key} model={model} />
               ))}
             </tbody>

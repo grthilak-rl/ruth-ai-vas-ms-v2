@@ -4,9 +4,17 @@ Aligned with F6 §4.3 ModelsStatusResponse interface.
 From API Contract - Models APIs.
 """
 
-from datetime import datetime
+from datetime import date, datetime
 
 from pydantic import BaseModel, Field
+
+
+class ModelLatestNote(BaseModel):
+    """The newest non-internal note about a model, as the camera picker shows it."""
+
+    body: str
+    observed_on: date
+    project_name: str | None = None
 
 
 class ModelStatusInfo(BaseModel):
@@ -46,6 +54,18 @@ class ModelStatusInfo(BaseModel):
     )
     reports_ppe: bool | None = Field(
         None, description="Reports missing PPE, like the built-in ppe_detection"
+    )
+    violation_types: list[str] | None = Field(
+        None, description="Violation types its rules raise (store models)"
+    )
+    violation_type_labels: dict[str, str] | None = Field(
+        None, description="Display label per violation type, e.g. missing_hardhat -> Missing hard hat"
+    )
+    recommended_for: list[str] | None = Field(
+        None, description="Violation types this is the recommended model for (set by an admin)"
+    )
+    latest_note: ModelLatestNote | None = Field(
+        None, description="The newest note an admin has not marked internal"
     )
 
 

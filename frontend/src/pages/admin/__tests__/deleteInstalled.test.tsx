@@ -16,6 +16,10 @@ const api = vi.hoisted(() => ({
   getStoreModel: vi.fn(),
   deleteStoreModel: vi.fn(),
   deleteStoreFile: vi.fn(),
+  // The page's notes and recommendation sections; not under test here.
+  listModelNotes: vi.fn(async () => []),
+  listProjects: vi.fn(async () => ({ items: [], active: null })),
+  listRecommendations: vi.fn(async () => []),
 }));
 vi.mock('../adminApi', async (importOriginal) => ({
   ...(await importOriginal<typeof import('../adminApi')>()),

@@ -55,6 +55,9 @@ class StoreModelInfo:
     #: default, and the value for anything missing or invalid) opens on
     #: the first qualifying result, as before.
     persistence_seconds: float = 0.0
+    #: every violation_type its rules raise, lowercased, in rule order,
+    #: e.g. ("fall_detected", "possible_fall"): what it can be recommended for
+    violation_types: Tuple[str, ...] = field(default_factory=tuple)
     #: the zone types its rules need (``requires_zone``), in rule order,
     #: e.g. ("restricted", "allowed"): what the zone editor offers
     zone_types: Tuple[str, ...] = field(default_factory=tuple)
@@ -102,6 +105,13 @@ def _info_from_manifest(model_id: str, version: str, manifest: dict) -> StoreMod
         for r in rules
         if r.get("violation_type") and isinstance(r.get("severity"), str) and r["severity"].strip()
     )
+    violation_types = tuple(
+        dict.fromkeys(
+            str(r["violation_type"]).strip().lower()
+            for r in rules
+            if isinstance(r.get("violation_type"), str) and r["violation_type"].strip()
+        )
+    )
     floors = [
         float(r["min_confidence"])
         for r in rules
@@ -118,6 +128,7 @@ def _info_from_manifest(model_id: str, version: str, manifest: dict) -> StoreMod
         min_confidence=min(floors) if floors else 1.0,
         rule_labels=rule_labels,
         rule_severities=rule_severities,
+        violation_types=violation_types,
         persistence_seconds=_persistence_seconds(manifest),
     )
 

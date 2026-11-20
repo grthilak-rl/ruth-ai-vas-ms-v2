@@ -15,6 +15,7 @@ from sqlalchemy import update
 
 from app.models.model_store import ModelStoreUpload
 from app.services.model_store import service
+from app.services.model_store.enabled import StoreModelInfo
 from tests.model_store.conftest import DATABASE_URL, TEST_CHUNK
 
 pytestmark = pytest.mark.skipif(not DATABASE_URL, reason="MODEL_STORE_TEST_DATABASE_URL not set")
@@ -383,7 +384,7 @@ def _installed(monkeypatch, store, *model_ids):
 
     for model_id in model_ids:
         (store.root / "enabled" / model_id / "1.0.0").mkdir(parents=True)
-    installed = {m: object() for m in model_ids}
+    installed = {m: StoreModelInfo(m, "1.0.0", m, (), False, True) for m in model_ids}
     monkeypatch.setattr(admin_api, "enabled_store_models", lambda: installed)
 
 
