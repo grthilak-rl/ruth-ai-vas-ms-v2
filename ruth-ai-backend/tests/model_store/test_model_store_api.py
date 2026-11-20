@@ -114,6 +114,73 @@ async def test_model_id_editable_while_draft(client):
     assert reserved.status_code == 422
 
 
+async def test_edit_draft_fixes_badly_named_upload_and_keeps_its_files(client):
+    """The harness3 case: rename display name and ID without re-uploading."""
+    model = await new_model(client, "harness3")
+    assert model["model_id"] == "harness3"
+    _, done = await upload_file(client, model["id"], "best.pt", b"w" * 100)
+    assert done.status_code == 200
+
+    edited = await client.patch(
+        f"{BASE}/models/{model['id']}",
+        json={"display_name": "Harness v3", "model_id": "harness_v3"},
+    )
+    assert edited.status_code == 200, edited.text
+    body = edited.json()
+    assert (body["display_name"], body["model_id"]) == ("Harness v3", "harness_v3")
+    assert [f["filename"] for f in body["files"]] == ["best.pt"]
+    assert body["id"] == model["id"]
+
+    # Display name alone leaves the ID as it is; blanks are refused.
+    only_name = await client.patch(f"{BASE}/models/{model['id']}", json={"display_name": "  Harness V3 "})
+    assert (only_name.json()["display_name"], only_name.json()["model_id"]) == ("Harness V3", "harness_v3")
+    blank = await client.patch(f"{BASE}/models/{model['id']}", json={"display_name": " "})
+    assert blank.status_code == 422
+
+
+@pytest.mark.parametrize("bad_id", ["Harness3", "harness 3", "harness-3", "3harness", "hx"])
+async def test_edit_refuses_ids_off_the_naming_standard(client, bad_id):
+    model = await new_model(client, "Harness")
+    response = await client.patch(f"{BASE}/models/{model['id']}", json={"model_id": bad_id})
+    assert response.status_code == 422
+    assert response.json()["detail"]["error"] == "invalid_model_id"
+
+
+async def test_edit_refuses_an_id_in_use_or_tombstoned(client):
+    taken = await new_model(client, "Vest", model_id="vest_taken")
+    gone = await new_model(client, "Old", model_id="old_gone")
+    await client.delete(f"{BASE}/models/{gone['id']}")
+    model = await new_model(client, "New")
+    for model_id in (taken["model_id"], "old_gone"):
+        response = await client.patch(f"{BASE}/models/{model['id']}", json={"model_id": model_id})
+        assert response.status_code == 409
+        assert response.json()["detail"]["error"] == "model_id_taken"
+
+
+async def test_installed_model_keeps_its_id_but_display_name_can_change(client, monkeypatch):
+    from app.api.v1.admin import model_store as admin_api
+
+    model = await new_model(client, "Harness", model_id="harness_inst")
+    installed = {"harness_inst": object()}
+    monkeypatch.setattr(service, "enabled_store_models", lambda: installed)
+    monkeypatch.setattr(admin_api, "enabled_store_models", lambda: installed)
+
+    detail = (await client.get(f"{BASE}/models/{model['id']}")).json()
+    assert detail["model_id_editable"] is False
+    listed = (await client.get(f"{BASE}/models")).json()["models"]
+    assert listed[0]["model_id_editable"] is False
+
+    locked = await client.patch(f"{BASE}/models/{model['id']}", json={"model_id": "harness_new"})
+    assert locked.status_code == 409
+    assert locked.json()["detail"]["error"] == "model_id_locked"
+
+    renamed = await client.patch(
+        f"{BASE}/models/{model['id']}", json={"display_name": "Harness (full body)", "model_id": "harness_inst"}
+    )
+    assert renamed.status_code == 200
+    assert renamed.json()["display_name"] == "Harness (full body)"
+
+
 # =============================================================================
 # Chunked upload
 # =============================================================================

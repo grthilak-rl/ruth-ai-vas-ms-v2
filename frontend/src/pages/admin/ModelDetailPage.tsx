@@ -1,4 +1,4 @@
-import { useCallback } from 'react';
+import { useCallback, useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { Link, useNavigate, useParams } from 'react-router-dom';
 import {
@@ -8,12 +8,13 @@ import {
   getStoreModel,
   type StoreFile,
 } from './adminApi';
+import { DraftEditForm } from './DraftEditForm';
 import { ModelUploader } from './ModelUploader';
 import { formatBytes, formatDateTime } from './format';
 import './AdminPages.css';
 
 /**
- * One uploaded model: files, uploads, delete.
+ * One uploaded model: rename, files, uploads, delete.
  *
  * Path: /settings/models/:modelPk — a drill-down from the AI Models tab,
  * still behind RequireAdminToken because, unlike the tabs, there is
@@ -24,6 +25,7 @@ export function ModelDetailPage() {
   const navigate = useNavigate();
   const queryClient = useQueryClient();
   const queryKey = ['admin', 'model-store', 'model', modelPk];
+  const [editing, setEditing] = useState(false);
 
   const model = useQuery({
     queryKey,
@@ -89,15 +91,38 @@ export function ModelDetailPage() {
             {data.file_count} file{data.file_count === 1 ? '' : 's'}, {formatBytes(data.total_bytes)}
           </p>
         </div>
-        <button
-          className="admin-button admin-button--danger"
-          type="button"
-          onClick={confirmDeleteModel}
-          disabled={removeModel.isPending}
-        >
-          Delete draft
-        </button>
+        <div className="admin-page__header-actions">
+          {data.state === 'draft' && !editing && (
+            <button
+              className="admin-button admin-button--secondary"
+              type="button"
+              onClick={() => setEditing(true)}
+            >
+              Edit
+            </button>
+          )}
+          <button
+            className="admin-button admin-button--danger"
+            type="button"
+            onClick={confirmDeleteModel}
+            disabled={removeModel.isPending}
+          >
+            Delete draft
+          </button>
+        </div>
       </header>
+
+      {editing && (
+        <DraftEditForm
+          model={data}
+          onCancel={() => setEditing(false)}
+          onSaved={(saved) => {
+            queryClient.setQueryData(queryKey, saved);
+            refresh();
+            setEditing(false);
+          }}
+        />
+      )}
 
       {(removeModel.isError || removeFile.isError) && (
         <p className="admin-login__error" role="alert">

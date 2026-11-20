@@ -333,6 +333,20 @@ export function getStoreModel(modelPk: string): Promise<StoreModelDetail> {
   return adminFetch<StoreModelDetail>(`${STORE}/models/${modelPk}`);
 }
 
+/**
+ * PATCH a draft's display name and/or model ID. The ID is refused (409
+ * model_id_locked) once the model is installed; see `model_id_editable`.
+ */
+export function updateStoreModel(
+  modelPk: string,
+  changes: { display_name?: string; model_id?: string }
+): Promise<StoreModelDetail> {
+  return adminFetch<StoreModelDetail>(`${STORE}/models/${modelPk}`, {
+    method: 'PATCH',
+    body: JSON.stringify(changes),
+  });
+}
+
 export function deleteStoreModel(modelPk: string): Promise<void> {
   return adminFetch<void>(`${STORE}/models/${modelPk}`, { method: 'DELETE' });
 }

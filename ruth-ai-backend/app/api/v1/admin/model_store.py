@@ -162,13 +162,16 @@ def _summary_out(
     file_count: int,
     total_bytes: int,
     runtime: StoreModelRuntime | None = None,
+    installed: bool = False,
 ) -> StoreModelSummary:
     return StoreModelSummary(
         id=model.id,
         model_id=model.model_id,
         display_name=model.display_name,
         state=model.state,
-        model_id_editable=model.state == "draft" and model.first_applied_at is None,
+        model_id_editable=(
+            model.state == "draft" and model.first_applied_at is None and not installed
+        ),
         file_count=file_count,
         total_bytes=total_bytes,
         status="uploaded" if file_count else "no_files",
@@ -182,11 +185,13 @@ async def _detail_out(db, store: ModelStore, model: ModelStoreModel) -> StoreMod
     files = await service.list_files(db, model.id)
     uploads = await service.list_active_uploads(db, model.id)
     probe = await probe_store_runtime()
+    installed = enabled_store_models()
     summary = _summary_out(
         model,
         len(files),
         sum(f.size_bytes for f in files),
-        runtime=_runtime_out(model, probe, enabled_store_models()),
+        runtime=_runtime_out(model, probe, installed),
+        installed=model.model_id in installed,
     )
     return StoreModelDetail(
         **summary.model_dump(),
@@ -213,6 +218,7 @@ async def list_models(db: DBSession, _store: Store) -> StoreModelList:
                 s.file_count,
                 s.total_bytes,
                 runtime=_runtime_out(s.model, probe, installed),
+                installed=s.model.model_id in installed,
             )
             for s in summaries
         ]

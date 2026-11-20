@@ -30,6 +30,7 @@ from app.models.model_store import (
     ModelStoreModel,
     ModelStoreUpload,
 )
+from app.services.model_store.enabled import enabled_store_models
 from app.services.model_store.ids import model_id_candidates, model_id_problem
 from app.services.model_store.storage import ModelStore, file_age_seconds
 
@@ -157,6 +158,14 @@ async def create_model(
     return model
 
 
+def model_id_installed(model_id: str) -> bool:
+    """Whether ``model_id`` is installed in the store's enabled/ tree."""
+    try:
+        return model_id in enabled_store_models()
+    except Exception:  # noqa: BLE001 - unreadable store: nothing is installed
+        return False
+
+
 async def update_model(
     db: AsyncSession,
     model_pk: uuid.UUID,
@@ -174,6 +183,16 @@ async def update_model(
         if model.first_applied_at is not None:
             raise ModelStoreError(
                 409, "model_id_locked", "model_id cannot change after the first Apply"
+            )
+        if model_id_installed(model.model_id):
+            # Installed models are named by model_id in enabled/, in cameras'
+            # saved model lists and in violations; a rename here would orphan
+            # all of that while the runtime keeps serving the old id.
+            raise ModelStoreError(
+                409,
+                "model_id_locked",
+                f"'{model.model_id}' is installed; its model ID can no longer change "
+                "(the display name still can)",
             )
         await _validate_new_model_id(db, model_id)
         model.model_id = model_id
