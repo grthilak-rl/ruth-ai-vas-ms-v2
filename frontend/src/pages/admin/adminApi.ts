@@ -287,6 +287,8 @@ export interface StoreModelSummary {
   display_name: string;
   state: string;
   model_id_editable: boolean;
+  /** In the store's enabled/ tree: the runtime serves it, so the draft and its files cannot be deleted. */
+  installed?: boolean;
   file_count: number;
   total_bytes: number;
   status: 'no_files' | 'uploaded';

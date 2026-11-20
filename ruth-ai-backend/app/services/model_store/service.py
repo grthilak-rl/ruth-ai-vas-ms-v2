@@ -7,6 +7,7 @@ and a stable error code; the router turns them into responses.
 
 import asyncio
 import math
+import os
 import re
 import uuid
 from collections.abc import AsyncIterator
@@ -30,7 +31,6 @@ from app.models.model_store import (
     ModelStoreModel,
     ModelStoreUpload,
 )
-from app.services.model_store.enabled import enabled_store_models
 from app.services.model_store.ids import model_id_candidates, model_id_problem
 from app.services.model_store.storage import ModelStore, file_age_seconds
 
@@ -158,16 +158,53 @@ async def create_model(
     return model
 
 
-def model_id_installed(model_id: str) -> bool:
-    """Whether ``model_id`` is installed in the store's enabled/ tree."""
+def _enabled_model_ids(store: ModelStore) -> set[str]:
+    """Model IDs installed in ``<store>/enabled``. Raises OSError if unreadable.
+
+    Read fresh and strictly (no cache, no "missing means empty"): it guards
+    deletes and ID changes, where guessing "not installed" is the unsafe way
+    to be wrong. ``ensure_layout`` creates enabled/, so its absence means the
+    mount is wrong, not that nothing is installed.
+    """
+    root = store.root / "enabled"
+    return {name for name in os.listdir(root) if (root / name).is_dir()}
+
+
+def model_id_installed(store: ModelStore, model_id: str) -> bool:
+    """Whether ``model_id`` is installed; 503 if that cannot be determined."""
     try:
-        return model_id in enabled_store_models()
-    except Exception:  # noqa: BLE001 - unreadable store: nothing is installed
-        return False
+        return model_id in _enabled_model_ids(store)
+    except OSError as exc:
+        logger.warning("Model store enabled/ unreadable", model_id=model_id, error=str(exc))
+        raise ModelStoreError(
+            503,
+            "installed_state_unknown",
+            f"Can't confirm whether '{model_id}' is installed: the model store's enabled/ "
+            f"folder could not be read ({exc.strerror or exc}). Try again, or check the "
+            "model store mount.",
+        ) from exc
+
+
+def _require_not_installed(store: ModelStore, model: ModelStoreModel, what: str) -> None:
+    """Refuse to remove files an installed model runs from.
+
+    Until Install records an installed state, "installed" means the model ID
+    is in the store's enabled/ tree. The runtime keeps serving from its own
+    hardlink, but the draft is what every later install reads the weights
+    from, and deleting it would also hide a running model from this page.
+    """
+    if model_id_installed(store, model.model_id):
+        raise ModelStoreError(
+            409,
+            "model_installed",
+            f"Cannot delete {what}: '{model.model_id}' is installed and its files are in use "
+            "by the model store runtime. Uninstall the model first.",
+        )
 
 
 async def update_model(
     db: AsyncSession,
+    store: ModelStore,
     model_pk: uuid.UUID,
     display_name: str | None,
     model_id: str | None,
@@ -184,7 +221,7 @@ async def update_model(
             raise ModelStoreError(
                 409, "model_id_locked", "model_id cannot change after the first Apply"
             )
-        if model_id_installed(model.model_id):
+        if model_id_installed(store, model.model_id):
             # Installed models are named by model_id in enabled/, in cameras'
             # saved model lists and in violations; a rename here would orphan
             # all of that while the runtime keeps serving the old id.
@@ -210,6 +247,7 @@ async def delete_model(
     """Trash a draft: abort its uploads, move its directory, tombstone the row."""
     model = await get_model(db, model_pk)
     _require_draft(model)
+    _require_not_installed(store, model, "this draft")
 
     active = (
         await db.execute(
@@ -261,6 +299,7 @@ async def delete_file(
     record = await db.get(ModelStoreFile, file_pk)
     if record is None or record.model_pk != model.id:
         raise ModelStoreError(404, "file_not_found", "file not found")
+    _require_not_installed(store, model, record.filename)
     await db.delete(record)
     await db.flush()
     await asyncio.to_thread(store.delete_weights, record.storage_path)

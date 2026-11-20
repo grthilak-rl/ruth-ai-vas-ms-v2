@@ -6,6 +6,7 @@ tombstoned ids, deletes, stale-staging cleanup. See conftest.py for setup.
 
 import hashlib
 import os
+import shutil
 import time
 from datetime import datetime, timedelta, timezone
 
@@ -157,13 +158,9 @@ async def test_edit_refuses_an_id_in_use_or_tombstoned(client):
         assert response.json()["detail"]["error"] == "model_id_taken"
 
 
-async def test_installed_model_keeps_its_id_but_display_name_can_change(client, monkeypatch):
-    from app.api.v1.admin import model_store as admin_api
-
+async def test_installed_model_keeps_its_id_but_display_name_can_change(client, store, monkeypatch):
     model = await new_model(client, "Harness", model_id="harness_inst")
-    installed = {"harness_inst": object()}
-    monkeypatch.setattr(service, "enabled_store_models", lambda: installed)
-    monkeypatch.setattr(admin_api, "enabled_store_models", lambda: installed)
+    _installed(monkeypatch, store, "harness_inst")
 
     detail = (await client.get(f"{BASE}/models/{model['id']}")).json()
     assert detail["model_id_editable"] is False
@@ -377,6 +374,110 @@ async def test_delete_draft_moves_to_trash_and_aborts_uploads(client, store):
     assert (await client.get(f"{BASE}/uploads/{pending['id']}")).json()["status"] == "aborted"
     assert (await client.get(f"{BASE}/models/{model['id']}")).status_code == 404
     assert (await client.get(f"{BASE}/models")).json()["models"] == []
+
+
+def _installed(monkeypatch, store, *model_ids):
+    """Install ``model_ids``: a real enabled/<id>/ for the guards, plus the
+    page's (cached, manifest-reading) list for the ``installed`` flags."""
+    from app.api.v1.admin import model_store as admin_api
+
+    for model_id in model_ids:
+        (store.root / "enabled" / model_id / "1.0.0").mkdir(parents=True)
+    installed = {m: object() for m in model_ids}
+    monkeypatch.setattr(admin_api, "enabled_store_models", lambda: installed)
+
+
+def _break_enabled(store):
+    """enabled/ cannot be listed (as with a wrong or missing mount)."""
+    enabled = store.root / "enabled"
+    shutil.rmtree(enabled)
+    enabled.write_text("not a directory")
+
+
+async def test_installed_model_cannot_be_deleted_and_its_files_stay(client, store, monkeypatch):
+    """Every installed model is still a draft; Delete must not trash its files."""
+    model = await new_model(client, "Hard Hat", model_id="hard_hat_inst")
+    await upload_file(client, model["id"], "besthardhat.pt", b"weights")
+    file_id = (await client.get(f"{BASE}/models/{model['id']}")).json()["files"][0]["id"]
+    _installed(monkeypatch, store, "hard_hat_inst")
+
+    detail = (await client.get(f"{BASE}/models/{model['id']}")).json()
+    assert detail["installed"] is True
+    assert (await client.get(f"{BASE}/models")).json()["models"][0]["installed"] is True
+
+    refused = await client.delete(f"{BASE}/models/{model['id']}")
+    assert refused.status_code == 409
+    body = refused.json()["detail"]
+    assert body["error"] == "model_installed"
+    assert "'hard_hat_inst' is installed" in body["message"]
+    assert "in use" in body["message"] and "Uninstall" in body["message"]
+
+    file_refused = await client.delete(f"{BASE}/models/{model['id']}/files/{file_id}")
+    assert file_refused.status_code == 409
+    assert file_refused.json()["detail"]["error"] == "model_installed"
+    assert "besthardhat.pt" in file_refused.json()["detail"]["message"]
+
+    # Nothing moved: the row is listed, the weights are where they were.
+    assert (await client.get(f"{BASE}/models/{model['id']}")).status_code == 200
+    assert (store.root / "drafts" / model["id"] / "weights" / "besthardhat.pt").read_bytes() == b"weights"
+    assert list((store.root / "trash").iterdir()) == []
+
+
+async def test_draft_not_installed_still_deletes(client, store, monkeypatch):
+    model = await new_model(client, "Harness three", model_id="harness_three")
+    await upload_file(client, model["id"], "best.pt", b"weights")
+    _installed(monkeypatch, store, "hard_hat")  # some other model is installed
+
+    assert (await client.get(f"{BASE}/models/{model['id']}")).json()["installed"] is False
+    assert (await client.delete(f"{BASE}/models/{model['id']}")).status_code == 204
+    assert not (store.root / "drafts" / model["id"]).exists()
+
+
+UNKNOWN = "Can't confirm whether 'harness_three' is installed"
+
+
+async def test_unreadable_enabled_refuses_deletes_and_keeps_files(client, store):
+    """Fail safe: if enabled/ can't be read, nothing is assumed uninstalled."""
+    model = await new_model(client, "Harness three", model_id="harness_three")
+    await upload_file(client, model["id"], "best.pt", b"weights")
+    file_id = (await client.get(f"{BASE}/models/{model['id']}")).json()["files"][0]["id"]
+    _break_enabled(store)
+
+    for url in (f"{BASE}/models/{model['id']}", f"{BASE}/models/{model['id']}/files/{file_id}"):
+        refused = await client.delete(url)
+        assert refused.status_code == 503, url
+        detail = refused.json()["detail"]
+        assert detail["error"] == "installed_state_unknown"
+        assert detail["message"].startswith(UNKNOWN)
+        assert "Try again, or check the model store mount" in detail["message"]
+
+    assert (store.root / "drafts" / model["id"] / "weights" / "best.pt").read_bytes() == b"weights"
+    assert (await client.get(f"{BASE}/models/{model['id']}")).json()["file_count"] == 1
+
+
+async def test_unreadable_enabled_refuses_id_change_but_not_display_name(client, store):
+    model = await new_model(client, "Harness three", model_id="harness_three")
+    _break_enabled(store)
+
+    refused = await client.patch(f"{BASE}/models/{model['id']}", json={"model_id": "harness_v3"})
+    assert refused.status_code == 503
+    assert refused.json()["detail"]["error"] == "installed_state_unknown"
+    assert refused.json()["detail"]["message"].startswith(UNKNOWN)
+
+    # The display name never depended on the install state.
+    renamed = await client.patch(f"{BASE}/models/{model['id']}", json={"display_name": "Harness 3"})
+    assert renamed.status_code == 200
+    assert (renamed.json()["display_name"], renamed.json()["model_id"]) == ("Harness 3", "harness_three")
+
+
+async def test_enabled_readable_again_allows_delete(client, store):
+    model = await new_model(client, "Harness three", model_id="harness_three")
+    _break_enabled(store)
+    assert (await client.delete(f"{BASE}/models/{model['id']}")).status_code == 503
+
+    (store.root / "enabled").unlink()
+    (store.root / "enabled").mkdir()
+    assert (await client.delete(f"{BASE}/models/{model['id']}")).status_code == 204
 
 
 # =============================================================================

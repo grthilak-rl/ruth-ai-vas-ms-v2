@@ -66,6 +66,9 @@ export function ModelDetailPage() {
   }
 
   const data = model.data;
+  const installed = data.installed === true;
+  const installedReason =
+    'Installed: the model store runtime is using its files. Uninstall it before deleting.';
   const confirmDeleteModel = () => {
     if (
       window.confirm(
@@ -105,12 +108,19 @@ export function ModelDetailPage() {
             className="admin-button admin-button--danger"
             type="button"
             onClick={confirmDeleteModel}
-            disabled={removeModel.isPending}
+            disabled={removeModel.isPending || installed}
+            title={installed ? installedReason : undefined}
           >
             Delete draft
           </button>
         </div>
       </header>
+
+      {installed && (
+        <p className="admin-muted model-detail__installed" role="note">
+          {installedReason}
+        </p>
+      )}
 
       {editing && (
         <DraftEditForm
@@ -169,7 +179,8 @@ export function ModelDetailPage() {
                       type="button"
                       className="admin-button admin-button--link"
                       onClick={() => confirmDeleteFile(file)}
-                      disabled={removeFile.isPending}
+                      disabled={removeFile.isPending || installed}
+                      title={installed ? installedReason : undefined}
                     >
                       Delete
                     </button>

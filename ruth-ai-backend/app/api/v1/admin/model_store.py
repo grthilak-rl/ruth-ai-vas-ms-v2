@@ -172,6 +172,7 @@ def _summary_out(
         model_id_editable=(
             model.state == "draft" and model.first_applied_at is None and not installed
         ),
+        installed=installed,
         file_count=file_count,
         total_bytes=total_bytes,
         status="uploaded" if file_count else "no_files",
@@ -247,13 +248,21 @@ async def get_model(model_pk: UUID, db: DBSession, store: Store) -> StoreModelDe
         return await _detail_out(db, store, model)
 
 
-@router.patch("/models/{model_pk}", response_model=StoreModelDetail, summary="Rename a draft")
+@router.patch(
+    "/models/{model_pk}",
+    response_model=StoreModelDetail,
+    summary="Rename a draft",
+    responses={
+        409: {"description": "model_id_locked / model_id_taken"},
+        503: {"description": "installed_state_unknown: enabled/ unreadable, so an ID change is refused"},
+    },
+)
 async def update_model(
     model_pk: UUID, body: StoreModelUpdate, db: DBSession, store: Store, admin: AdminUser
 ) -> StoreModelDetail:
     with _http_errors():
         model = await service.update_model(
-            db, model_pk, body.display_name, body.model_id, admin.username
+            db, store, model_pk, body.display_name, body.model_id, admin.username
         )
     await db.commit()
     return await _detail_out(db, store, model)
@@ -263,6 +272,10 @@ async def update_model(
     "/models/{model_pk}",
     status_code=status.HTTP_204_NO_CONTENT,
     summary="Delete a draft (moves it to trash; the model_id is never reused)",
+    responses={
+        409: {"description": "model_installed: the model is installed; uninstall it first"},
+        503: {"description": "installed_state_unknown: enabled/ unreadable, so the delete is refused"},
+    },
 )
 async def delete_model(model_pk: UUID, db: DBSession, store: Store, admin: AdminUser) -> Response:
     with _http_errors():
@@ -287,6 +300,10 @@ async def list_files(model_pk: UUID, db: DBSession, _store: Store) -> StoreFileL
     "/models/{model_pk}/files/{file_pk}",
     status_code=status.HTTP_204_NO_CONTENT,
     summary="Delete one file from a draft",
+    responses={
+        409: {"description": "model_installed: the model is installed; uninstall it first"},
+        503: {"description": "installed_state_unknown: enabled/ unreadable, so the delete is refused"},
+    },
 )
 async def delete_file(
     model_pk: UUID, file_pk: UUID, db: DBSession, store: Store, admin: AdminUser

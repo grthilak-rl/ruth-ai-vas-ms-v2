@@ -474,3 +474,8 @@
   gap: 0.5rem;
   align-items: flex-start;
 }
+
+.model-detail__installed {
+  margin: 0 0 1rem;
+  font-size: 0.875rem;
+}

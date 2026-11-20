@@ -54,6 +54,9 @@ class StoreModelSummary(BaseModel):
     display_name: str
     state: str
     model_id_editable: bool
+    #: Its model ID is in the store's enabled/ tree: the runtime serves it,
+    #: so the draft and its files cannot be deleted.
+    installed: bool = False
     file_count: int
     total_bytes: int
     # Step 2: every file is simply "uploaded"; introspection arrives in Step 3.
