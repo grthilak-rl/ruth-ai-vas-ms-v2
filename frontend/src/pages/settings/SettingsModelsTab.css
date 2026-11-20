@@ -94,7 +94,9 @@
   font-size: 0.8125rem;
 }
 
-.models-tab__num {
+/* Header and cells alike: scoped to the table so it beats the
+   `.models-tab__table th { text-align: left }` rule above. */
+.models-tab__table .models-tab__num {
   text-align: right;
   font-variant-numeric: tabular-nums;
 }
