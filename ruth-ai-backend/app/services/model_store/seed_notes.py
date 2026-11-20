@@ -124,9 +124,9 @@ SEEDS: tuple[SeedNote, ...] = (
     ),
     SeedNote(
         "harness_3", date(2026, 11, 20), POST_HPCL,
-        "Installed today, not yet judged: validation mAP50 0.895. On 38 PPE frames (not "
+        "Installed 20 Nov 2026, not yet judged: validation mAP50 0.895. On 38 PPE frames (not "
         "confined-space): 1 violation at 0.7, best \"no harness\" 0.754.",
-        "manifest; today's probe",
+        "manifest; probe of 20 Nov 2026",
     ),
     SeedNote(
         "fall_pose", date(2026, 11, 19), HPCL,
