@@ -45,6 +45,11 @@ analysed today. Since 2026-11-20 submitting any other model is refused with
 
 ## BL-37 · Flaky test: multi_model g8 (frames_processed counter)
 
+**Update 2026-11-20:** `test_g2_remove_down_to_one_streak_continues` flaked
+once too: a steady-state tick gap of 0.356 s against its 0.3 s wall-clock
+limit (test-logs/20261120-120218); the full rerun passed. Timing-based, like
+g8; no change to the inference loop was involved.
+
 **Status:** backlog · **Raised:** 2026-11-19 (geofence release tests)
 
 `tests/multi_model/test_multi_model_loop.py::test_g8_publish_before_counter_and_one_counter_write_per_tick`
